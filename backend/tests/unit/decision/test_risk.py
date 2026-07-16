@@ -10,6 +10,7 @@ from wildfireops.decision.risk import (
     default_risk_config,
     score_risk,
     serialize_risk_breakdown,
+    serialize_risk_config,
 )
 
 
@@ -87,19 +88,38 @@ def test_risk_config_rejects_invalid_weights(field: str, value: object) -> None:
         replace(default_risk_config(), **{field: value})
 
 
-def test_weight_sum_tolerance_is_exactly_one_e_minus_nine() -> None:
-    accepted = replace(
-        default_risk_config(),
-        proximity_weight=0.30 + 1e-9,
-    )
-
-    accepted_result = score_risk(RiskFactors(1, 1, 1, 1, 1, 1), accepted)
-    assert accepted_result.score == pytest.approx(100.0000001)
+def test_weight_sum_validation_precedes_registered_version_binding() -> None:
     with pytest.raises(ValueError, match="sum to 1"):
         replace(
             default_risk_config(),
             proximity_weight=0.30 + 1.0001e-9,
         )
+
+    with pytest.raises(ValueError, match="registered parameters"):
+        replace(
+            default_risk_config(),
+            proximity_weight=0.30 + 1e-9,
+        )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    (
+        {"proximity_weight": 0.31, "population_weight": 0.24},
+        {"population_saturation": 20_000},
+        {"weather_search_radius_meters": 50_000},
+    ),
+)
+def test_risk_v1_rejects_any_change_to_its_registered_parameters(
+    changes: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="risk-v1.*registered parameters"):
+        replace(default_risk_config(), **changes)
+
+
+def test_unknown_risk_algorithm_version_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown risk algorithm version.*risk-v2"):
+        replace(default_risk_config(), algorithm_version="risk-v2")
 
 
 def test_rounding_occurs_only_in_the_canonical_serializer() -> None:
@@ -123,6 +143,26 @@ def test_rounding_occurs_only_in_the_canonical_serializer() -> None:
             }
             for item in result.contributions
         ],
+    }
+
+
+def test_risk_config_serializer_persists_every_registered_parameter() -> None:
+    assert serialize_risk_config(default_risk_config()) == {
+        "algorithm_version": "risk-v1",
+        "weights": {
+            "proximity": 0.3,
+            "population": 0.25,
+            "critical_facilities": 0.2,
+            "wind_alignment": 0.15,
+            "detection_confidence": 0.05,
+            "source_freshness": 0.05,
+        },
+        "population_saturation": 10_000.0,
+        "critical_facility_saturation_count": 5.0,
+        "wind_speed_saturation_mps": 15.0,
+        "fire_freshness_seconds": 21_600.0,
+        "weather_freshness_seconds": 3_600.0,
+        "weather_search_radius_meters": 100_000.0,
     }
 
 

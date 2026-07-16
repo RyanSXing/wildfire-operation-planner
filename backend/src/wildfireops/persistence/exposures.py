@@ -7,7 +7,7 @@ from math import isfinite
 from uuid import UUID
 
 from geoalchemy2 import Geography
-from sqlalchemy import String, case, cast, func, select
+from sqlalchemy import String, and_, case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from wildfireops.decision.risk import (
@@ -15,6 +15,7 @@ from wildfireops.decision.risk import (
     normalize_risk_inputs,
     score_risk,
     serialize_risk_breakdown,
+    serialize_risk_config,
 )
 from wildfireops.domain.observations import NormalizedObservation, WeatherObservation
 from wildfireops.geospatial.exposure import (
@@ -181,6 +182,11 @@ async def refresh_exposure_and_risk(
             exposures=exposures,
         )
         asset_state = _asset_state(exposures)
+        risk_state = serialize_risk_breakdown(
+            breakdown,
+            normalized.raw_evidence,
+        )
+        risk_state["config"] = serialize_risk_config(risk_config)
         incident_state = {
             "status": incident.status,
             "geometry_geojson": _canonical_source_json(
@@ -194,10 +200,7 @@ async def refresh_exposure_and_risk(
             "exposure": {
                 "buffer_meters": _calculated_float(exposure_config.buffer_meters)
             },
-            "risk": serialize_risk_breakdown(
-                breakdown,
-                normalized.raw_evidence,
-            ),
+            "risk": risk_state,
         }
         snapshot = await _reuse_or_create_snapshot(
             session,
@@ -433,13 +436,19 @@ async def _reuse_or_create_snapshot(
         .order_by(IncidentSnapshotModel.snapshot_version.desc())
         .limit(1)
     )
-    if latest is not None and (
-        latest.source_versions == source_versions
-        and latest.incident_state == incident_state
-        and latest.asset_state == asset_state
-        and latest.resource_state == resource_state
-    ):
-        return latest
+    if latest is not None:
+        is_identical = await session.scalar(
+            select(
+                and_(
+                    IncidentSnapshotModel.source_versions == source_versions,
+                    IncidentSnapshotModel.incident_state == incident_state,
+                    IncidentSnapshotModel.asset_state == asset_state,
+                    IncidentSnapshotModel.resource_state == resource_state,
+                )
+            ).where(IncidentSnapshotModel.id == latest.id)
+        )
+        if is_identical:
+            return latest
     snapshot = IncidentSnapshotModel(
         incident_id=incident_id,
         snapshot_version=1 if latest is None else latest.snapshot_version + 1,

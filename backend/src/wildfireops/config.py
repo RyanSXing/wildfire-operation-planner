@@ -13,20 +13,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 _HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
-_RISK_V1_PARAMETERS = (
-    0.30,
-    0.25,
-    0.20,
-    0.15,
-    0.05,
-    0.05,
-    10_000.0,
-    5.0,
-    15.0,
-    21_600.0,
-    3_600.0,
-    100_000.0,
-)
 
 
 class Settings(BaseSettings):
@@ -243,24 +229,6 @@ class Settings(BaseSettings):
             weather_freshness_seconds=self.risk_weather_freshness_seconds,
             weather_search_radius_meters=self.risk_weather_search_radius_meters,
         )
-        configured = (
-            self.risk_proximity_weight,
-            self.risk_population_weight,
-            self.risk_critical_facilities_weight,
-            self.risk_wind_alignment_weight,
-            self.risk_detection_confidence_weight,
-            self.risk_source_freshness_weight,
-            self.risk_population_saturation,
-            self.risk_critical_facility_saturation_count,
-            self.risk_wind_speed_saturation_mps,
-            self.risk_fire_freshness_seconds,
-            self.risk_weather_freshness_seconds,
-            self.risk_weather_search_radius_meters,
-        )
-        if self.risk_algorithm_version == "risk-v1" and configured != (
-            _RISK_V1_PARAMETERS
-        ):
-            raise ValueError("changing risk-v1 parameters requires a version bump")
         return self
 
 

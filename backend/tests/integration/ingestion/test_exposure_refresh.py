@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -7,7 +8,7 @@ from uuid import UUID
 import pytest
 import pytest_asyncio
 from geoalchemy2.elements import WKTElement
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from wildfireops.config import Settings
@@ -33,6 +34,23 @@ from wildfireops.sources.base import SourceBatch
 
 _REFERENCE = datetime(2024, 7, 24, 18, tzinfo=UTC)
 _INCIDENT_ID = UUID("00000000-0000-0000-0000-000000000702")
+_RISK_V1_STATE = {
+    "algorithm_version": "risk-v1",
+    "weights": {
+        "proximity": 0.3,
+        "population": 0.25,
+        "critical_facilities": 0.2,
+        "wind_alignment": 0.15,
+        "detection_confidence": 0.05,
+        "source_freshness": 0.05,
+    },
+    "population_saturation": 10_000.0,
+    "critical_facility_saturation_count": 5.0,
+    "wind_speed_saturation_mps": 15.0,
+    "fire_freshness_seconds": 21_600.0,
+    "weather_freshness_seconds": 3_600.0,
+    "weather_search_radius_meters": 100_000.0,
+}
 
 
 def _fire(
@@ -225,6 +243,7 @@ async def test_refresh_persists_exact_canonical_snapshot_and_current_risk(
         "exposure": {"buffer_meters": 10_000.0},
         "risk": {
             "config_version": "risk-v1",
+            "config": _RISK_V1_STATE,
             "score": 67.0,
             "factors": [
                 {
@@ -330,6 +349,133 @@ async def test_identical_refresh_reuses_snapshot_and_weather_only_change_advance
     assert snapshots[1].source_versions["observation_inputs"][1]["record_ids"] == [
         "weather-2"
     ]
+
+
+@pytest.mark.asyncio
+async def test_refresh_does_not_reuse_snapshot_with_different_persisted_risk_config(
+    db_session: AsyncSession,
+) -> None:
+    await _seed_snapshot_inputs(db_session)
+    kwargs = {
+        "reference_at": _REFERENCE,
+        "exposure_config": ExposureConfig(),
+        "risk_config": default_risk_config(),
+        "clustering_algorithm_version": "dbscan-v1",
+    }
+    first = await refresh_exposure_and_risk(db_session, **kwargs)
+    snapshot = (await db_session.scalars(select(IncidentSnapshotModel))).one()
+    tampered_state = deepcopy(snapshot.incident_state)
+    risk_state = dict(tampered_state["risk"])
+    changed_config = deepcopy(_RISK_V1_STATE)
+    changed_config["weather_search_radius_meters"] = 50_000.0
+    risk_state["config"] = changed_config
+    tampered_state["risk"] = risk_state
+    await db_session.execute(
+        update(IncidentSnapshotModel)
+        .where(IncidentSnapshotModel.id == snapshot.id)
+        .values(incident_state=tampered_state)
+    )
+
+    second = await refresh_exposure_and_risk(db_session, **kwargs)
+    snapshots = (
+        await db_session.scalars(
+            select(IncidentSnapshotModel).order_by(
+                IncidentSnapshotModel.snapshot_version
+            )
+        )
+    ).all()
+
+    assert first != second
+    assert [item.snapshot_version for item in snapshots] == [1, 2]
+    assert snapshots[1].incident_state["risk"]["config"] == _RISK_V1_STATE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "identity_field", "identity", "before", "after"),
+    (
+        (
+            ExposedAssetModel,
+            ExposedAssetModel.asset_id,
+            "community-1",
+            {"nested": {"value": True}},
+            {"nested": {"value": 1}},
+        ),
+        (
+            ResourceUnitModel,
+            ResourceUnitModel.resource_id,
+            "engine-1",
+            {"nested": {"value": False}},
+            {"nested": {"value": 0}},
+        ),
+    ),
+)
+async def test_nested_json_boolean_to_number_change_creates_snapshot(
+    db_session: AsyncSession,
+    model: type[ExposedAssetModel] | type[ResourceUnitModel],
+    identity_field: object,
+    identity: str,
+    before: dict[str, object],
+    after: dict[str, object],
+) -> None:
+    await _seed_snapshot_inputs(db_session)
+    await db_session.execute(
+        update(model).where(identity_field == identity).values(raw_metadata=before)
+    )
+    kwargs = {
+        "reference_at": _REFERENCE,
+        "exposure_config": ExposureConfig(),
+        "risk_config": default_risk_config(),
+        "clustering_algorithm_version": "dbscan-v1",
+    }
+    first = await refresh_exposure_and_risk(db_session, **kwargs)
+    await db_session.execute(
+        update(model).where(identity_field == identity).values(raw_metadata=after)
+    )
+
+    second = await refresh_exposure_and_risk(db_session, **kwargs)
+
+    assert first != second
+    assert (
+        await db_session.scalar(select(func.count()).select_from(IncidentSnapshotModel))
+        == 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_nested_json_integer_to_decimal_reuses_snapshot(
+    db_session: AsyncSession,
+) -> None:
+    await _seed_snapshot_inputs(db_session)
+    asset = await db_session.scalar(
+        select(ExposedAssetModel).where(ExposedAssetModel.asset_id == "community-1")
+    )
+    assert asset is not None
+    await db_session.execute(
+        update(ExposedAssetModel)
+        .where(ExposedAssetModel.asset_id == asset.asset_id)
+        .values(raw_metadata={"nested": {"value": 1}})
+    )
+    kwargs = {
+        "reference_at": _REFERENCE,
+        "exposure_config": ExposureConfig(),
+        "risk_config": default_risk_config(),
+        "clustering_algorithm_version": "dbscan-v1",
+    }
+    first = await refresh_exposure_and_risk(db_session, **kwargs)
+    await db_session.execute(
+        update(ExposedAssetModel)
+        .where(ExposedAssetModel.asset_id == asset.asset_id)
+        .values(raw_metadata={"nested": {"value": 1.0}})
+    )
+
+    second = await refresh_exposure_and_risk(db_session, **kwargs)
+
+    assert first == second
+    assert (
+        await db_session.scalar(select(func.count()).select_from(IncidentSnapshotModel))
+        == 1
+    )
 
 
 @pytest.mark.asyncio

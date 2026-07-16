@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from math import cos, isfinite, radians
+from types import MappingProxyType
 
 from pyproj import Geod
 
@@ -34,6 +35,40 @@ FACTOR_NAMES = (
 )
 CRITICAL_FACILITY_KINDS = frozenset({"hospital", "fire_station", "shelter"})
 _WGS84 = Geod(ellps="WGS84")
+_WEIGHT_FIELDS = (
+    "proximity_weight",
+    "population_weight",
+    "critical_facilities_weight",
+    "wind_alignment_weight",
+    "detection_confidence_weight",
+    "source_freshness_weight",
+)
+_THRESHOLD_FIELDS = (
+    "population_saturation",
+    "critical_facility_saturation_count",
+    "wind_speed_saturation_mps",
+    "fire_freshness_seconds",
+    "weather_freshness_seconds",
+    "weather_search_radius_meters",
+)
+_REGISTERED_RISK_PARAMETERS: Mapping[str, tuple[float, ...]] = MappingProxyType(
+    {
+        "risk-v1": (
+            0.30,
+            0.25,
+            0.20,
+            0.15,
+            0.05,
+            0.05,
+            10_000.0,
+            5.0,
+            15.0,
+            21_600.0,
+            3_600.0,
+            100_000.0,
+        )
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,40 +112,37 @@ class RiskConfig:
             raise ValueError("algorithm_version must be a nonblank string")
         object.__setattr__(self, "algorithm_version", self.algorithm_version.strip())
 
-        weight_fields = (
-            "proximity_weight",
-            "population_weight",
-            "critical_facilities_weight",
-            "wind_alignment_weight",
-            "detection_confidence_weight",
-            "source_freshness_weight",
-        )
-        for field in weight_fields:
+        for field in _WEIGHT_FIELDS:
             object.__setattr__(
                 self,
                 field,
                 _finite_nonnegative(getattr(self, field), field),
             )
         decimal_total = sum(
-            (Decimal(str(getattr(self, field))) for field in weight_fields),
+            (Decimal(str(getattr(self, field))) for field in _WEIGHT_FIELDS),
             start=Decimal(0),
         )
         if abs(decimal_total - Decimal(1)) > Decimal("1e-9"):
             raise ValueError("risk weights must sum to 1 within 1e-9")
 
-        threshold_fields = (
-            "population_saturation",
-            "critical_facility_saturation_count",
-            "wind_speed_saturation_mps",
-            "fire_freshness_seconds",
-            "weather_freshness_seconds",
-            "weather_search_radius_meters",
-        )
-        for field in threshold_fields:
+        for field in _THRESHOLD_FIELDS:
             object.__setattr__(
                 self,
                 field,
                 _finite_positive(getattr(self, field), field),
+            )
+
+        registered = _REGISTERED_RISK_PARAMETERS.get(self.algorithm_version)
+        if registered is None:
+            raise ValueError(
+                f"unknown risk algorithm version: {self.algorithm_version}"
+            )
+        configured = tuple(
+            getattr(self, field) for field in (*_WEIGHT_FIELDS, *_THRESHOLD_FIELDS)
+        )
+        if configured != registered:
+            raise ValueError(
+                f"{self.algorithm_version} must use its registered parameters"
             )
 
     def ordered_weights(self) -> tuple[float, ...]:
@@ -426,6 +458,26 @@ def serialize_risk_breakdown(
         "config_version": breakdown.algorithm_version,
         "score": round(breakdown.score, digits),
         "factors": factors,
+    }
+
+
+def serialize_risk_config(
+    config: RiskConfig,
+    *,
+    digits: int = 6,
+) -> dict[str, object]:
+    """Serialize the complete parameter set bound to a risk algorithm version."""
+    return {
+        "algorithm_version": config.algorithm_version,
+        "weights": {
+            name: round(weight, digits)
+            for name, weight in zip(
+                FACTOR_NAMES,
+                config.ordered_weights(),
+                strict=True,
+            )
+        },
+        **{field: round(getattr(config, field), digits) for field in _THRESHOLD_FIELDS},
     }
 
 

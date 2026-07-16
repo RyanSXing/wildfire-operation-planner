@@ -45,24 +45,19 @@ def test_settings_reject_invalid_risk_threshold(field: str) -> None:
         Settings(**{field: 0})
 
 
-def test_changing_risk_v1_parameters_requires_an_explicit_version_bump() -> None:
-    with pytest.raises(ValidationError, match="version bump"):
+def test_settings_use_the_public_registered_risk_config_boundary() -> None:
+    with pytest.raises(ValidationError, match="registered parameters"):
         Settings(risk_population_saturation=20_000)
-    with pytest.raises(ValidationError, match="version bump"):
+    with pytest.raises(ValidationError, match="registered parameters"):
         Settings(risk_proximity_weight=0.31, risk_population_weight=0.24)
-
-    changed = Settings(
-        risk_algorithm_version="risk-v2",
-        risk_population_saturation=20_000,
-    )
-
-    assert changed.risk_algorithm_version == "risk-v2"
-    assert changed.risk_population_saturation == 20_000
+    with pytest.raises(
+        ValidationError, match="unknown risk algorithm version.*risk-v2"
+    ):
+        Settings(risk_algorithm_version="risk-v2")
 
 
 def test_settings_reject_weight_sets_that_do_not_sum_to_one() -> None:
     with pytest.raises(ValidationError, match="sum to 1"):
         Settings(
-            risk_algorithm_version="risk-v2",
             risk_proximity_weight=0.4,
         )
