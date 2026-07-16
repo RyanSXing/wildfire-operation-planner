@@ -14,7 +14,9 @@ import structlog
 
 from wildfireops.config import Settings, get_settings
 from wildfireops.db import create_engine, create_session_factory
+from wildfireops.decision.risk import RiskConfig
 from wildfireops.geospatial.clustering import ClusteringConfig
+from wildfireops.geospatial.exposure import ExposureConfig
 from wildfireops.ingestion.service import IngestionRun, IngestionService
 from wildfireops.observability import configure_observability
 from wildfireops.replay.loader import ReplayLoader
@@ -62,6 +64,30 @@ class ReplayAdapter:
             failures=(),
             reference_at=self._loader.manifest.end_at,
         )
+
+
+def build_exposure_config(settings: Settings) -> ExposureConfig:
+    return ExposureConfig(buffer_meters=settings.exposure_buffer_meters)
+
+
+def build_risk_config(settings: Settings) -> RiskConfig:
+    return RiskConfig(
+        algorithm_version=settings.risk_algorithm_version,
+        proximity_weight=settings.risk_proximity_weight,
+        population_weight=settings.risk_population_weight,
+        critical_facilities_weight=settings.risk_critical_facilities_weight,
+        wind_alignment_weight=settings.risk_wind_alignment_weight,
+        detection_confidence_weight=settings.risk_detection_confidence_weight,
+        source_freshness_weight=settings.risk_source_freshness_weight,
+        population_saturation=settings.risk_population_saturation,
+        critical_facility_saturation_count=(
+            settings.risk_critical_facility_saturation_count
+        ),
+        wind_speed_saturation_mps=settings.risk_wind_speed_saturation_mps,
+        fire_freshness_seconds=settings.risk_fire_freshness_seconds,
+        weather_freshness_seconds=settings.risk_weather_freshness_seconds,
+        weather_search_radius_meters=settings.risk_weather_search_radius_meters,
+    )
 
 
 def build_live_adapters(
@@ -213,6 +239,8 @@ async def _async_main(arguments: argparse.Namespace) -> int:
             minimum_points=settings.clustering_minimum_points,
             algorithm_version=settings.clustering_algorithm_version,
         ),
+        exposure_config=build_exposure_config(settings),
+        risk_config=build_risk_config(settings),
     )
     try:
         if arguments.replay is not None:

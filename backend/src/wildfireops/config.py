@@ -7,11 +7,26 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
     field_validator,
+    model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 _HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
+_RISK_V1_PARAMETERS = (
+    0.30,
+    0.25,
+    0.20,
+    0.15,
+    0.05,
+    0.05,
+    10_000.0,
+    5.0,
+    15.0,
+    21_600.0,
+    3_600.0,
+    100_000.0,
+)
 
 
 class Settings(BaseSettings):
@@ -37,6 +52,20 @@ class Settings(BaseSettings):
     clustering_temporal_window_seconds: float = 21_600.0
     clustering_minimum_points: int = 2
     clustering_algorithm_version: str = "spatiotemporal-dbscan-v1"
+    exposure_buffer_meters: float = 10_000.0
+    risk_algorithm_version: str = "risk-v1"
+    risk_proximity_weight: float = 0.30
+    risk_population_weight: float = 0.25
+    risk_critical_facilities_weight: float = 0.20
+    risk_wind_alignment_weight: float = 0.15
+    risk_detection_confidence_weight: float = 0.05
+    risk_source_freshness_weight: float = 0.05
+    risk_population_saturation: float = 10_000.0
+    risk_critical_facility_saturation_count: float = 5.0
+    risk_wind_speed_saturation_mps: float = 15.0
+    risk_fire_freshness_seconds: float = 21_600.0
+    risk_weather_freshness_seconds: float = 3_600.0
+    risk_weather_search_radius_meters: float = 100_000.0
     model_config = SettingsConfigDict(env_file=".env", env_prefix="WILDFIREOPS_")
 
     @field_validator("firms_map_key", mode="before")
@@ -51,6 +80,7 @@ class Settings(BaseSettings):
     @field_validator(
         "firms_source",
         "clustering_algorithm_version",
+        "risk_algorithm_version",
     )
     @classmethod
     def validate_nonblank_setting(cls, value: str) -> str:
@@ -150,6 +180,89 @@ class Settings(BaseSettings):
             raise ValueError("clustering minimum points must be a positive integer")
         return value
 
+    @field_validator("exposure_buffer_meters", mode="before")
+    @classmethod
+    def validate_exposure_buffer(cls, value: object) -> object:
+        parsed = _parse_finite_number(value, "exposure buffer")
+        if not 100 <= parsed <= 100_000:
+            raise ValueError(
+                "exposure buffer must be between 100 and 100000 meters inclusive"
+            )
+        return value
+
+    @field_validator(
+        "risk_proximity_weight",
+        "risk_population_weight",
+        "risk_critical_facilities_weight",
+        "risk_wind_alignment_weight",
+        "risk_detection_confidence_weight",
+        "risk_source_freshness_weight",
+        mode="before",
+    )
+    @classmethod
+    def validate_risk_weight(cls, value: object) -> object:
+        parsed = _parse_finite_number(value, "risk weight")
+        if parsed < 0:
+            raise ValueError("risk weight must be finite and nonnegative")
+        return value
+
+    @field_validator(
+        "risk_population_saturation",
+        "risk_critical_facility_saturation_count",
+        "risk_wind_speed_saturation_mps",
+        "risk_fire_freshness_seconds",
+        "risk_weather_freshness_seconds",
+        "risk_weather_search_radius_meters",
+        mode="before",
+    )
+    @classmethod
+    def validate_risk_threshold(cls, value: object) -> object:
+        parsed = _parse_finite_number(value, "risk threshold")
+        if parsed <= 0:
+            raise ValueError("risk threshold must be a finite positive number")
+        return value
+
+    @model_validator(mode="after")
+    def validate_risk_version_contract(self) -> "Settings":
+        from wildfireops.decision.risk import RiskConfig
+
+        RiskConfig(
+            algorithm_version=self.risk_algorithm_version,
+            proximity_weight=self.risk_proximity_weight,
+            population_weight=self.risk_population_weight,
+            critical_facilities_weight=self.risk_critical_facilities_weight,
+            wind_alignment_weight=self.risk_wind_alignment_weight,
+            detection_confidence_weight=self.risk_detection_confidence_weight,
+            source_freshness_weight=self.risk_source_freshness_weight,
+            population_saturation=self.risk_population_saturation,
+            critical_facility_saturation_count=(
+                self.risk_critical_facility_saturation_count
+            ),
+            wind_speed_saturation_mps=self.risk_wind_speed_saturation_mps,
+            fire_freshness_seconds=self.risk_fire_freshness_seconds,
+            weather_freshness_seconds=self.risk_weather_freshness_seconds,
+            weather_search_radius_meters=self.risk_weather_search_radius_meters,
+        )
+        configured = (
+            self.risk_proximity_weight,
+            self.risk_population_weight,
+            self.risk_critical_facilities_weight,
+            self.risk_wind_alignment_weight,
+            self.risk_detection_confidence_weight,
+            self.risk_source_freshness_weight,
+            self.risk_population_saturation,
+            self.risk_critical_facility_saturation_count,
+            self.risk_wind_speed_saturation_mps,
+            self.risk_fire_freshness_seconds,
+            self.risk_weather_freshness_seconds,
+            self.risk_weather_search_radius_meters,
+        )
+        if self.risk_algorithm_version == "risk-v1" and configured != (
+            _RISK_V1_PARAMETERS
+        ):
+            raise ValueError("changing risk-v1 parameters requires a version bump")
+        return self
+
 
 def _is_positive_integer_input(value: object) -> bool:
     if isinstance(value, int):
@@ -163,6 +276,18 @@ def _is_positive_integer_input(value: object) -> bool:
         except ValueError:
             return False
     return False
+
+
+def _parse_finite_number(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(f"{field} must be a finite number")
+    try:
+        parsed = float(value)
+    except (OverflowError, ValueError):
+        raise ValueError(f"{field} must be a finite number") from None
+    if not isfinite(parsed):
+        raise ValueError(f"{field} must be a finite number")
+    return parsed
 
 
 @lru_cache

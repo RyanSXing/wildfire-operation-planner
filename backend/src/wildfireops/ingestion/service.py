@@ -1,6 +1,8 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -12,7 +14,10 @@ from wildfireops.geospatial.clustering import (
     DetectionCluster,
     cluster_detections,
 )
+from wildfireops.geospatial.exposure import ExposureConfig
 from wildfireops.ingestion.quarantine import write_quarantine
+from wildfireops.decision.risk import RiskConfig, default_risk_config
+from wildfireops.persistence.exposures import refresh_exposure_and_risk
 from wildfireops.persistence.incidents import (
     acquire_incident_refresh_lock,
     load_current_fire_detections,
@@ -29,6 +34,18 @@ type UtcClock = Callable[[], datetime]
 type IncidentRefresher = Callable[
     [AsyncSession, tuple[DetectionCluster, ...], float], Awaitable[None]
 ]
+
+
+class ExposureRiskRefresher(Protocol):
+    def __call__(
+        self,
+        session: AsyncSession,
+        *,
+        reference_at: datetime,
+        exposure_config: ExposureConfig,
+        risk_config: RiskConfig,
+        clustering_algorithm_version: str,
+    ) -> Awaitable[tuple[UUID, ...]]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,12 +65,18 @@ class IngestionService:
         *,
         observation_repository: ObservationRepository | None = None,
         incident_refresher: IncidentRefresher = refresh_incidents,
+        exposure_risk_refresher: ExposureRiskRefresher = refresh_exposure_and_risk,
+        exposure_config: ExposureConfig = ExposureConfig(),
+        risk_config: RiskConfig | None = None,
         clock: UtcClock = lambda: datetime.now(UTC),
     ) -> None:
         self._session_factory = session_factory
         self._clustering_config = clustering_config
         self._observation_repository = observation_repository or ObservationRepository()
         self._incident_refresher = incident_refresher
+        self._exposure_risk_refresher = exposure_risk_refresher
+        self._exposure_config = exposure_config
+        self._risk_config = risk_config or default_risk_config()
         self._clock = clock
 
     async def run_source(self, adapter: SourceAdapter) -> IngestionRun:
@@ -109,6 +132,15 @@ class IngestionService:
                     session,
                     clusters,
                     self._clustering_config.spatial_radius_meters,
+                )
+                await self._exposure_risk_refresher(
+                    session,
+                    reference_at=reference_at,
+                    exposure_config=self._exposure_config,
+                    risk_config=self._risk_config,
+                    clustering_algorithm_version=(
+                        self._clustering_config.algorithm_version
+                    ),
                 )
                 await _record_source_success(
                     session,

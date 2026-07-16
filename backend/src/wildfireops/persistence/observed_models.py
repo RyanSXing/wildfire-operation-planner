@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from datetime import datetime
+from typing import cast
 from uuid import UUID, uuid4
 
 from geoalchemy2 import Geometry
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Table,
     Text,
     UniqueConstraint,
     func,
@@ -273,6 +275,14 @@ class ExposedAssetModel(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+Index(
+    "ix_exposed_assets_geometry_geography",
+    text("(geometry::geography)"),
+    _table=cast(Table, ExposedAssetModel.__table__),
+    postgresql_using="gist",
+)
 
 
 class ResourceUnitModel(Base):

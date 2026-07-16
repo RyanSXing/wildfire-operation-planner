@@ -10,7 +10,9 @@ from wildfireops.config import Settings
 from wildfireops.ingestion.service import IngestionRun
 from wildfireops.ingestion.worker import (
     ScheduledSource,
+    build_exposure_config,
     build_live_adapters,
+    build_risk_config,
     run_once,
     run_replay,
 )
@@ -60,6 +62,28 @@ def _next(values: tuple[float, ...]) -> Iterator[float]:
 
 def test_blank_firms_key_is_treated_as_unconfigured() -> None:
     assert Settings(firms_map_key="").firms_map_key is None  # type: ignore[arg-type]
+
+
+def test_worker_builds_versioned_exposure_and_risk_configs_from_settings() -> None:
+    settings = Settings(
+        exposure_buffer_meters=12_000,
+        risk_algorithm_version="risk-v2",
+        risk_proximity_weight=0.25,
+        risk_population_weight=0.25,
+        risk_critical_facilities_weight=0.20,
+        risk_wind_alignment_weight=0.15,
+        risk_detection_confidence_weight=0.10,
+        risk_source_freshness_weight=0.05,
+        risk_population_saturation=20_000,
+    )
+
+    exposure = build_exposure_config(settings)
+    risk = build_risk_config(settings)
+
+    assert exposure.buffer_meters == 12_000
+    assert risk.algorithm_version == "risk-v2"
+    assert risk.ordered_weights() == (0.25, 0.25, 0.20, 0.15, 0.10, 0.05)
+    assert risk.population_saturation == 20_000
 
 
 @pytest.mark.parametrize(
