@@ -39,7 +39,7 @@ def _materialize_json_value(value: FrozenJsonValue) -> object:
     return value
 
 
-def _materialize_json_object(payload: FrozenJsonObject) -> dict[str, object]:
+def materialize_json_object(payload: FrozenJsonObject) -> dict[str, object]:
     return {key: _materialize_json_value(value) for key, value in payload.items()}
 
 
@@ -106,7 +106,7 @@ class SourceObservationModel(Base):
                 f"POINT({record.longitude} {record.latitude})",
                 srid=4326,
             ),
-            "raw_payload": _materialize_json_object(record.raw_payload),
+            "raw_payload": materialize_json_object(record.raw_payload),
         }
 
         if isinstance(record, NormalizedObservation):

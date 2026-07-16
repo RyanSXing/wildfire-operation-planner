@@ -17,7 +17,10 @@ async def db_session() -> AsyncIterator[AsyncSession]:
             transaction = await connection.begin()
             try:
                 await connection.execute(
-                    text("TRUNCATE TABLE source_observations CASCADE")
+                    text(
+                        "TRUNCATE TABLE quarantined_observations, source_status, "
+                        "wildfire_incidents, source_observations CASCADE"
+                    )
                 )
                 async with AsyncSession(
                     bind=connection,
