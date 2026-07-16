@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -73,6 +73,100 @@ async def test_nws_adapter_preserves_missing_optional_temperature() -> None:
     observation = batch.observations[0]
     assert isinstance(observation, WeatherObservation)
     assert observation.temperature_celsius is None
+
+
+@pytest.mark.asyncio
+async def test_nws_adapter_accepts_wind_speed_already_in_metres_per_second() -> None:
+    payload = json.loads((FIXTURES / "nws_observation.json").read_text())
+    payload["properties"]["windSpeed"] = {
+        "unitCode": "wmoUnit:m_s-1",
+        "value": 5.25,
+    }
+
+    async with httpx.AsyncClient(transport=json_transport(payload)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.failures == ()
+    observation = batch.observations[0]
+    assert isinstance(observation, WeatherObservation)
+    assert observation.wind_speed_mps == 5.25
+
+
+@pytest.mark.asyncio
+async def test_nws_adapter_quarantines_unsupported_wind_speed_unit() -> None:
+    payload = json.loads((FIXTURES / "nws_observation.json").read_text())
+    payload["properties"]["windSpeed"]["unitCode"] = "wmoUnit:kn"
+
+    async with httpx.AsyncClient(transport=json_transport(payload)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    assert batch.failures[0].reason == (
+        "invalid NWS observation: windSpeed unit is unsupported"
+    )
+    assert batch.failures[0].raw_payload == payload["properties"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("timestamp", "expected"),
+    [
+        ("2024-07-24T18:20:00Z", datetime(2024, 7, 24, 18, 20, tzinfo=UTC)),
+        (
+            "2024-07-24T11:20:00-07:00",
+            datetime(2024, 7, 24, 18, 20, tzinfo=UTC),
+        ),
+    ],
+)
+async def test_nws_adapter_normalizes_offset_timestamps_to_utc(
+    timestamp: str,
+    expected: datetime,
+) -> None:
+    payload = json.loads((FIXTURES / "nws_observation.json").read_text())
+    payload["properties"]["timestamp"] = timestamp
+
+    async with httpx.AsyncClient(transport=json_transport(payload)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.failures == ()
+    assert batch.observations[0].observed_at == expected
+
+
+@pytest.mark.asyncio
+async def test_nws_adapter_quarantines_naive_timestamp() -> None:
+    payload = json.loads((FIXTURES / "nws_observation.json").read_text())
+    payload["properties"]["timestamp"] = "2024-07-24T18:20:00"
+
+    async with httpx.AsyncClient(transport=json_transport(payload)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    assert batch.failures[0].reason == (
+        "invalid NWS observation: timestamp must include an offset"
+    )
+    assert batch.failures[0].raw_payload == payload["properties"]
 
 
 @pytest.mark.asyncio
@@ -181,3 +275,151 @@ async def test_nws_adapter_quarantines_malformed_json_response() -> None:
         "invalid NWS observation: response body is not valid JSON"
     )
     assert batch.failures[0].raw_payload == {"response_body": response_body}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "constant",
+    ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"],
+)
+async def test_nws_adapter_rejects_non_finite_numbers_during_json_decode(
+    constant: str,
+) -> None:
+    response_body = (
+        (FIXTURES / "nws_observation.json")
+        .read_text()
+        .replace(
+            '"value": 18.0',
+            f'"value": {constant}',
+            1,
+        )
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=response_body, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    failure = batch.failures[0]
+    assert failure.reason == (
+        "invalid NWS observation: response body is not valid JSON"
+    )
+    assert failure.raw_payload == {"response_body": response_body}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (field, value)
+        for field in ("windSpeed", "windDirection", "temperature")
+        for value in ("NaN", "Infinity", "-Infinity", "1e309", "-1e309")
+    ],
+)
+async def test_nws_adapter_quarantines_non_finite_measurement_strings(
+    field: str,
+    value: str,
+) -> None:
+    payload = json.loads((FIXTURES / "nws_observation.json").read_text())
+    payload["properties"][field]["value"] = value
+
+    async with httpx.AsyncClient(transport=json_transport(payload)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    failure = batch.failures[0]
+    assert failure.reason == f"invalid NWS observation: {field} must be finite"
+    assert failure.raw_payload == payload["properties"]
+
+
+@pytest.mark.asyncio
+async def test_nws_adapter_quarantines_integer_measurement_too_large_for_float() -> (
+    None
+):
+    payload = json.loads((FIXTURES / "nws_observation.json").read_text())
+    payload["properties"]["temperature"]["value"] = 10**400
+
+    async with httpx.AsyncClient(transport=json_transport(payload)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    failure = batch.failures[0]
+    assert failure.reason == ("invalid NWS observation: temperature must be finite")
+    assert failure.raw_payload == payload["properties"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response_body", ["[]", "42", "null", '"scalar"'])
+async def test_nws_adapter_preserves_body_for_non_object_json_root(
+    response_body: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=response_body, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    failure = batch.failures[0]
+    assert failure.reason == "invalid NWS observation: payload must be an object"
+    assert response_body not in failure.reason
+    assert failure.raw_payload == {"response_body": response_body}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response_body",
+    [
+        '{"type":"Feature","geometry":null}',
+        '{"type":"Feature","geometry":null,"properties":[]}',
+        '{"type":"Feature","geometry":null,"properties":"invalid"}',
+    ],
+)
+async def test_nws_adapter_preserves_body_when_properties_are_not_an_object(
+    response_body: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=response_body, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    failure = batch.failures[0]
+    assert failure.reason == "invalid NWS observation: properties must be an object"
+    assert response_body not in failure.reason
+    assert failure.raw_payload == {"response_body": response_body}
+    with pytest.raises(TypeError):
+        cast(Any, failure.raw_payload)["response_body"] = "changed"

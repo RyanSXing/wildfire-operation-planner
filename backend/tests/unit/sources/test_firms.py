@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -88,6 +89,57 @@ not-a-latitude,-121.612,341.6,h,2024-07-24,1812,N20,VIIRS
     assert batch.failures[0].source_name == "nasa_firms"
     assert batch.failures[0].reason == "invalid FIRMS row: latitude must be a number"
     assert batch.failures[0].raw_payload["latitude"] == "not-a-latitude"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "intensity",
+    ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"],
+)
+async def test_firms_adapter_quarantines_non_finite_intensity(
+    intensity: str,
+) -> None:
+    csv_payload = f"""\
+latitude,longitude,bright_ti4,confidence,acq_date,acq_time,satellite,instrument
+39.805,-121.612,{intensity},h,2024-07-24,1812,N20,VIIRS
+"""
+
+    async with httpx.AsyncClient(transport=csv_transport(csv_payload)) as client:
+        batch = await FirmsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    failure = batch.failures[0]
+    assert failure.reason == "invalid FIRMS row: bright_ti4 must be finite"
+    assert failure.raw_payload["bright_ti4"] == intensity
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("acquisition_time", ["12", "181", "１２１２"])
+async def test_firms_adapter_requires_four_ascii_time_digits(
+    acquisition_time: str,
+) -> None:
+    csv_payload = f"""\
+latitude,longitude,bright_ti4,confidence,acq_date,acq_time,satellite,instrument
+39.805,-121.612,341.6,h,2024-07-24,{acquisition_time},N20,VIIRS
+"""
+
+    async with httpx.AsyncClient(transport=csv_transport(csv_payload)) as client:
+        batch = await FirmsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    failure = batch.failures[0]
+    assert failure.reason == "invalid FIRMS row: acquisition time is invalid"
+    assert failure.raw_payload["acq_time"] == acquisition_time
 
 
 @pytest.mark.asyncio
@@ -219,5 +271,46 @@ latitude,longitude,bright_ti4,confidence,acq_date,acq_time,satellite,instrument
     assert len(batch.observations) == 1
     assert batch.observations[0].latitude == 39.807
     assert len(batch.failures) == 1
-    assert batch.failures[0].reason == ("invalid FIRMS row: row has unexpected columns")
-    assert batch.failures[0].raw_payload["_extra_columns"] == ("unexpected",)
+    failure = batch.failures[0]
+    assert failure.reason == "invalid FIRMS row: row has unexpected columns"
+    assert failure.raw_payload == {
+        "latitude": "39.805",
+        "longitude": "-121.612",
+        "bright_ti4": "341.6",
+        "confidence": "h",
+        "acq_date": "2024-07-24",
+        "acq_time": "1812",
+        "satellite": "N20",
+        "instrument": "VIIRS",
+        "_extra_columns": ("unexpected",),
+    }
+    with pytest.raises(TypeError):
+        cast(Any, failure.raw_payload)["latitude"] = "changed"
+    with pytest.raises(TypeError):
+        cast(Any, failure.raw_payload["_extra_columns"])[0] = "changed"
+
+
+@pytest.mark.asyncio
+async def test_firms_adapter_resynchronizes_after_unclosed_quote() -> None:
+    malformed_record = '39.805,-121.612,341.6,h,2024-07-24,1812,N20,"VIIRS'
+    csv_payload = f"""\
+latitude,longitude,bright_ti4,confidence,acq_date,acq_time,satellite,instrument
+{malformed_record}
+39.807,-121.609,335.2,n,2024-07-24,1818,N20,VIIRS
+"""
+
+    async with httpx.AsyncClient(transport=csv_transport(csv_payload)) as client:
+        batch = await FirmsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            sleep=no_sleep,
+        ).fetch()
+
+    assert len(batch.observations) == 1
+    assert batch.observations[0].latitude == 39.807
+    assert len(batch.failures) == 1
+    failure = batch.failures[0]
+    assert failure.reason == "invalid FIRMS row: CSV record is malformed"
+    assert failure.raw_payload == {"raw_record": malformed_record}
+    with pytest.raises(TypeError):
+        cast(Any, failure.raw_payload)["raw_record"] = "changed"

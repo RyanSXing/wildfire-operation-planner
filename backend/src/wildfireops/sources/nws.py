@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from hashlib import sha256
+from math import isfinite
 from typing import Any
 
 import httpx
@@ -48,20 +49,23 @@ class NwsAdapter:
             sleep=self._sleep,
             source_name=self.source_name,
         )
+        raw_payload = freeze_json_object({"response_body": response.text})
         try:
-            payload: Any = response.json()
+            payload: Any = response.json(
+                parse_constant=_reject_non_finite_json_constant,
+                parse_float=_finite_json_float,
+            )
         except (UnicodeDecodeError, ValueError):
             return self._failure(
                 "response body is not valid JSON",
-                freeze_json_object({"response_body": response.text}),
+                raw_payload,
             )
         if not isinstance(payload, Mapping):
             return self._failure(
                 "payload must be an object",
-                freeze_json_object({}),
+                raw_payload,
             )
 
-        raw_payload = freeze_json_object({})
         try:
             payload_object = _string_keyed_object(payload, "payload")
             properties = _string_keyed_object(
@@ -246,6 +250,22 @@ def _measurement_value(
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         raise ValueError(f"{field} is invalid")
     try:
-        return float(value)
+        number = float(value)
+    except OverflowError:
+        raise ValueError(f"{field} must be finite") from None
     except (TypeError, ValueError):
         raise ValueError(f"{field} is invalid") from None
+    if not isfinite(number):
+        raise ValueError(f"{field} must be finite")
+    return number
+
+
+def _reject_non_finite_json_constant(value: str) -> object:
+    raise ValueError(f"non-finite JSON constant is not allowed: {value}")
+
+
+def _finite_json_float(value: str) -> float:
+    number = float(value)
+    if not isfinite(number):
+        raise ValueError("non-finite JSON number is not allowed")
+    return number

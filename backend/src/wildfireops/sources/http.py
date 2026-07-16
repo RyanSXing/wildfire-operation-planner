@@ -1,6 +1,10 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
+from math import isfinite
+from threading import Lock
 
 import httpx
 
@@ -14,6 +18,28 @@ _RETRYABLE_TRANSPORT_ERRORS = (
     httpx.ProxyError,
     httpx.RemoteProtocolError,
 )
+_SOURCE_HTTP_LOGGER_NAMES = (
+    "httpx",
+    "httpcore.connection",
+    "httpcore.proxy",
+    "httpcore.socks",
+    "httpcore.http11",
+    "httpcore.http2",
+)
+_SUPPRESS_SOURCE_HTTP_LOGS = ContextVar(
+    "wildfireops_suppress_source_http_logs",
+    default=False,
+)
+
+
+class _SourceHttpLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not _SUPPRESS_SOURCE_HTTP_LOGS.get()
+
+
+_SOURCE_HTTP_LOG_FILTER = _SourceHttpLogFilter()
+_SOURCE_HTTP_LOG_FILTER_LOCK = Lock()
+_source_http_log_filter_installed = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,12 +49,26 @@ class RetryPolicy:
     timeout_seconds: float = 10.0
 
     def __post_init__(self) -> None:
-        if self.max_attempts < 1:
-            raise ValueError("max_attempts must be positive")
-        if self.base_delay_seconds < 0:
-            raise ValueError("base_delay_seconds cannot be negative")
-        if self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+        if (
+            isinstance(self.max_attempts, bool)
+            or not isinstance(self.max_attempts, int)
+            or self.max_attempts < 1
+        ):
+            raise ValueError("max_attempts must be a positive integer")
+        if (
+            isinstance(self.base_delay_seconds, bool)
+            or not isinstance(self.base_delay_seconds, (int, float))
+            or not isfinite(self.base_delay_seconds)
+            or self.base_delay_seconds < 0
+        ):
+            raise ValueError("base_delay_seconds must be a finite non-negative number")
+        if (
+            isinstance(self.timeout_seconds, bool)
+            or not isinstance(self.timeout_seconds, (int, float))
+            or not isfinite(self.timeout_seconds)
+            or self.timeout_seconds <= 0
+        ):
+            raise ValueError("timeout_seconds must be a finite positive number")
 
 
 class SourceUnavailable(RuntimeError):
@@ -58,11 +98,16 @@ async def fetch_with_retry(
 ) -> httpx.Response:
     for attempt in range(1, policy.max_attempts + 1):
         try:
-            response = await client.send(_request_for_attempt(request, policy))
+            response = await _send_without_third_party_logs(
+                client,
+                _request_for_attempt(request, policy),
+            )
         except _RETRYABLE_TRANSPORT_ERRORS:
             if attempt == policy.max_attempts:
                 raise SourceUnavailable(source_name, attempt) from None
         except httpx.TransportError:
+            raise SourceUnavailable(source_name, attempt) from None
+        except httpx.RequestError:
             raise SourceUnavailable(source_name, attempt) from None
         else:
             if response.is_success:
@@ -83,6 +128,30 @@ async def fetch_with_retry(
         await sleep(policy.base_delay_seconds * 2 ** (attempt - 1))
 
     raise AssertionError("retry loop exhausted without returning or raising")
+
+
+async def _send_without_third_party_logs(
+    client: httpx.AsyncClient,
+    request: httpx.Request,
+) -> httpx.Response:
+    _install_source_http_log_filter()
+    token = _SUPPRESS_SOURCE_HTTP_LOGS.set(True)
+    try:
+        return await client.send(request, follow_redirects=False)
+    finally:
+        _SUPPRESS_SOURCE_HTTP_LOGS.reset(token)
+
+
+def _install_source_http_log_filter() -> None:
+    global _source_http_log_filter_installed
+    if _source_http_log_filter_installed:
+        return
+    with _SOURCE_HTTP_LOG_FILTER_LOCK:
+        if _source_http_log_filter_installed:
+            return
+        for logger_name in _SOURCE_HTTP_LOGGER_NAMES:
+            logging.getLogger(logger_name).addFilter(_SOURCE_HTTP_LOG_FILTER)
+        _source_http_log_filter_installed = True
 
 
 def _request_for_attempt(

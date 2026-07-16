@@ -3,7 +3,7 @@ import csv
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from hashlib import sha256
-from io import StringIO
+from math import isfinite
 
 import httpx
 
@@ -58,21 +58,51 @@ class FirmsAdapter:
         )
         observations: list[NormalizedObservation] = []
         failures: list[SourceValidationFailure] = []
+        physical_records = response.text.splitlines()
+        if not physical_records:
+            return SourceBatch((), ())
 
-        for row in csv.DictReader(StringIO(response.text)):
-            row_items = tuple(row.items())
-            raw_payload_data: dict[str, object] = {
-                key: value for key, value in row_items if isinstance(key, str)
-            }
-            extra_columns = next(
-                (value for key, value in row_items if key is None),
-                None,
+        try:
+            fieldnames = next(csv.reader([physical_records[0]], strict=True))
+        except csv.Error:
+            return SourceBatch(
+                (),
+                (
+                    SourceValidationFailure(
+                        source_name=self.source_name,
+                        reason="invalid FIRMS row: CSV record is malformed",
+                        raw_payload=freeze_json_object(
+                            {"raw_record": physical_records[0]}
+                        ),
+                    ),
+                ),
             )
-            if extra_columns is not None:
+
+        for raw_record in physical_records[1:]:
+            if not raw_record:
+                continue
+            try:
+                values = next(csv.reader([raw_record], strict=True))
+            except csv.Error:
+                failures.append(
+                    SourceValidationFailure(
+                        source_name=self.source_name,
+                        reason="invalid FIRMS row: CSV record is malformed",
+                        raw_payload=freeze_json_object({"raw_record": raw_record}),
+                    )
+                )
+                continue
+
+            raw_payload_data: dict[str, object] = {
+                fieldname: values[index] if index < len(values) else None
+                for index, fieldname in enumerate(fieldnames)
+            }
+            extra_columns = values[len(fieldnames) :]
+            if extra_columns:
                 raw_payload_data["_extra_columns"] = extra_columns
             raw_payload = freeze_json_object(raw_payload_data)
             try:
-                if extra_columns is not None:
+                if extra_columns:
                     raise ValueError("row has unexpected columns")
                 observations.append(self._normalize(raw_payload))
             except (KeyError, TypeError, ValueError) as error:
@@ -137,13 +167,26 @@ def _required(row: Mapping[str, object], field: str) -> str:
 def _number(row: Mapping[str, object], field: str) -> float:
     value = _required(row, field)
     try:
-        return float(value)
+        number = float(value)
+    except OverflowError:
+        raise ValueError(f"{field} must be finite") from None
     except ValueError:
         raise ValueError(f"{field} must be a number") from None
+    if not isfinite(number):
+        raise ValueError(f"{field} must be finite")
+    return number
 
 
 def _observed_at(row: Mapping[str, object]) -> datetime:
-    value = f"{_required(row, 'acq_date')} {_required(row, 'acq_time')}"
+    acquisition_date = _required(row, "acq_date")
+    acquisition_time = _required(row, "acq_time")
+    if (
+        len(acquisition_time) != 4
+        or not acquisition_time.isascii()
+        or not acquisition_time.isdigit()
+    ):
+        raise ValueError("acquisition time is invalid")
+    value = f"{acquisition_date} {acquisition_time}"
     try:
         return datetime.strptime(value, "%Y-%m-%d %H%M").replace(tzinfo=UTC)
     except ValueError:
