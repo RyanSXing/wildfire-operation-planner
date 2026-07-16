@@ -365,3 +365,197 @@ Success: no issues found in 55 source files
 ```
 
 An independent final publication review returned `APPROVE` with no concrete issues.
+
+## Cumulative ownership review fixes
+
+This section supersedes the cleanup and locking details in the preceding publication
+safety section. Cumulative review found six remaining ownership defects: pathname
+check-then-unlink cleanup, the fixed manifest temporary, a live-resource FK on
+snapshot-owned overrides, a manifest check/replace window, an unpinned graph pathname
+at manifest commit, and a swappable package-directory pathname.
+
+The final protocol opens the replay package once with `O_DIRECTORY|O_NOFOLLOW`, takes
+one package-writer `fcntl.flock`, and performs sensitive reads, hard links, renames,
+replacements, and fsyncs relative to that directory descriptor. `ReplayManifest` uses
+the same lock for every in-place manifest write. Road-graph publication holds the
+staged graph descriptor through manifest commit, checks its inode and exact digest at
+the final pathname immediately before and after commit, and restores the exact base
+manifest from its private stage if the graph changes during the commit boundary.
+
+No public graph or journal is conditionally unlinked. Failed graph/manifest
+publication leaves the graph and journal for verified roll-forward. A completed or
+unrecoverable fixed journal is atomically renamed into a fresh mode-0700 private
+orphan directory; if the source pathname was raced, the unrelated replacement is
+preserved there and the build reports the ownership change. Package staging
+directories are deliberately retained for explicit cleanup instead of introducing a
+second pathname-deletion race.
+
+`ReplayManifest.write_atomic` now creates a per-call UUID stage with
+`O_CREAT|O_EXCL`, fsyncs it, replaces the target under the shared writer lock, and
+fsyncs the opened directory. It never unlinks a failed stage. A pre-existing legacy
+`.manifest.json.tmp` is ignored and preserved.
+
+Scenario resource overrides now use the immutable pinned snapshot as their sole
+resource-identity authority. Alembic revision `0003_snapshot_resource_overrides`
+drops only `scenario_resource_overrides_resource_id_fkey`; its downgrade recreates
+that FK with `ON DELETE RESTRICT`. Recommendation assignments retain their separate
+live-resource FK.
+
+### Cumulative RED evidence
+
+Manifest ownership:
+
+```bash
+cd backend
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/unit/replay/test_manifest.py \
+  -k 'preexisting_legacy_temporary or raced_unique_stage' -vv
+```
+
+```text
+2 failed, 36 deselected in 0.08s
+```
+
+The legacy fixed temporary raised `FileExistsError` and was then deleted. The
+replacement injected after stage creation was also deleted by the unconditional
+`finally` unlink.
+
+Publication ownership:
+
+```bash
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/unit/geospatial/test_road_graph.py \
+  -k 'manifest_writer_cannot_enter or graph_path_replacement_at_manifest_commit or package_directory_swap or journal_replacement_during_retirement' \
+  -vv
+```
+
+```text
+4 failed, 25 deselected in 2.27s
+```
+
+The concurrent writer completed inside the manifest commit window, a graph
+replacement at that boundary was committed, a package-directory replacement
+redirected publication, and the old `lstat`/`unlink` sequence deleted the raced
+journal bytes.
+
+Pinned resource identity:
+
+```bash
+WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@10.0.0.151:5432/wildfireops_test \
+  UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/integration/decision/test_scenarios.py::test_newer_snapshot_and_graph_never_rebase_an_existing_scenario \
+  -vv
+```
+
+```text
+1 failed in 0.98s
+ForeignKeyViolationError: scenario_resource_overrides_resource_id_fkey
+Key (resource_id)=(engine-1) is not present in table "resource_units".
+```
+
+The first sandboxed database attempt could not open the socket with
+`PermissionError: [Errno 1] Operation not permitted`; the approved database-enabled
+rerun above reached PostgreSQL and reproduced the intended FK failure.
+
+### Cumulative GREEN and verification evidence
+
+All seven focused ownership regressions, including conservative recovery after an
+ordinary manifest replace failure:
+
+```bash
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/unit/geospatial/test_road_graph.py \
+  tests/unit/replay/test_manifest.py \
+  -k 'manifest_writer_cannot_enter or graph_path_replacement_at_manifest_commit or package_directory_swap or journal_replacement_during_retirement or manifest_publish_failure_leaves or preexisting_legacy_temporary or raced_unique_stage' \
+  -q
+```
+
+```text
+7 passed, 60 deselected in 2.75s
+```
+
+Road graph plus manifest:
+
+```bash
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/unit/geospatial/test_road_graph.py tests/unit/replay/test_manifest.py -q
+```
+
+```text
+67 passed in 3.40s
+```
+
+Replay unit regressions:
+
+```bash
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest tests/unit/replay -q
+```
+
+```text
+92 passed in 0.18s
+```
+
+Pinned-snapshot and persistence constraints:
+
+```bash
+WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@10.0.0.151:5432/wildfireops_test \
+  UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/integration/decision/test_scenarios.py \
+  tests/integration/persistence/test_scenario_constraints.py -q
+```
+
+```text
+12 passed in 4.03s
+```
+
+Complete Task 9 focused group:
+
+```bash
+WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@10.0.0.151:5432/wildfireops_test \
+  UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/unit/geospatial/test_road_graph.py \
+  tests/integration/decision/test_scenarios.py -q
+```
+
+```text
+40 passed in 7.24s
+```
+
+Migration verification completed the full reversible chain:
+
+```bash
+uv run alembic heads
+uv run alembic upgrade head
+uv run alembic downgrade 0002_exposure_geography_idx
+uv run alembic upgrade head
+uv run alembic current
+uv run alembic check
+```
+
+```text
+0003_snapshot_resource_overrides (head)
+Running downgrade 0003_snapshot_resource_overrides -> 0002_exposure_geography_idx
+Running upgrade 0002_exposure_geography_idx -> 0003_snapshot_resource_overrides
+No new upgrade operations detected.
+```
+
+Formatting, lint, typing, and patch integrity:
+
+```bash
+uv run ruff format --check <seven touched Python files>
+uv run ruff check <seven touched Python files>
+uv run mypy src
+git diff --check
+```
+
+```text
+7 files already formatted
+All checks passed!
+Success: no issues found in 55 source files
+git diff --check: clean
+```
+
+The deletion pass removed 23 net production lines from the first green version. The
+settled production delta is +419/-253 in `road_graph.py`, +66/-9 in `manifest.py`,
+-1 in the SQLAlchemy model, and +35 lines for the required migration. Automated graph
+tests still inject recorded graphs; no test invoked live OSM retrieval.

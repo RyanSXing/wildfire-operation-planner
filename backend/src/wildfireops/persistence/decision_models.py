@@ -232,7 +232,6 @@ class ScenarioResourceOverrideModel(Base):
     )
     resource_id: Mapped[str] = mapped_column(
         String(255),
-        ForeignKey("resource_units.resource_id", ondelete="RESTRICT"),
         nullable=False,
     )
     available: Mapped[bool] = mapped_column(Boolean, nullable=False)

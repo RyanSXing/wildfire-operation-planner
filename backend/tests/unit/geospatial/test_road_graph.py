@@ -1,7 +1,8 @@
 import json
 import multiprocessing
+import os
 import time
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -410,6 +411,27 @@ def _concurrent_build_worker(
         result.write_text("ok", encoding="utf-8")
 
 
+def _concurrent_manifest_writer(
+    package: Path,
+    commit_ready: Path,
+    write_started: Path,
+    result: Path,
+) -> None:
+    if not _wait_for_path(commit_ready, timeout=10.0):
+        result.write_text("error:timed out waiting for commit", encoding="utf-8")
+        return
+    try:
+        manifest = ReplayManifest.load(package / "manifest.json")
+        write_started.touch()
+        replace(manifest, package_id="concurrent-writer").write_atomic(
+            package / "manifest.json"
+        )
+    except Exception as error:
+        result.write_text(f"error:{error}", encoding="utf-8")
+    else:
+        result.write_text("ok", encoding="utf-8")
+
+
 def _recover_without_retrieval(output: Path) -> ReplayManifest:
     retrieved = False
 
@@ -444,10 +466,12 @@ def _interrupt_after_graph_claim(
     output = package / "roads.graphml.gz"
     from wildfireops.geospatial import road_graph
 
-    def interrupt_manifest_replace(source: Path, destination: Path) -> None:
-        if destination == manifest_path:
+    original_replace = road_graph._replace_file
+
+    def interrupt_manifest_replace(*args: object, **kwargs: object) -> None:
+        if Path(args[1]).name == manifest_path.name:
             raise KeyboardInterrupt
-        source.replace(destination)
+        original_replace(*args, **kwargs)
 
     monkeypatch.setattr(road_graph, "_replace_file", interrupt_manifest_replace)
     with pytest.raises(KeyboardInterrupt):
@@ -580,6 +604,197 @@ def test_concurrent_builds_are_serialized_across_processes(tmp_path: Path) -> No
     assert manifest.road_graph.graph_digest == sha256(output.read_bytes()).hexdigest()
 
 
+def test_manifest_writer_cannot_enter_between_base_check_and_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    copyfile(
+        Path("tests/fixtures/replay-small/manifest.json"), package / "manifest.json"
+    )
+    commit_ready = tmp_path / "commit-ready"
+    write_started = tmp_path / "write-started"
+    writer_result = tmp_path / "writer-result"
+    writer_completed_during_commit = False
+    context = multiprocessing.get_context("fork")
+    writer = context.Process(
+        target=_concurrent_manifest_writer,
+        args=(package, commit_ready, write_started, writer_result),
+    )
+    from wildfireops.geospatial import road_graph
+
+    original_replace = road_graph._replace_file
+
+    def pause_before_manifest_replace(*args: object, **kwargs: object) -> None:
+        nonlocal writer_completed_during_commit
+        destination = Path(args[1])
+        if destination.name == "manifest.json" and not commit_ready.exists():
+            commit_ready.touch()
+            assert _wait_for_path(write_started)
+            writer_completed_during_commit = _wait_for_path(
+                writer_result,
+                timeout=0.25,
+            )
+        original_replace(*args, **kwargs)
+
+    monkeypatch.setattr(road_graph, "_replace_file", pause_before_manifest_replace)
+    writer.start()
+    try:
+        _build_test_graph(package / "roads.graphml.gz")
+    finally:
+        writer.join(timeout=10.0)
+        if writer.is_alive():
+            writer.terminate()
+            writer.join(timeout=5.0)
+
+    assert writer.exitcode == 0
+    assert writer_result.read_text(encoding="utf-8") == "ok"
+    assert writer_completed_during_commit is False
+    assert ReplayManifest.load(package / "manifest.json").package_id == (
+        "concurrent-writer"
+    )
+
+
+def test_graph_path_replacement_at_manifest_commit_restores_the_base_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    manifest_path = package / "manifest.json"
+    copyfile(Path("tests/fixtures/replay-small/manifest.json"), manifest_path)
+    manifest_before = manifest_path.read_bytes()
+    output = package / "roads.graphml.gz"
+    displaced = package / "claimed.graphml.gz"
+    unrelated = b"replacement graph"
+    raced = False
+    from wildfireops.geospatial import road_graph
+
+    original_replace = road_graph._replace_file
+
+    def replace_graph_at_commit(*args: object, **kwargs: object) -> None:
+        nonlocal raced
+        destination = Path(args[1])
+        if destination.name == "manifest.json" and not raced:
+            output.replace(displaced)
+            output.write_bytes(unrelated)
+            raced = True
+        original_replace(*args, **kwargs)
+
+    monkeypatch.setattr(road_graph, "_replace_file", replace_graph_at_commit)
+
+    with pytest.raises(RoadGraphBuildError, match="road graph changed"):
+        _build_test_graph(output)
+
+    assert raced is True
+    assert output.read_bytes() == unrelated
+    assert displaced.exists()
+    assert manifest_path.read_bytes() == manifest_before
+
+
+def test_package_directory_swap_never_redirects_publication(tmp_path: Path) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    fixture = Path("tests/fixtures/replay-small/manifest.json")
+    copyfile(fixture, package / "manifest.json")
+    displaced = tmp_path / "opened-package"
+    replacement_marker = b"replacement package"
+
+    def retrieve(
+        bbox: tuple[float, float, float, float],
+        network_type: str,
+    ) -> RetrievedRoadGraph:
+        package.rename(displaced)
+        package.mkdir()
+        copyfile(fixture, package / "manifest.json")
+        (package / "marker").write_bytes(replacement_marker)
+        return RetrievedRoadGraph(_raw_osm_graph(), "2.1.0-test")
+
+    with pytest.raises(RoadGraphBuildError, match="output directory changed"):
+        build_road_graph(
+            bbox=(-122.4, 39.2, -120.3, 41.0),
+            output=package / "roads.graphml.gz",
+            retriever=retrieve,
+            clock=lambda: datetime(2024, 7, 25, 12, tzinfo=UTC),
+        )
+
+    assert (package / "marker").read_bytes() == replacement_marker
+    assert (package / "manifest.json").read_bytes() == fixture.read_bytes()
+    assert not (package / "roads.graphml.gz").exists()
+
+
+def test_journal_replacement_during_retirement_is_preserved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    copyfile(
+        Path("tests/fixtures/replay-small/manifest.json"), package / "manifest.json"
+    )
+    output = package / "roads.graphml.gz"
+    unrelated = b"journal replacement owned by another writer"
+    from wildfireops.geospatial import road_graph
+
+    journal_path = package / road_graph._BUILD_JOURNAL_FILENAME
+    original_lstat = Path.lstat
+    original_rename = os.rename
+    raced = False
+
+    def replace_after_ownership_check(
+        path: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> os.stat_result:
+        nonlocal raced
+        current = original_lstat(path, *args, **kwargs)
+        if path == journal_path and not raced:
+            path.unlink()
+            path.write_bytes(unrelated)
+            raced = True
+        return current
+
+    def replace_before_quarantine(
+        source: str | os.PathLike[str],
+        destination: str | os.PathLike[str],
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal raced
+        source_directory = kwargs.get("src_dir_fd")
+        if (
+            str(source) == road_graph._BUILD_JOURNAL_FILENAME
+            and isinstance(source_directory, int)
+            and not raced
+        ):
+            os.unlink(source, dir_fd=source_directory)
+            descriptor = os.open(
+                source,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=source_directory,
+            )
+            try:
+                os.write(descriptor, unrelated)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            raced = True
+        original_rename(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", replace_after_ownership_check)
+    monkeypatch.setattr(os, "rename", replace_before_quarantine)
+
+    with pytest.raises(RoadGraphBuildError, match="journal changed"):
+        _build_test_graph(output)
+
+    assert raced is True
+    assert any(
+        path.read_bytes() == unrelated for path in package.rglob("*") if path.is_file()
+    )
+
+
 @pytest.mark.parametrize("case", ["missing_manifest", "bbox_mismatch"])
 def test_build_preflight_fails_before_retrieval(
     tmp_path: Path,
@@ -646,7 +861,7 @@ def test_same_osm_graph_build_is_byte_deterministic(tmp_path: Path) -> None:
     assert first.edge_ids == second.edge_ids
 
 
-def test_manifest_publish_failure_rolls_back_the_new_graph(
+def test_manifest_publish_failure_leaves_a_recoverable_graph(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -658,10 +873,12 @@ def test_manifest_publish_failure_rolls_back_the_new_graph(
     output = package / "roads.graphml.gz"
     from wildfireops.geospatial import road_graph
 
-    def fail_manifest_replace(source: Path, destination: Path) -> None:
-        if destination == manifest_path:
+    original_replace = road_graph._replace_file
+
+    def fail_manifest_replace(*args: object, **kwargs: object) -> None:
+        if Path(args[1]).name == manifest_path.name:
             raise OSError("simulated manifest publish failure")
-        source.replace(destination)
+        original_replace(*args, **kwargs)
 
     monkeypatch.setattr(road_graph, "_replace_file", fail_manifest_replace)
 
@@ -671,8 +888,14 @@ def test_manifest_publish_failure_rolls_back_the_new_graph(
     ):
         _build_test_graph(output)
 
-    assert not output.exists()
+    assert output.exists()
     assert manifest_path.read_bytes() == manifest_before
+    assert (package / road_graph._BUILD_JOURNAL_FILENAME).exists()
+
+    monkeypatch.undo()
+    manifest = _recover_without_retrieval(output)
+    assert manifest.road_graph is not None
+    assert manifest.road_graph.graph_digest == sha256(output.read_bytes()).hexdigest()
 
 
 def test_interrupted_publication_recovers_without_retrieval(
@@ -750,14 +973,20 @@ def test_graph_directory_fsync_failure_keeps_recovery_journal(
     from wildfireops.geospatial import road_graph
 
     original_fsync = road_graph._fsync_directory
-    calls = 0
+    package_stat = package.stat()
+    package_syncs = 0
 
-    def fail_graph_fsync(path: Path) -> None:
-        nonlocal calls
-        calls += 1
-        if calls == 2:
+    def fail_graph_fsync(directory: int) -> None:
+        nonlocal package_syncs
+        current = os.fstat(directory)
+        if (
+            current.st_dev == package_stat.st_dev
+            and current.st_ino == package_stat.st_ino
+        ):
+            package_syncs += 1
+        if package_syncs == 3:
             raise OSError("simulated graph directory fsync failure")
-        original_fsync(path)
+        original_fsync(directory)
 
     monkeypatch.setattr(road_graph, "_fsync_directory", fail_graph_fsync)
 

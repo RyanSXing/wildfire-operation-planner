@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -230,6 +231,67 @@ def test_road_graph_metadata_round_trips_atomically(tmp_path: Path) -> None:
         json.loads(output.read_text(encoding="utf-8"))["road_graph"]
         == payload["road_graph"]
     )
+
+
+def test_atomic_write_ignores_a_preexisting_legacy_temporary(tmp_path: Path) -> None:
+    manifest = ReplayManifest.load(FIXTURE_MANIFEST)
+    output = tmp_path / "manifest.json"
+    unrelated = tmp_path / ".manifest.json.tmp"
+    unrelated.write_bytes(b"user-owned temporary")
+
+    manifest.write_atomic(output)
+
+    assert ReplayManifest.load(output) == manifest
+    assert unrelated.read_bytes() == b"user-owned temporary"
+
+
+def test_atomic_write_failure_preserves_a_raced_unique_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = ReplayManifest.load(FIXTURE_MANIFEST)
+    output = tmp_path / "manifest.json"
+    output.write_bytes(b"original manifest")
+    unrelated = b"replacement stage owned by another writer"
+
+    def replace_stage_then_fail(
+        source: str | os.PathLike[str],
+        destination: str | os.PathLike[str],
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        source_directory = kwargs.get("src_dir_fd")
+        if isinstance(source_directory, int):
+            os.unlink(source, dir_fd=source_directory)
+            descriptor = os.open(
+                source,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=source_directory,
+            )
+            try:
+                os.write(descriptor, unrelated)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        else:
+            source_path = Path(source)
+            source_path.unlink()
+            source_path.write_bytes(unrelated)
+        raise OSError("simulated manifest replace race")
+
+    monkeypatch.setattr(os, "replace", replace_stage_then_fail)
+
+    with pytest.raises(
+        ReplayManifestInvalid,
+        match="simulated manifest replace race",
+    ):
+        manifest.write_atomic(output)
+
+    stages = list(tmp_path.glob(".manifest.json.tmp-*"))
+    assert output.read_bytes() == b"original manifest"
+    assert len(stages) == 1
+    assert stages[0].read_bytes() == unrelated
 
 
 def test_road_graph_metadata_digest_must_match_the_file_map(tmp_path: Path) -> None:

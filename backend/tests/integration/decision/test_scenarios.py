@@ -7,7 +7,7 @@ import networkx as nx
 import pytest
 import pytest_asyncio
 from geoalchemy2.elements import WKTElement
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -290,6 +290,10 @@ async def test_newer_snapshot_and_graph_never_rebase_an_existing_scenario(
         )
     )
     await db_session.flush()
+    await db_session.execute(
+        delete(ResourceUnitModel).where(ResourceUnitModel.resource_id == "engine-1")
+    )
+    await db_session.flush()
     scenario_id = UUID(version_1.scenario.scenario_id)
 
     version_2 = await service.add_version(
@@ -316,6 +320,15 @@ async def test_newer_snapshot_and_graph_never_rebase_an_existing_scenario(
             idempotency_key="live-is-not-snapshot",
             resource_overrides=(ResourceOverride("live-only", False),),
         )
+
+    versions = (
+        await db_session.scalars(
+            select(ScenarioVersionModel).order_by(ScenarioVersionModel.version)
+        )
+    ).all()
+    overrides = (await db_session.scalars(select(ScenarioResourceOverrideModel))).all()
+    assert [version.version for version in versions] == [1, 2]
+    assert [override.resource_id for override in overrides] == ["engine-1"]
 
 
 @pytest.mark.asyncio

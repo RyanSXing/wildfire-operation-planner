@@ -1,13 +1,16 @@
+import fcntl
 import json
 import os
 import re
 import stat
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from math import isfinite
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
+from uuid import uuid4
 
 
 SUPPORTED_SCHEMA_VERSION = 1
@@ -30,6 +33,7 @@ _ROAD_GRAPH_FIELDS = {
     "graph_digest",
     "edge_count",
 }
+_PACKAGE_WRITER_LOCK_FILENAME = ".replay-package-write.lock"
 
 
 class ReplayManifestInvalid(ValueError):
@@ -185,18 +189,71 @@ class ReplayManifest:
 
     def write_atomic(self, path: Path) -> None:
         path = Path(path)
-        temporary = path.with_name(f".{path.name}.tmp")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = f".{path.name}.tmp-{uuid4().hex}"
         content = _canonical_json(self.to_payload())
         try:
-            with temporary.open("xb") as file:
-                file.write(content)
-                file.flush()
-                os.fsync(file.fileno())
-            temporary.replace(path)
+            with replay_package_writer(path.parent) as directory:
+                flags = (
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0)
+                )
+                descriptor = os.open(temporary, flags, 0o600, dir_fd=directory)
+                try:
+                    with os.fdopen(descriptor, "wb", closefd=False) as file:
+                        file.write(content)
+                        file.flush()
+                        os.fsync(file.fileno())
+                finally:
+                    os.close(descriptor)
+                os.replace(
+                    temporary,
+                    path.name,
+                    src_dir_fd=directory,
+                    dst_dir_fd=directory,
+                )
+                os.fsync(directory)
         except OSError as error:
             raise ReplayManifestInvalid(f"cannot write {path.name}: {error}") from error
-        finally:
-            temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def replay_package_writer(package: Path) -> Iterator[int]:
+    """Pin and exclusively lock one replay package for manifest publication."""
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    directory = os.open(package, directory_flags)
+    lock = -1
+    try:
+        if not stat.S_ISDIR(os.fstat(directory).st_mode):
+            raise OSError(f"{package.name} must be a directory")
+        lock_flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        lock = os.open(
+            _PACKAGE_WRITER_LOCK_FILENAME,
+            lock_flags,
+            0o600,
+            dir_fd=directory,
+        )
+        if not stat.S_ISREG(os.fstat(lock).st_mode):
+            raise OSError("replay package writer lock must be a regular file")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield directory
+    finally:
+        if lock >= 0:
+            os.close(lock)
+        os.close(directory)
 
 
 def _read_manifest(path: Path) -> bytes:

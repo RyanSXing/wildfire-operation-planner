@@ -8,16 +8,13 @@ without either field deliberately contribute zero meters.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import gzip
 import heapq
 import json
 import os
-import shutil
 import stat
 import tempfile
-from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -28,6 +25,7 @@ from math import isfinite
 from pathlib import Path
 from threading import Lock
 from typing import Hashable
+from uuid import uuid4
 from xml.etree.ElementTree import ParseError
 
 import networkx as nx
@@ -36,6 +34,7 @@ from wildfireops.replay.manifest import (
     ReplayManifest,
     ReplayManifestInvalid,
     RoadGraphMetadata,
+    replay_package_writer,
 )
 
 
@@ -363,7 +362,6 @@ def _read_graph_bytes(path: Path) -> bytes:
 
 _LOAD_CACHE: dict[Path, RoadGraph] = {}
 _LOAD_CACHE_LOCK = Lock()
-_BUILD_LOCK_FILENAME = ".road-graph-build.lock"
 _BUILD_JOURNAL_FILENAME = ".road-graph-build.json"
 _JOURNAL_FIELDS = {
     "base_manifest_digest",
@@ -398,19 +396,23 @@ def build_road_graph(
     now = clock or _utc_now
 
     try:
-        manifest_path = _preflight_package(
-            output=output,
-            bbox=validated_bbox,
-        )
-        with _package_build_lock(output.parent):
+        if not output.name.endswith(".graphml.gz"):
+            raise RoadGraphBuildError("output must end in .graphml.gz")
+        with replay_package_writer(output.parent) as package:
+            package_stat = os.fstat(package)
+            _assert_package_identity(output.parent, package_stat)
             if _recover_publication(
-                output=output,
-                manifest_path=manifest_path,
+                package=package,
+                package_path=output.parent,
+                package_stat=package_stat,
+                output_name=output.name,
                 bbox=validated_bbox,
             ):
+                _assert_package_identity(output.parent, package_stat)
                 return output
-            manifest_path, manifest, base_manifest_digest = _preflight_build(
-                output=output,
+            manifest, base_manifest_content, base_manifest_digest = _preflight_build(
+                package=package,
+                output_name=output.name,
                 bbox=validated_bbox,
             )
             retrieved = retrieve(validated_bbox, normalized_network_type)
@@ -440,11 +442,15 @@ def build_road_graph(
                 edge_count=prepared.number_of_edges(),
             )
             updated_manifest = manifest.with_road_graph(metadata)
+            _assert_package_identity(output.parent, package_stat)
             _publish_graph_and_manifest(
-                output=output,
-                manifest_path=manifest_path,
+                package=package,
+                package_path=output.parent,
+                package_stat=package_stat,
+                output_name=output.name,
                 graph_content=graph_content,
                 manifest=updated_manifest,
+                base_manifest_content=base_manifest_content,
                 base_manifest_digest=base_manifest_digest,
             )
     except RoadGraphBuildError:
@@ -456,171 +462,175 @@ def build_road_graph(
     return output
 
 
-def _preflight_package(
-    *,
-    output: Path,
-    bbox: tuple[float, float, float, float],
-) -> Path:
-    if not output.name.endswith(".graphml.gz"):
-        raise RoadGraphBuildError("output must end in .graphml.gz")
-    parent = output.parent
-    if parent.is_symlink() or not parent.is_dir():
-        raise RoadGraphBuildError(
-            "output directory must be an existing nonsymlink replay package"
-        )
-    manifest_path = parent / "manifest.json"
-    try:
-        manifest = ReplayManifest.load(manifest_path)
-    except ReplayManifestInvalid as error:
-        raise RoadGraphBuildError(str(error)) from error
-    if manifest.region != bbox:
-        raise RoadGraphBuildError(
-            "road graph bbox must exactly match replay manifest region"
-        )
-    return manifest_path
-
-
 def _preflight_build(
     *,
-    output: Path,
+    package: int,
+    output_name: str,
     bbox: tuple[float, float, float, float],
-) -> tuple[Path, ReplayManifest, str]:
-    if output.is_symlink() or output.exists():
+) -> tuple[ReplayManifest, bytes, str]:
+    if _entry_exists(package, output_name):
         raise RoadGraphBuildError("output road graph already exists")
-    manifest_path = _preflight_package(output=output, bbox=bbox)
-    manifest, content = _manifest_snapshot(manifest_path)
+    manifest, content = _manifest_snapshot(package)
     if manifest.region != bbox:
         raise RoadGraphBuildError(
             "road graph bbox must exactly match replay manifest region"
         )
     if manifest.road_graph is not None:
         raise RoadGraphBuildError("replay manifest already pins a road graph")
-    return manifest_path, manifest, sha256(content).hexdigest()
+    return manifest, content, sha256(content).hexdigest()
 
 
-@contextmanager
-def _package_build_lock(package: Path) -> Iterator[None]:
-    lock_path = package / _BUILD_LOCK_FILENAME
-    flags = (
-        os.O_RDWR
-        | os.O_CREAT
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
-    descriptor = os.open(lock_path, flags, 0o600)
+def _assert_package_identity(path: Path, expected: os.stat_result) -> None:
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise RoadGraphBuildError("road graph build lock must be a regular file")
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        yield
-    finally:
-        os.close(descriptor)
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as error:
+        raise RoadGraphBuildError(
+            "output directory changed during publication"
+        ) from error
+    if (
+        not stat.S_ISDIR(current.st_mode)
+        or current.st_dev != expected.st_dev
+        or current.st_ino != expected.st_ino
+    ):
+        raise RoadGraphBuildError("output directory changed during publication")
+
+
+def _entry_exists(directory: int, name: str) -> bool:
+    try:
+        os.stat(name, dir_fd=directory, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _recover_publication(
     *,
-    output: Path,
-    manifest_path: Path,
+    package: int,
+    package_path: Path,
+    package_stat: os.stat_result,
+    output_name: str,
     bbox: tuple[float, float, float, float],
 ) -> bool:
-    journal_path = output.parent / _BUILD_JOURNAL_FILENAME
     try:
-        journal_content, journal_stat = _read_regular_file(journal_path)
+        journal_descriptor = _open_regular_file(package, _BUILD_JOURNAL_FILENAME)
     except FileNotFoundError:
         return False
-    journal = _parse_publication_journal(journal_content)
-    if journal.output_name != output.name:
-        raise RoadGraphBuildError("road graph build journal targets another output")
-    journal_manifest = _load_canonical_manifest(
-        journal.manifest_content,
-        output.parent,
-    )
-    metadata = journal_manifest.road_graph
-    if (
-        metadata is None
-        or metadata.filename != output.name
-        or metadata.graph_digest != journal.graph_digest
-        or metadata.bbox != bbox
-    ):
-        raise RoadGraphBuildError("road graph build journal metadata is inconsistent")
-    current_manifest, current_manifest_content = _manifest_snapshot(manifest_path)
-    if current_manifest.region != bbox:
-        raise RoadGraphBuildError(
-            "road graph bbox must exactly match replay manifest region"
-        )
-    base_matches = (
-        sha256(current_manifest_content).hexdigest() == journal.base_manifest_digest
-        and current_manifest.road_graph is None
-        and current_manifest.with_road_graph(metadata) == journal_manifest
-    )
-
     try:
-        graph_content, graph_stat = _read_regular_file(output)
-    except FileNotFoundError:
-        if not base_matches:
+        journal_content = _read_descriptor(journal_descriptor)
+        journal = _parse_publication_journal(journal_content)
+        if journal.output_name != output_name:
+            raise RoadGraphBuildError("road graph build journal targets another output")
+        journal_manifest = _load_canonical_manifest(journal.manifest_content)
+        metadata = journal_manifest.road_graph
+        if (
+            metadata is None
+            or metadata.filename != output_name
+            or metadata.graph_digest != journal.graph_digest
+            or metadata.bbox != bbox
+        ):
             raise RoadGraphBuildError(
-                "road graph build journal has no owned output to recover"
-            ) from None
-        _remove_journal(journal_path, journal_stat, output.parent)
-        return False
-    if (
-        graph_stat.st_ino != journal.graph_inode
-        or sha256(graph_content).hexdigest() != journal.graph_digest
-    ):
-        raise RoadGraphBuildError(
-            "road graph build journal does not own the existing output"
-        )
-
-    if base_matches:
-        with tempfile.TemporaryDirectory(
-            prefix=".road-graph-recovery-",
-            dir=output.parent,
-        ) as directory:
-            manifest_stage = Path(directory) / "manifest.json"
-            _write_bytes(manifest_stage, journal.manifest_content)
-            _replace_file(manifest_stage, manifest_path)
-        _, published_content = _manifest_snapshot(manifest_path)
-        if published_content != journal.manifest_content:
-            raise RoadGraphBuildError("recovered replay manifest changed")
-        _fsync_directory(output.parent)
-    elif current_manifest_content != journal.manifest_content:
-        raise RoadGraphBuildError(
-            "road graph build journal manifest does not match base manifest"
-        )
-    _remove_journal(journal_path, journal_stat, output.parent)
-    return True
-
-
-def _manifest_snapshot(path: Path) -> tuple[ReplayManifest, bytes]:
-    before, _ = _read_regular_file(path)
-    manifest = ReplayManifest.load(path)
-    after, _ = _read_regular_file(path)
-    if after != before:
-        raise RoadGraphBuildError("replay manifest changed during preflight")
-    return manifest, before
-
-
-def _load_canonical_manifest(content: bytes, package: Path) -> ReplayManifest:
-    with tempfile.TemporaryDirectory(
-        prefix=".road-graph-journal-check-",
-        dir=package,
-    ) as directory:
-        temporary = Path(directory)
-        source = temporary / "manifest.json"
-        canonical = temporary / "canonical.json"
-        _write_bytes(source, content)
-        try:
-            manifest = ReplayManifest.load(source)
-            manifest.write_atomic(canonical)
-        except ReplayManifestInvalid as error:
-            raise RoadGraphBuildError(
-                f"road graph build journal manifest is invalid: {error}"
-            ) from error
-        if canonical.read_bytes() != content:
-            raise RoadGraphBuildError(
-                "road graph build journal manifest is not canonical"
+                "road graph build journal metadata is inconsistent"
             )
-        return manifest
+        current_manifest, current_manifest_content = _manifest_snapshot(package)
+        if current_manifest.region != bbox:
+            raise RoadGraphBuildError(
+                "road graph bbox must exactly match replay manifest region"
+            )
+        base_matches = (
+            sha256(current_manifest_content).hexdigest() == journal.base_manifest_digest
+            and current_manifest.road_graph is None
+            and current_manifest.with_road_graph(metadata) == journal_manifest
+        )
+
+        try:
+            graph_descriptor = _open_regular_file(package, output_name)
+        except FileNotFoundError:
+            if not base_matches:
+                raise RoadGraphBuildError(
+                    "road graph build journal has no owned output to recover"
+                ) from None
+            _retire_journal(package, journal_descriptor)
+            return False
+        try:
+            graph_content = _read_descriptor(graph_descriptor)
+            graph_stat = os.fstat(graph_descriptor)
+            if (
+                graph_stat.st_ino != journal.graph_inode
+                or sha256(graph_content).hexdigest() != journal.graph_digest
+            ):
+                raise RoadGraphBuildError(
+                    "road graph build journal does not own the existing output"
+                )
+
+            if base_matches:
+                stage = _create_stage_directory(package)
+                try:
+                    os.close(
+                        _write_bytes_at(
+                            stage,
+                            "manifest.next",
+                            journal.manifest_content,
+                        )
+                    )
+                    os.close(
+                        _write_bytes_at(
+                            stage,
+                            "manifest.base",
+                            current_manifest_content,
+                        )
+                    )
+                    _fsync_directory(stage)
+                    try:
+                        _commit_manifest(
+                            package=package,
+                            package_path=package_path,
+                            package_stat=package_stat,
+                            output_name=output_name,
+                            graph_descriptor=graph_descriptor,
+                            graph_digest=journal.graph_digest,
+                            stage=stage,
+                            manifest_content=journal.manifest_content,
+                            base_manifest_content=current_manifest_content,
+                        )
+                    except RoadGraphBuildError:
+                        _retire_journal(package, journal_descriptor)
+                        raise
+                finally:
+                    os.close(stage)
+            elif current_manifest_content != journal.manifest_content:
+                raise RoadGraphBuildError(
+                    "road graph build journal manifest does not match base manifest"
+                )
+            _retire_journal(package, journal_descriptor)
+            return True
+        finally:
+            os.close(graph_descriptor)
+    finally:
+        os.close(journal_descriptor)
+
+
+def _manifest_snapshot(package: int) -> tuple[ReplayManifest, bytes]:
+    content = _read_regular_file(package, "manifest.json")
+    return _load_manifest(content), content
+
+
+def _load_manifest(content: bytes) -> ReplayManifest:
+    with tempfile.TemporaryDirectory(prefix="road-graph-manifest-check-") as directory:
+        source = Path(directory) / "manifest.json"
+        _write_path_bytes(source, content)
+        return ReplayManifest.load(source)
+
+
+def _load_canonical_manifest(content: bytes) -> ReplayManifest:
+    try:
+        manifest = _load_manifest(content)
+    except ReplayManifestInvalid as error:
+        raise RoadGraphBuildError(
+            f"road graph build journal manifest is invalid: {error}"
+        ) from error
+    if _canonical_json(manifest.to_payload()) != content:
+        raise RoadGraphBuildError("road graph build journal manifest is not canonical")
+    return manifest
 
 
 def _parse_publication_journal(content: bytes) -> _PublicationJournal:
@@ -675,16 +685,6 @@ def _journal_digest(value: object, field: str) -> str:
     ):
         raise RoadGraphBuildError(f"road graph build journal has invalid {field}")
     return value
-
-
-def _remove_journal(
-    path: Path,
-    expected: os.stat_result,
-    package: Path,
-) -> None:
-    if not _remove_owned_path(path, expected.st_dev, expected.st_ino):
-        raise RoadGraphBuildError("road graph build journal changed during recovery")
-    _fsync_directory(package)
 
 
 def _prepare_retrieved_graph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
@@ -770,142 +770,297 @@ def _graphml_gzip(graph: nx.MultiDiGraph) -> bytes:
 
 def _publish_graph_and_manifest(
     *,
-    output: Path,
-    manifest_path: Path,
+    package: int,
+    package_path: Path,
+    package_stat: os.stat_result,
+    output_name: str,
     graph_content: bytes,
     manifest: ReplayManifest,
+    base_manifest_content: bytes,
     base_manifest_digest: str,
 ) -> None:
-    temporary = Path(
-        tempfile.mkdtemp(
-            prefix=f".{output.name}.tmp-",
-            dir=output.parent,
-        )
-    )
-    graph_stage = temporary / output.name
-    manifest_stage = temporary / "manifest.json"
-    journal_stage = temporary / _BUILD_JOURNAL_FILENAME
-    journal_path = output.parent / _BUILD_JOURNAL_FILENAME
+    metadata = manifest.road_graph
+    if metadata is None:
+        raise RoadGraphBuildError("staged manifest has no road graph metadata")
+    _validate_graph_content(graph_content, metadata.graph_version)
+    manifest_content = _canonical_json(manifest.to_payload())
+    stage = _create_stage_directory(package)
+    graph_descriptor = -1
+    journal_descriptor = -1
     try:
-        _write_bytes(graph_stage, graph_content)
-        loaded = RoadGraph.load(graph_stage)
-        metadata = manifest.road_graph
-        if metadata is None:
-            raise RoadGraphBuildError("staged manifest has no road graph metadata")
-        if loaded.graph_version != metadata.graph_version:
-            raise RoadGraphBuildError("staged road graph digest changed")
-        manifest.write_atomic(manifest_stage)
-        ReplayManifest.load(manifest_stage)
-        manifest_content, _ = _read_regular_file(manifest_stage)
-        graph_stat = graph_stage.stat()
-        _write_bytes(
-            journal_stage,
+        graph_descriptor = _write_bytes_at(stage, "graph.stage", graph_content)
+        graph_stat = os.fstat(graph_descriptor)
+        os.close(_write_bytes_at(stage, "manifest.next", manifest_content))
+        os.close(_write_bytes_at(stage, "manifest.base", base_manifest_content))
+        journal_descriptor = _write_bytes_at(
+            stage,
+            "journal.stage",
             _canonical_json(
                 {
                     "base_manifest_digest": base_manifest_digest,
                     "graph_digest": metadata.graph_digest,
                     "graph_inode": graph_stat.st_ino,
                     "manifest": manifest_content.decode("utf-8"),
-                    "output": output.name,
+                    "output": output_name,
                     "version": 1,
                 }
             ),
         )
-        _, current_manifest_content = _manifest_snapshot(manifest_path)
-        if sha256(current_manifest_content).hexdigest() != base_manifest_digest:
+        _fsync_directory(stage)
+        _assert_package_identity(package_path, package_stat)
+        _, current_manifest_content = _manifest_snapshot(package)
+        if current_manifest_content != base_manifest_content:
             raise RoadGraphBuildError(
                 "replay manifest changed before road graph publication"
             )
-        os.link(journal_stage, journal_path, follow_symlinks=False)
-        journal_stat = journal_stage.stat()
-        _fsync_directory(output.parent)
+        os.link(
+            "journal.stage",
+            _BUILD_JOURNAL_FILENAME,
+            src_dir_fd=stage,
+            dst_dir_fd=package,
+            follow_symlinks=False,
+        )
+        _fsync_directory(package)
         try:
-            os.link(graph_stage, output, follow_symlinks=False)
+            os.link(
+                "graph.stage",
+                output_name,
+                src_dir_fd=stage,
+                dst_dir_fd=package,
+                follow_symlinks=False,
+            )
         except OSError:
-            _remove_journal(journal_path, journal_stat, output.parent)
+            _retire_journal(package, journal_descriptor, stage)
             raise
-        _fsync_directory(output.parent)
+        _fsync_directory(package)
         try:
-            _replace_file(manifest_stage, manifest_path)
-            _fsync_directory(output.parent)
-        except OSError:
-            _, current_manifest_content = _manifest_snapshot(manifest_path)
-            if sha256(current_manifest_content).hexdigest() == base_manifest_digest:
-                if not _remove_owned_graph(
-                    output,
-                    graph_stat,
-                    metadata.graph_digest,
-                ):
-                    raise RoadGraphBuildError(
-                        "claimed road graph changed before rollback"
-                    ) from None
-                _remove_journal(journal_path, journal_stat, output.parent)
+            _commit_manifest(
+                package=package,
+                package_path=package_path,
+                package_stat=package_stat,
+                output_name=output_name,
+                graph_descriptor=graph_descriptor,
+                graph_digest=metadata.graph_digest,
+                stage=stage,
+                manifest_content=manifest_content,
+                base_manifest_content=base_manifest_content,
+            )
+        except RoadGraphBuildError:
+            _retire_journal(package, journal_descriptor, stage)
             raise
-        _remove_journal(journal_path, journal_stat, output.parent)
+        _retire_journal(package, journal_descriptor, stage)
     finally:
-        shutil.rmtree(temporary, ignore_errors=True)
+        if journal_descriptor >= 0:
+            os.close(journal_descriptor)
+        if graph_descriptor >= 0:
+            os.close(graph_descriptor)
+        os.close(stage)
 
 
-def _write_bytes(path: Path, content: bytes) -> None:
+def _commit_manifest(
+    *,
+    package: int,
+    package_path: Path,
+    package_stat: os.stat_result,
+    output_name: str,
+    graph_descriptor: int,
+    graph_digest: str,
+    stage: int,
+    manifest_content: bytes,
+    base_manifest_content: bytes,
+) -> None:
+    _assert_package_identity(package_path, package_stat)
+    _, current_manifest_content = _manifest_snapshot(package)
+    if current_manifest_content != base_manifest_content:
+        raise RoadGraphBuildError(
+            "replay manifest changed before road graph publication"
+        )
+    if not _path_matches_open_file(
+        package,
+        output_name,
+        graph_descriptor,
+        graph_digest,
+    ):
+        raise RoadGraphBuildError("claimed road graph changed before manifest commit")
+
+    _replace_file(
+        "manifest.next",
+        "manifest.json",
+        source_directory=stage,
+        destination_directory=package,
+    )
+    _fsync_directory(package)
+
+    _, published_content = _manifest_snapshot(package)
+    graph_matches = _path_matches_open_file(
+        package,
+        output_name,
+        graph_descriptor,
+        graph_digest,
+    )
+    try:
+        _assert_package_identity(package_path, package_stat)
+    except RoadGraphBuildError:
+        package_matches = False
+    else:
+        package_matches = True
+    if published_content == manifest_content and graph_matches and package_matches:
+        return
+
+    if published_content == manifest_content:
+        _replace_file(
+            "manifest.base",
+            "manifest.json",
+            source_directory=stage,
+            destination_directory=package,
+        )
+        _fsync_directory(package)
+        _, restored_content = _manifest_snapshot(package)
+        if restored_content != base_manifest_content:
+            raise RoadGraphBuildError("base manifest changed during rollback")
+    if not graph_matches:
+        raise RoadGraphBuildError("claimed road graph changed during manifest commit")
+    if not package_matches:
+        raise RoadGraphBuildError("output directory changed during publication")
+    raise RoadGraphBuildError("replay manifest changed during publication")
+
+
+def _validate_graph_content(content: bytes, expected_digest: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="road-graph-stage-check-") as directory:
+        path = Path(directory) / "roads.graphml.gz"
+        _write_path_bytes(path, content)
+        if RoadGraph.load(path).graph_version != expected_digest:
+            raise RoadGraphBuildError("staged road graph digest changed")
+
+
+def _create_stage_directory(package: int) -> int:
+    name = f".road-graph-publication-{uuid4().hex}"
+    os.mkdir(name, 0o700, dir_fd=package)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(name, flags, dir_fd=package)
+    try:
+        _fsync_directory(package)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def _write_bytes_at(directory: int, name: str, content: bytes) -> int:
+    flags = (
+        os.O_RDWR
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(name, flags, 0o600, dir_fd=directory)
+    try:
+        with os.fdopen(descriptor, "wb", closefd=False) as file:
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def _write_path_bytes(path: Path, content: bytes) -> None:
     with path.open("xb") as file:
         file.write(content)
         file.flush()
         os.fsync(file.fileno())
 
 
-def _read_regular_file(path: Path) -> tuple[bytes, os.stat_result]:
+def _open_regular_file(directory: int, name: str) -> int:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
+    descriptor = os.open(name, flags, dir_fd=directory)
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise RoadGraphBuildError(f"{name} must be a regular file")
+    return descriptor
+
+
+def _read_descriptor(descriptor: int) -> bytes:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    with os.fdopen(descriptor, "rb", closefd=False) as file:
+        return file.read()
+
+
+def _read_regular_file(directory: int, name: str) -> bytes:
+    descriptor = _open_regular_file(directory, name)
     try:
-        file_stat = os.fstat(descriptor)
-        if not stat.S_ISREG(file_stat.st_mode):
-            raise RoadGraphBuildError(f"{path.name} must be a regular file")
-        with os.fdopen(descriptor, "rb", closefd=False) as file:
-            return file.read(), file_stat
+        return _read_descriptor(descriptor)
     finally:
         os.close(descriptor)
 
 
-def _remove_owned_graph(
-    path: Path,
-    expected: os.stat_result,
+def _path_matches_open_file(
+    directory: int,
+    name: str,
+    expected_descriptor: int,
     expected_digest: str,
 ) -> bool:
     try:
-        content, current = _read_regular_file(path)
+        descriptor = _open_regular_file(directory, name)
     except (FileNotFoundError, OSError):
         return False
-    if (
-        current.st_dev != expected.st_dev
-        or current.st_ino != expected.st_ino
-        or sha256(content).hexdigest() != expected_digest
-    ):
-        return False
-    return _remove_owned_path(path, expected.st_dev, expected.st_ino)
-
-
-def _remove_owned_path(path: Path, device: int, inode: int) -> bool:
     try:
-        current = path.lstat()
-    except FileNotFoundError:
-        return False
-    if (
-        not stat.S_ISREG(current.st_mode)
-        or current.st_dev != device
-        or current.st_ino != inode
-    ):
-        return False
-    path.unlink()
-    return True
-
-
-def _fsync_directory(path: Path) -> None:
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
-    descriptor = os.open(path, flags)
-    try:
-        os.fsync(descriptor)
+        expected = os.fstat(expected_descriptor)
+        current = os.fstat(descriptor)
+        return (
+            current.st_dev == expected.st_dev
+            and current.st_ino == expected.st_ino
+            and sha256(_read_descriptor(descriptor)).hexdigest() == expected_digest
+        )
     finally:
         os.close(descriptor)
+
+
+def _retire_journal(
+    package: int,
+    journal_descriptor: int,
+    stage: int | None = None,
+) -> None:
+    if stage is None:
+        retirement_stage = _create_stage_directory(package)
+        owned_stage = True
+    else:
+        retirement_stage = stage
+        owned_stage = False
+    target = f"retired-journal-{uuid4().hex}"
+    try:
+        os.rename(
+            _BUILD_JOURNAL_FILENAME,
+            target,
+            src_dir_fd=package,
+            dst_dir_fd=retirement_stage,
+        )
+        moved = os.stat(target, dir_fd=retirement_stage, follow_symlinks=False)
+        expected = os.fstat(journal_descriptor)
+        _fsync_directory(retirement_stage)
+        _fsync_directory(package)
+        if (
+            not stat.S_ISREG(moved.st_mode)
+            or moved.st_dev != expected.st_dev
+            or moved.st_ino != expected.st_ino
+        ):
+            raise RoadGraphBuildError(
+                "road graph build journal changed during retirement"
+            )
+    finally:
+        if owned_stage:
+            os.close(retirement_stage)
+
+
+def _fsync_directory(directory: int) -> None:
+    os.fsync(directory)
 
 
 def _canonical_json(payload: object) -> bytes:
@@ -921,8 +1076,19 @@ def _canonical_json(payload: object) -> bytes:
     ).encode("utf-8")
 
 
-def _replace_file(source: Path, destination: Path) -> None:
-    os.replace(source, destination)
+def _replace_file(
+    source: str,
+    destination: str,
+    *,
+    source_directory: int,
+    destination_directory: int,
+) -> None:
+    os.replace(
+        source,
+        destination,
+        src_dir_fd=source_directory,
+        dst_dir_fd=destination_directory,
+    )
 
 
 def _retrieve_osm_graph(
