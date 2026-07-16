@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,7 @@ from wildfireops.geospatial.clustering import (
 )
 from wildfireops.ingestion.quarantine import write_quarantine
 from wildfireops.persistence.incidents import (
+    acquire_incident_refresh_lock,
     load_current_fire_detections,
     refresh_incidents,
 )
@@ -61,26 +63,38 @@ class IngestionService:
                 attempted_at=attempted_at,
                 error=error,
             )
-        fire_observations: list[NormalizedObservation] = []
-        weather_observations: list[WeatherObservation] = []
-        for observation in batch.observations:
-            if isinstance(observation, NormalizedObservation):
-                fire_observations.append(observation)
-            elif isinstance(observation, WeatherObservation):
-                weather_observations.append(observation)
-            else:
-                raise TypeError(
-                    f"unsupported observation type: {type(observation).__name__}"
-                )
 
         async with self._session_factory() as session:
             try:
+                fire_observations: list[NormalizedObservation] = []
+                weather_observations: list[WeatherObservation] = []
+                for observation in batch.observations:
+                    if isinstance(observation, NormalizedObservation):
+                        fire_observations.append(observation)
+                    elif isinstance(observation, WeatherObservation):
+                        weather_observations.append(observation)
+                    else:
+                        raise TypeError(
+                            "unsupported observation type: "
+                            f"{type(observation).__name__}"
+                        )
+                reference_at = max(
+                    (observation.observed_at for observation in batch.observations),
+                    default=attempted_at,
+                )
                 stats = await self._observation_repository.upsert_many(
                     session,
                     (*fire_observations, *weather_observations),
                 )
                 quarantined = await write_quarantine(session, batch.failures)
-                current_detections = await load_current_fire_detections(session)
+                await acquire_incident_refresh_lock(session)
+                current_detections = await load_current_fire_detections(
+                    session,
+                    reference_at=reference_at,
+                    temporal_window_seconds=(
+                        self._clustering_config.temporal_window_seconds
+                    ),
+                )
                 clusters = cluster_detections(
                     current_detections,
                     self._clustering_config,
@@ -99,8 +113,19 @@ class IngestionService:
                     quarantined=quarantined,
                 )
                 await session.commit()
-            except Exception:
-                await session.rollback()
+            except Exception as error:
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                try:
+                    await self._record_processing_failure(
+                        source_name=adapter.source_name,
+                        attempted_at=attempted_at,
+                        error=error,
+                    )
+                except Exception:
+                    pass
                 raise
 
         return IngestionRun(
@@ -111,6 +136,26 @@ class IngestionService:
             outcome="success",
         )
 
+    async def _record_processing_failure(
+        self,
+        *,
+        source_name: str,
+        attempted_at: datetime,
+        error: Exception,
+    ) -> None:
+        async with self._session_factory() as session:
+            try:
+                await _record_source_failure(
+                    session,
+                    source_name=source_name,
+                    attempted_at=attempted_at,
+                    error_message=_sanitized_error_message(error),
+                )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
     async def _record_fetch_failure(
         self,
         *,
@@ -118,9 +163,7 @@ class IngestionService:
         attempted_at: datetime,
         error: Exception,
     ) -> IngestionRun:
-        error_message = (
-            str(error) if isinstance(error, SourceUnavailable) else type(error).__name__
-        )
+        error_message = _sanitized_error_message(error)
         async with self._session_factory() as session:
             try:
                 await _record_source_failure(
@@ -166,10 +209,14 @@ async def _record_source_success(
         .values(**values)
         .on_conflict_do_update(
             index_elements=["source_name"],
-            set_=values,
+            set_={**values, "updated_at": func.now()},
         )
     )
     await session.execute(statement)
+
+
+def _sanitized_error_message(error: Exception) -> str:
+    return str(error) if isinstance(error, SourceUnavailable) else type(error).__name__
 
 
 async def _record_source_failure(
@@ -194,6 +241,7 @@ async def _record_source_failure(
         for key, value in insert_values.items()
         if key not in {"source_name", "last_success_at"}
     }
+    update_values["updated_at"] = func.now()
     statement = (
         insert(SourceStatusModel)
         .values(**insert_values)

@@ -1,8 +1,17 @@
 from functools import lru_cache
 from math import isfinite
 
-from pydantic import SecretStr, field_validator
+from pydantic import (
+    AnyHttpUrl,
+    SecretStr,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 
 
 class Settings(BaseSettings):
@@ -40,9 +49,7 @@ class Settings(BaseSettings):
         return value
 
     @field_validator(
-        "firms_area_url",
         "firms_source",
-        "nws_observation_url",
         "clustering_algorithm_version",
     )
     @classmethod
@@ -51,6 +58,21 @@ class Settings(BaseSettings):
         if not normalized:
             raise ValueError("setting must not be blank")
         return normalized
+
+    @field_validator("firms_area_url", "nws_observation_url", mode="before")
+    @classmethod
+    def validate_live_source_url(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError("live source URL must be an absolute HTTP(S) URL")
+        try:
+            parsed = _HTTP_URL_ADAPTER.validate_python(value.strip())
+        except ValidationError:
+            raise ValueError(
+                "live source URL must be an absolute HTTP(S) URL"
+            ) from None
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("live source URL must not contain credentials")
+        return str(parsed)
 
     @field_validator("nws_user_agent")
     @classmethod

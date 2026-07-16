@@ -64,6 +64,29 @@ def test_blank_firms_key_is_treated_as_unconfigured() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     (
+        ("firms_area_url", "not-a-url"),
+        ("firms_area_url", "/relative/area/csv"),
+        ("firms_area_url", "ftp://firms.example.invalid/area/csv"),
+        ("firms_area_url", "https://"),
+        ("firms_area_url", "https://user:password@firms.example.invalid/area/csv"),
+        ("nws_observation_url", "not-a-url"),
+        ("nws_observation_url", "/relative/observations/latest"),
+        ("nws_observation_url", "file:///tmp/weather.json"),
+        ("nws_observation_url", "https://"),
+        ("nws_observation_url", "https://user:password@weather.example.invalid/latest"),
+    ),
+)
+def test_live_source_urls_must_be_absolute_http_urls_without_credentials(
+    field: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: value})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
         ("firms_day_range", 0),
         ("firms_day_range", -1),
         ("firms_day_range", 6),

@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
-from math import hypot
+from datetime import datetime, timedelta
+from math import hypot, isfinite
 from typing import cast
 from uuid import UUID
 
@@ -21,6 +21,7 @@ from wildfireops.persistence.observed_models import (
 
 _TO_EPSG_3310 = Transformer.from_crs("EPSG:4326", "EPSG:3310", always_xy=True)
 DEFAULT_INCIDENT_MATCH_RADIUS_METERS = 5_000.0
+_INCIDENT_REFRESH_LOCK_ID = int.from_bytes(b"WFIREOPS", byteorder="big")
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +34,11 @@ class _ExistingIncident:
 
 async def load_current_fire_detections(
     session: AsyncSession,
+    *,
+    reference_at: datetime,
+    temporal_window_seconds: float,
 ) -> tuple[NormalizedObservation, ...]:
+    window_start = _window_start(reference_at, temporal_window_seconds)
     statement = (
         select(
             SourceObservationModel.source_name,
@@ -45,7 +50,11 @@ async def load_current_fire_detections(
             SourceObservationModel.intensity,
             SourceObservationModel.raw_payload,
         )
-        .where(SourceObservationModel.observation_kind == "fire")
+        .where(
+            SourceObservationModel.observation_kind == "fire",
+            SourceObservationModel.observed_at >= window_start,
+            SourceObservationModel.observed_at <= reference_at,
+        )
         .order_by(
             SourceObservationModel.observed_at,
             SourceObservationModel.source_name,
@@ -72,11 +81,45 @@ async def load_current_fire_detections(
     return tuple(detections)
 
 
+async def acquire_incident_refresh_lock(session: AsyncSession) -> None:
+    """Serialize the read/cluster/refresh critical section for one transaction."""
+    await session.execute(select(func.pg_advisory_xact_lock(_INCIDENT_REFRESH_LOCK_ID)))
+
+
+def _window_start(
+    reference_at: datetime,
+    temporal_window_seconds: float,
+) -> datetime:
+    if not isinstance(reference_at, datetime) or reference_at.utcoffset() != timedelta(
+        0
+    ):
+        raise ValueError("reference_at must be UTC")
+    if isinstance(temporal_window_seconds, bool) or not isinstance(
+        temporal_window_seconds, (int, float)
+    ):
+        raise ValueError("temporal_window_seconds must be a finite positive number")
+    try:
+        seconds = float(temporal_window_seconds)
+    except (OverflowError, ValueError):
+        raise ValueError(
+            "temporal_window_seconds must be a finite positive number"
+        ) from None
+    if not isfinite(seconds) or seconds <= 0:
+        raise ValueError("temporal_window_seconds must be a finite positive number")
+    try:
+        return reference_at - timedelta(seconds=seconds)
+    except OverflowError:
+        raise ValueError("detection time window must be representable") from None
+
+
 async def refresh_incidents(
     session: AsyncSession,
     clusters: Sequence[DetectionCluster],
     spatial_radius_meters: float = DEFAULT_INCIDENT_MATCH_RADIUS_METERS,
 ) -> None:
+    # Direct callers are serialized too. Ingestion acquires the same re-entrant
+    # transaction lock before it reads detections so waiting runs recompute.
+    await acquire_incident_refresh_lock(session)
     observations = await _observation_members(session)
     ordered_clusters = tuple(sorted(clusters, key=lambda item: item.member_identities))
     existing = await _existing_incidents(session)
