@@ -2,15 +2,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from wildfireops.api.dependencies import (
-    IncidentQueryService,
-    get_incident_query_service,
+from wildfireops.api.dependencies import get_incident_query_service
+from wildfireops.api.mappers.incidents import (
+    incident_detail,
+    incident_summary,
+    timeline_frame,
 )
 from wildfireops.api.schemas.incidents import (
     IncidentDetailResponse,
     IncidentListResponse,
     IncidentTimelineResponse,
 )
+from wildfireops.application.read_models import IncidentQueryService
 
 
 router = APIRouter(prefix="/api/incidents", tags=["incidents"])
@@ -20,7 +23,8 @@ router = APIRouter(prefix="/api/incidents", tags=["incidents"])
 async def list_incidents(
     service: Annotated[IncidentQueryService, Depends(get_incident_query_service)],
 ) -> IncidentListResponse:
-    return IncidentListResponse(items=await service.list_incidents())
+    models = await service.list_incidents()
+    return IncidentListResponse(items=tuple(incident_summary(item) for item in models))
 
 
 @router.get("/{incident_id}", response_model=IncidentDetailResponse)
@@ -28,7 +32,7 @@ async def get_incident(
     incident_id: str,
     service: Annotated[IncidentQueryService, Depends(get_incident_query_service)],
 ) -> IncidentDetailResponse:
-    return await service.get_incident(incident_id)
+    return incident_detail(await service.get_incident(incident_id))
 
 
 @router.get("/{incident_id}/timeline", response_model=IncidentTimelineResponse)
@@ -36,4 +40,7 @@ async def get_incident_timeline(
     incident_id: str,
     service: Annotated[IncidentQueryService, Depends(get_incident_query_service)],
 ) -> IncidentTimelineResponse:
-    return IncidentTimelineResponse(items=await service.get_timeline(incident_id))
+    models = await service.get_timeline(incident_id)
+    return IncidentTimelineResponse(
+        items=tuple(timeline_frame(item) for item in models)
+    )

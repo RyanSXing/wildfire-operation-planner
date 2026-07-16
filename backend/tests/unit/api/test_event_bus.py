@@ -1,4 +1,5 @@
 import asyncio
+from threading import get_ident
 
 import pytest
 
@@ -31,8 +32,9 @@ async def test_publish_preserves_order_and_isolates_subscribers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slow_subscriber_replaces_oldest_incident_and_preserves_source_order(
-) -> None:
+async def test_slow_subscriber_replaces_oldest_incident_and_preserves_source_order() -> (
+    None
+):
     bus = EventBus(queue_size=2)
 
     async with bus.subscribe() as queue:
@@ -79,8 +81,7 @@ async def test_sse_stream_emits_named_events_heartbeat_and_cleans_up() -> None:
     bus.publish("incident-updated", {"incidentId": "incident-1"})
 
     assert await first_chunk == (
-        "event: incident-updated\n"
-        'data: {"incidentId":"incident-1"}\n\n'
+        'event: incident-updated\ndata: {"incidentId":"incident-1"}\n\n'
     )
     assert await asyncio.wait_for(anext(stream), timeout=0.1) == ": heartbeat\n\n"
 
@@ -116,3 +117,78 @@ async def test_subscribers_cannot_mutate_each_others_nested_event_data() -> None
     assert isinstance(first_nested, dict)
     first_nested["value"] = "subscriber-mutated"
     assert second_event.data == {"nested": {"value": "original"}}
+
+
+@pytest.mark.asyncio
+async def test_sse_escapes_lone_surrogate_as_utf8_safe_ascii() -> None:
+    bus = EventBus()
+    stream = stream_events(bus, heartbeat_seconds=1)
+    pending_chunk = asyncio.create_task(anext(stream))
+    for _ in range(10):
+        if bus.subscriber_count == 1:
+            break
+        await asyncio.sleep(0)
+    bus.publish("incident-updated", {"value": "\ud800"})
+
+    try:
+        chunk = await pending_chunk
+        assert "\\ud800" in chunk
+        chunk.encode("utf-8")
+    finally:
+        await stream.aclose()
+
+
+@pytest.mark.asyncio
+async def test_publish_from_another_thread_and_loop_wakes_subscriber_safely() -> None:
+    bus = EventBus()
+    owner_thread = get_ident()
+    async with bus.subscribe() as queue:
+        original_put = queue.put_nowait
+
+        def checked_put(item: object) -> None:
+            assert get_ident() == owner_thread
+            original_put(item)  # type: ignore[arg-type]
+
+        setattr(queue, "put_nowait", checked_put)
+
+        def publish_from_other_loop() -> None:
+            async def publish() -> None:
+                bus.publish("incident-updated", {"incidentId": "cross-loop"})
+
+            asyncio.run(publish())
+
+        await asyncio.to_thread(publish_from_other_loop)
+        event = await asyncio.wait_for(queue.get(), timeout=1)
+
+    assert event.data == {"incidentId": "cross-loop"}
+
+
+@pytest.mark.asyncio
+async def test_coalescing_never_temporarily_completes_queue_join() -> None:
+    class JoinProbe(asyncio.Event):
+        def __init__(self) -> None:
+            super().__init__()
+            self.set_calls = 0
+
+        def set(self) -> None:
+            self.set_calls += 1
+            super().set()
+
+    bus = EventBus(queue_size=2)
+    async with bus.subscribe() as queue:
+        bus.publish("source-status-updated", {"sourceName": "nws"})
+        bus.publish("incident-updated", {"incidentId": "old"})
+        probe = JoinProbe()
+        setattr(queue, "_finished", probe)
+
+        bus.publish("incident-updated", {"incidentId": "new"})
+
+        assert probe.set_calls == 0
+        join_task = asyncio.create_task(queue.join())
+        await asyncio.sleep(0)
+        assert not join_task.done()
+        queue.get_nowait()
+        queue.task_done()
+        queue.get_nowait()
+        queue.task_done()
+        await asyncio.wait_for(join_task, timeout=1)

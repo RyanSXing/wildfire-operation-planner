@@ -5,6 +5,7 @@ import pytest
 from fastapi import FastAPI
 from geoalchemy2.elements import WKTElement
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from wildfireops.main import create_app
@@ -69,17 +70,17 @@ async def _seed_incident(
                     "type": "Point",
                     "coordinates": [-121.6, 39.8],
                 },
-                "first_observed_at": (
-                    last_observed_at - timedelta(hours=1)
-                ).isoformat().replace("+00:00", "Z"),
-                "last_observed_at": last_observed_at.isoformat().replace(
-                    "+00:00", "Z"
-                ),
+                "first_observed_at": (last_observed_at - timedelta(hours=1))
+                .isoformat()
+                .replace("+00:00", "Z"),
+                "last_observed_at": last_observed_at.isoformat().replace("+00:00", "Z"),
                 "reference_at": _REFERENCE.isoformat().replace("+00:00", "Z"),
                 "detection_identities": [],
                 "risk": _risk(score, score * 0.3),
             },
-            asset_state=[{"asset_id": f"asset-{index}"} for index in range(asset_count)],
+            asset_state=[
+                {"asset_id": f"asset-{index}"} for index in range(asset_count)
+            ],
             resource_state=[],
             captured_at=_REFERENCE,
         )
@@ -218,9 +219,7 @@ async def test_incident_detail_returns_the_complete_snapshot_and_detections(
                     "latest_observed_at": "2024-07-24T18:18:00Z",
                 }
             ],
-            "asset_inputs": [
-                {"source_name": "census", "source_version": "2023-acs5"}
-            ],
+            "asset_inputs": [{"source_name": "census", "source_version": "2023-acs5"}],
         },
         incident_state={
             "name": "Redwood Creek",
@@ -625,3 +624,43 @@ async def test_detail_uses_max_snapshot_version_and_stable_name_fallback(
     assert response.json()["snapshotVersion"] == 2
     assert response.json()["name"] == "Incident 12345678"
     assert response.json()["risk"]["score"] == 55.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/incidents",
+        f"/api/incidents/{_HIGH_ID}/timeline",
+    ],
+)
+async def test_malformed_snapshot_asset_object_is_never_counted_as_an_array(
+    db_session: AsyncSession,
+    path: str,
+) -> None:
+    await _seed_incident(
+        db_session,
+        incident_id=_HIGH_ID,
+        name="Malformed Asset State",
+        score=50.0,
+        last_observed_at=_REFERENCE,
+        asset_count=0,
+    )
+    snapshot = await db_session.scalar(
+        select(IncidentSnapshotModel).where(
+            IncidentSnapshotModel.incident_id == _HIGH_ID
+        )
+    )
+    assert snapshot is not None
+    setattr(snapshot, "asset_state", {"asset-1": {"name": "not-an-array"}})
+    await db_session.flush()
+
+    app = _test_app(db_session)
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(path)
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "internal_error"

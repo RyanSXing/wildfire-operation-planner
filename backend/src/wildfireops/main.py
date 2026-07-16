@@ -11,7 +11,11 @@ from wildfireops.api.routes.events import router as events_router
 from wildfireops.api.routes.incidents import router as incidents_router
 from wildfireops.api.routes.sources import router as sources_router
 from wildfireops.config import Settings, get_settings
-from wildfireops.db import create_engine, create_session_factory
+from wildfireops.db import (
+    create_engine,
+    create_read_service_provider,
+    create_session_factory,
+)
 from wildfireops.observability import configure_observability
 
 
@@ -32,6 +36,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
     app.state.clock = lambda: datetime.now(UTC)
+    app.state.read_service_provider = create_read_service_provider(
+        session_factory=lambda: app.state.session_factory(),
+        settings=resolved,
+        clock=lambda: app.state.clock(),
+    )
     app.state.event_bus = EventBus()
     app.state.event_heartbeat_seconds = 20.0
 

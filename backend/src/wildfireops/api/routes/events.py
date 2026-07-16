@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import AsyncIterator
-import json
 from math import isfinite
 from typing import Annotated
 
@@ -32,13 +31,7 @@ async def stream_events(
                 yield ": heartbeat\n\n"
                 continue
             queue.task_done()
-            data = json.dumps(
-                dict(event.data),
-                allow_nan=False,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            yield f"event: {event.name}\ndata: {data}\n\n"
+            yield f"event: {event.name}\ndata: {event.encoded_data}\n\n"
 
 
 @router.get("/api/events", response_class=StreamingResponse)

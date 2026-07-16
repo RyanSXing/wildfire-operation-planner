@@ -5,6 +5,7 @@ from uuid import UUID
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from wildfireops.main import create_app
@@ -131,3 +132,32 @@ async def test_unsafe_request_id_is_replaced_with_a_bounded_uuid(
     UUID(generated_id)
     assert len(generated_id) == 36
     assert unsafe_id not in output.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_validation_keeps_nested_field_named_body_in_location(
+    db_session: AsyncSession,
+) -> None:
+    class NestedPayload(BaseModel):
+        body: int
+
+    class CommandPayload(BaseModel):
+        command: NestedPayload
+
+    app = _test_app(db_session)
+
+    @app.post("/api/test-validation")
+    async def validate_command(payload: CommandPayload) -> None:
+        del payload
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/test-validation",
+            json={"command": {"body": "not-an-integer"}},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["details"]["fields"][0]["field"] == ("command.body")

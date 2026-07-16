@@ -1,42 +1,29 @@
 from collections.abc import AsyncIterator
 
-from fastapi import Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Request
 
-from wildfireops.api.services.incidents import IncidentQueryService
-from wildfireops.api.services.sources import SourceQueryService
 from wildfireops.api.event_bus import EventBus
+from wildfireops.application.read_models import (
+    IncidentQueryService,
+    ReadServiceProvider,
+    SourceQueryService,
+)
 
 
-async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
-    session_factory = request.app.state.session_factory
-    async with session_factory() as session:
-        try:
-            yield session
-        except Exception:
-            await session.rollback()
-            raise
-
-
-def get_incident_query_service(
+async def get_incident_query_service(
     request: Request,
-    session: AsyncSession = Depends(get_session),
-) -> IncidentQueryService:
-    return IncidentQueryService(
-        session=session,
-        settings=request.app.state.settings,
-    )
+) -> AsyncIterator[IncidentQueryService]:
+    provider: ReadServiceProvider = request.app.state.read_service_provider
+    async with provider.incidents() as service:
+        yield service
 
 
-def get_source_query_service(
+async def get_source_query_service(
     request: Request,
-    session: AsyncSession = Depends(get_session),
-) -> SourceQueryService:
-    return SourceQueryService(
-        session=session,
-        settings=request.app.state.settings,
-        clock=request.app.state.clock,
-    )
+) -> AsyncIterator[SourceQueryService]:
+    provider: ReadServiceProvider = request.app.state.read_service_provider
+    async with provider.sources() as service:
+        yield service
 
 
 def get_event_bus(request: Request) -> EventBus:

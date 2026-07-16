@@ -1,8 +1,10 @@
 import asyncio
+from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import json
+from threading import Lock
 from types import MappingProxyType
 from typing import Literal, cast
 
@@ -10,7 +12,6 @@ from pydantic import JsonValue
 
 
 type EventName = Literal["incident-updated", "source-status-updated"]
-type EventQueue = asyncio.Queue["EventBusEvent"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,37 @@ class EventBusEvent:
     def data(self) -> Mapping[str, JsonValue]:
         decoded = json.loads(self._encoded_data)
         return MappingProxyType(cast(dict[str, JsonValue], decoded))
+
+    @property
+    def encoded_data(self) -> str:
+        return self._encoded_data
+
+
+class EventQueue(asyncio.Queue[EventBusEvent]):
+    def offer(self, event: EventBusEvent) -> None:
+        if not self.full():
+            self.put_nowait(event)
+            return
+
+        queued = cast(deque[EventBusEvent], getattr(self, "_queue"))
+        incident_index = next(
+            (
+                index
+                for index, queued_event in enumerate(queued)
+                if queued_event.name == "incident-updated"
+            ),
+            None,
+        )
+        if incident_index is None:
+            return
+        del queued[incident_index]
+        queued.append(event)
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class _Subscription:
+    queue: EventQueue
+    loop: asyncio.AbstractEventLoop
 
 
 class EventBus:
@@ -38,59 +70,65 @@ class EventBus:
         if queue_size <= 0:
             raise ValueError("queue_size must be a positive integer")
         self._queue_size = queue_size
-        self._subscribers: set[EventQueue] = set()
+        self._subscribers: set[_Subscription] = set()
+        self._subscribers_lock = Lock()
 
     @property
     def subscriber_count(self) -> int:
-        return len(self._subscribers)
+        with self._subscribers_lock:
+            return len(self._subscribers)
 
     @asynccontextmanager
     async def subscribe(self) -> AsyncIterator[EventQueue]:
-        queue: EventQueue = asyncio.Queue(maxsize=self._queue_size)
-        self._subscribers.add(queue)
+        subscription = _Subscription(
+            queue=EventQueue(maxsize=self._queue_size),
+            loop=asyncio.get_running_loop(),
+        )
+        with self._subscribers_lock:
+            self._subscribers.add(subscription)
         try:
-            yield queue
+            yield subscription.queue
         finally:
-            self._subscribers.discard(queue)
+            with self._subscribers_lock:
+                self._subscribers.discard(subscription)
 
     def publish(self, name: EventName, data: Mapping[str, object]) -> None:
         if name not in {"incident-updated", "source-status-updated"}:
             raise ValueError("event name is not supported")
         encoded_data = _canonical_payload(data)
-        for queue in tuple(self._subscribers):
+        with self._subscribers_lock:
+            subscribers = tuple(self._subscribers)
+        try:
+            publishing_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            publishing_loop = None
+        for subscription in subscribers:
             event = EventBusEvent(
                 name=name,
                 _encoded_data=encoded_data,
             )
-            _offer_without_blocking(queue, event)
+            if publishing_loop is subscription.loop:
+                self._offer_if_subscribed(subscription, event)
+                continue
+            try:
+                subscription.loop.call_soon_threadsafe(
+                    self._offer_if_subscribed,
+                    subscription,
+                    event,
+                )
+            except RuntimeError:
+                with self._subscribers_lock:
+                    self._subscribers.discard(subscription)
 
-
-def _offer_without_blocking(queue: EventQueue, event: EventBusEvent) -> None:
-    if not queue.full():
-        queue.put_nowait(event)
-        return
-
-    queued: list[EventBusEvent] = []
-    while True:
-        try:
-            queued.append(queue.get_nowait())
-            queue.task_done()
-        except asyncio.QueueEmpty:
-            break
-    incident_index = next(
-        (
-            index
-            for index, queued_event in enumerate(queued)
-            if queued_event.name == "incident-updated"
-        ),
-        None,
-    )
-    if incident_index is not None:
-        queued.pop(incident_index)
-    for queued_event in queued:
-        queue.put_nowait(queued_event)
-    if incident_index is not None:
-        queue.put_nowait(event)
+    def _offer_if_subscribed(
+        self,
+        subscription: _Subscription,
+        event: EventBusEvent,
+    ) -> None:
+        with self._subscribers_lock:
+            if subscription not in self._subscribers:
+                return
+        subscription.queue.offer(event)
 
 
 def _canonical_payload(data: Mapping[str, object]) -> str:
@@ -100,7 +138,7 @@ def _canonical_payload(data: Mapping[str, object]) -> str:
         encoded = json.dumps(
             dict(data),
             allow_nan=False,
-            ensure_ascii=False,
+            ensure_ascii=True,
             separators=(",", ":"),
             sort_keys=True,
         )
