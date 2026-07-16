@@ -1,10 +1,15 @@
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from wildfireops.replay.manifest import ReplayManifest, ReplayManifestInvalid
+from wildfireops.replay.manifest import (
+    ReplayManifest,
+    ReplayManifestInvalid,
+    RoadGraphMetadata,
+)
 
 
 FIXTURE_MANIFEST = Path("tests/fixtures/replay-small/manifest.json")
@@ -183,3 +188,86 @@ def test_manifest_wraps_an_oversized_integer_token_as_invalid_json(
         match=r"^manifest\.json is not valid JSON$",
     ):
         ReplayManifest.load(path)
+
+
+def test_legacy_manifest_remains_valid_without_road_graph_metadata() -> None:
+    manifest = ReplayManifest.load(FIXTURE_MANIFEST)
+
+    assert manifest.road_graph is None
+    assert "road_graph" not in manifest.to_payload()
+
+
+def test_road_graph_metadata_round_trips_atomically(tmp_path: Path) -> None:
+    payload = _manifest_payload()
+    digest = "a" * 64
+    payload["files"]["roads.graphml.gz"] = digest
+    payload["road_graph"] = {
+        "filename": "roads.graphml.gz",
+        "retrieved_at": "2024-07-25T12:34:56Z",
+        "bbox": [-122.4, 39.2, -120.3, 41.0],
+        "network_type": "drive",
+        "osmnx_version": "2.1.0",
+        "graph_digest": digest,
+        "edge_count": 42,
+    }
+    manifest = ReplayManifest.load(_write_manifest(tmp_path, payload))
+
+    assert manifest.road_graph == RoadGraphMetadata(
+        filename="roads.graphml.gz",
+        retrieved_at=datetime(2024, 7, 25, 12, 34, 56, tzinfo=UTC),
+        bbox=(-122.4, 39.2, -120.3, 41.0),
+        network_type="drive",
+        osmnx_version="2.1.0",
+        graph_digest=digest,
+        edge_count=42,
+    )
+    output = tmp_path / "round-trip" / "manifest.json"
+    output.parent.mkdir()
+    manifest.write_atomic(output)
+
+    assert ReplayManifest.load(output) == manifest
+    assert (
+        json.loads(output.read_text(encoding="utf-8"))["road_graph"]
+        == payload["road_graph"]
+    )
+
+
+def test_road_graph_metadata_digest_must_match_the_file_map(tmp_path: Path) -> None:
+    payload = _manifest_payload()
+    payload["files"]["roads.graphml.gz"] = "b" * 64
+    payload["road_graph"] = {
+        "filename": "roads.graphml.gz",
+        "retrieved_at": "2024-07-25T12:34:56Z",
+        "bbox": [-122.4, 39.2, -120.3, 41.0],
+        "network_type": "drive",
+        "osmnx_version": "2.1.0",
+        "graph_digest": "a" * 64,
+        "edge_count": 42,
+    }
+
+    with pytest.raises(
+        ReplayManifestInvalid,
+        match="road_graph digest must match files",
+    ):
+        ReplayManifest.load(_write_manifest(tmp_path, payload))
+
+
+def test_road_graph_metadata_bbox_must_match_the_region(tmp_path: Path) -> None:
+    payload = _manifest_payload()
+    digest = "a" * 64
+    payload["files"]["roads.graphml.gz"] = digest
+    payload["road_graph"] = {
+        "filename": "roads.graphml.gz",
+        "retrieved_at": "2024-07-25T12:34:56Z",
+        "bbox": [-122.3, 39.2, -120.3, 41.0],
+        "network_type": "drive",
+        "osmnx_version": "2.1.0",
+        "graph_digest": digest,
+        "edge_count": 42,
+    }
+
+    with pytest.raises(
+        ReplayManifestInvalid,
+        match="road_graph bbox must match manifest region",
+    ):
+        ReplayManifest.load(_write_manifest(tmp_path, payload))

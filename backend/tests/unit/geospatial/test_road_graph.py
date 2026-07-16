@@ -1,0 +1,504 @@
+import json
+from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
+from hashlib import sha256
+from pathlib import Path
+from shutil import copyfile
+
+import networkx as nx
+import pytest
+
+from wildfireops.geospatial.road_graph import (
+    RoadGraph,
+    RoadGraphBuildError,
+    RoadGraphInvalid,
+    RetrievedRoadGraph,
+    RouteStatus,
+    build_road_graph,
+    compute_route,
+    main,
+)
+from wildfireops.replay.manifest import ReplayManifest
+from wildfireops.replay.loader import ReplayLoader
+
+
+def test_closed_roads_change_the_shortest_route_and_can_make_it_unreachable() -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_edge(
+        "A",
+        "B",
+        edge_id="AB",
+        travel_minutes=5.0,
+        distance_meters=500.0,
+    )
+    graph.add_edge(
+        "B",
+        "C",
+        edge_id="BC",
+        travel_minutes=5.0,
+        distance_meters=500.0,
+    )
+    graph.add_edge(
+        "A",
+        "C",
+        edge_id="AC",
+        travel_minutes=15.0,
+        distance_meters=1_200.0,
+    )
+    roads = RoadGraph.from_graph(graph)
+
+    baseline = compute_route(roads, "A", "C", ())
+    fallback = compute_route(roads, "A", "C", ("BC",))
+    unreachable = compute_route(roads, "A", "C", ("BC", "AC"))
+
+    assert baseline.status is RouteStatus.REACHABLE
+    assert baseline.edge_ids == ("AB", "BC")
+    assert baseline.travel_minutes == 10.0
+    assert fallback.status is RouteStatus.REACHABLE
+    assert fallback.edge_ids == ("AC",)
+    assert fallback.travel_minutes == 15.0
+    assert unreachable.status is RouteStatus.UNREACHABLE
+    assert unreachable.edge_ids == ()
+
+
+def test_load_pins_the_graphml_digest_and_preserves_parallel_directed_edges(
+    tmp_path: Path,
+) -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_edge(
+        "A",
+        "B",
+        key="slow",
+        edge_id="AB-slow",
+        travel_minutes=9.0,
+        distance_meters=900.0,
+    )
+    graph.add_edge(
+        "A",
+        "B",
+        key="fast",
+        edge_id="AB-fast",
+        travel_minutes=4.0,
+        distance_meters=450.0,
+    )
+    graph.add_edge(
+        "B",
+        "C",
+        edge_id="BC",
+        travel_minutes=3.0,
+        distance_meters=300.0,
+    )
+    path = tmp_path / "roads.graphml.gz"
+    nx.write_graphml(graph, path)
+
+    roads = RoadGraph.load(path)
+    result = compute_route(roads, "A", "C", ())
+
+    assert roads.graph_version == sha256(path.read_bytes()).hexdigest()
+    assert result.edge_ids == ("AB-fast", "BC")
+    assert result.travel_minutes == 7.0
+    assert result.distance_meters == 750.0
+
+
+def test_literal_toy_edges_without_distance_default_to_zero_meters() -> None:
+    graph = nx.DiGraph()
+    graph.add_edge("A", "B", edge_id="AB", travel_minutes=5.0)
+
+    result = compute_route(RoadGraph.from_graph(graph), "A", "B", ())
+
+    assert result.status is RouteStatus.REACHABLE
+    assert result.distance_meters == 0.0
+
+
+def test_parallel_ties_and_zero_cost_cycles_use_deterministic_hop_edge_order() -> None:
+    first = nx.MultiDiGraph()
+    first.add_edge(
+        "A",
+        "A",
+        key="cycle",
+        edge_id="AA",
+        travel_minutes=0.0,
+        distance_meters=0.0,
+    )
+    first.add_edge(
+        "A",
+        "B",
+        key="higher",
+        edge_id="AB-2",
+        travel_minutes=5.0,
+        distance_meters=500.0,
+    )
+    first.add_edge(
+        "A",
+        "B",
+        key="lower",
+        edge_id="AB-1",
+        travel_minutes=5.0,
+        distance_meters=500.0,
+    )
+    second = nx.MultiDiGraph()
+    for origin, destination, key, data in reversed(
+        list(first.edges(keys=True, data=True))
+    ):
+        second.add_edge(origin, destination, key=key, **data)
+
+    first_roads = RoadGraph.from_graph(first)
+    second_roads = RoadGraph.from_graph(second)
+
+    assert first_roads.graph_version == second_roads.graph_version
+    assert compute_route(first_roads, "A", "B", ()).edge_ids == ("AB-1",)
+    assert compute_route(second_roads, "A", "B", ()).edge_ids == ("AB-1",)
+
+
+def test_closure_hash_and_route_cache_canonicalize_duplicate_input_order() -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_edge(
+        "A",
+        "B",
+        edge_id="AB",
+        travel_minutes=5.0,
+        distance_meters=500.0,
+    )
+    graph.add_edge(
+        "A",
+        "C",
+        edge_id="AC",
+        travel_minutes=6.0,
+        distance_meters=600.0,
+    )
+    roads = RoadGraph.from_graph(graph)
+
+    first = compute_route(roads, "A", "B", ("AC", "AC"))
+    second = compute_route(roads, "A", "B", ["AC"])
+
+    assert second is first
+    assert second.closure_hash == first.closure_hash
+
+
+def test_load_reads_and_parses_each_resolved_graph_path_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_edge(
+        "A",
+        "B",
+        edge_id="AB",
+        travel_minutes="5.0",
+        length="450.0",
+    )
+    path = tmp_path / "roads.graphml"
+    nx.write_graphml(graph, path)
+    from wildfireops.geospatial import road_graph
+
+    reads = 0
+    original = road_graph._read_graph_bytes
+
+    def counting_read(graph_path: Path) -> bytes:
+        nonlocal reads
+        reads += 1
+        return original(graph_path)
+
+    monkeypatch.setattr(road_graph, "_read_graph_bytes", counting_read)
+
+    first = RoadGraph.load(path)
+    second = RoadGraph.load(path)
+
+    assert second is first
+    assert reads == 1
+    assert compute_route(first, "A", "B", ()).distance_meters == 450.0
+
+
+def test_load_wraps_a_truncated_gzip_as_invalid_graphml(tmp_path: Path) -> None:
+    path = tmp_path / "roads.graphml.gz"
+    path.write_bytes(b"\x1f\x8btruncated")
+
+    with pytest.raises(RoadGraphInvalid, match="not valid GraphML"):
+        RoadGraph.load(path)
+
+
+@pytest.mark.parametrize(
+    ("first_data", "second_data", "message"),
+    [
+        (
+            {"edge_id": " ", "travel_minutes": 1.0, "distance_meters": 1.0},
+            None,
+            "edge_id must be a nonblank string",
+        ),
+        (
+            {"edge_id": "same", "travel_minutes": 1.0, "distance_meters": 1.0},
+            {"edge_id": "same", "travel_minutes": 2.0, "distance_meters": 2.0},
+            "duplicate edge_id: same",
+        ),
+        (
+            {
+                "edge_id": "bad-time",
+                "travel_minutes": "nan",
+                "distance_meters": 1.0,
+            },
+            None,
+            "travel_minutes must be a finite nonnegative number",
+        ),
+        (
+            {
+                "edge_id": "bad-distance",
+                "travel_minutes": 1.0,
+                "distance_meters": -1.0,
+            },
+            None,
+            "distance_meters must be a finite nonnegative number",
+        ),
+    ],
+)
+def test_malformed_graph_edges_are_rejected_deliberately(
+    first_data: dict[str, object],
+    second_data: dict[str, object] | None,
+    message: str,
+) -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_edge("A", "B", **first_data)
+    if second_data is not None:
+        graph.add_edge("B", "C", **second_data)
+
+    with pytest.raises(RoadGraphInvalid, match=message):
+        RoadGraph.from_graph(graph)
+
+
+def test_missing_route_endpoint_is_explicitly_unreachable() -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_edge(
+        "A",
+        "B",
+        edge_id="AB",
+        travel_minutes=1.0,
+        distance_meters=100.0,
+    )
+    roads = RoadGraph.from_graph(graph)
+
+    result = compute_route(roads, "missing", "B", ())
+
+    assert result.status is RouteStatus.UNREACHABLE
+    assert result.edge_ids == ()
+    assert result.graph_version == roads.graph_version
+
+
+def test_parallel_edge_closure_falls_back_to_the_open_parallel_edge() -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_edge(
+        "A",
+        "B",
+        key="fast",
+        edge_id="AB-fast",
+        travel_minutes=2.0,
+        distance_meters=200.0,
+    )
+    graph.add_edge(
+        "A",
+        "B",
+        key="slow",
+        edge_id="AB-slow",
+        travel_minutes=5.0,
+        distance_meters=400.0,
+    )
+    roads = RoadGraph.from_graph(graph)
+
+    result = compute_route(roads, "A", "B", ("AB-fast",))
+
+    assert result.edge_ids == ("AB-slow",)
+    assert result.travel_minutes == 5.0
+
+
+def test_road_graph_version_identity_is_immutable() -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_edge(
+        "A",
+        "B",
+        edge_id="AB",
+        travel_minutes=1.0,
+        distance_meters=100.0,
+    )
+    roads = RoadGraph.from_graph(graph)
+
+    with pytest.raises(FrozenInstanceError):
+        roads.graph_version = "changed"
+
+
+def _raw_osm_graph() -> nx.MultiDiGraph:
+    graph = nx.MultiDiGraph()
+    graph.graph["crs"] = "EPSG:4326"
+    graph.add_node(100, x=-121.6, y=39.8)
+    graph.add_node(200, x=-121.5, y=39.9)
+    graph.add_edge(
+        100,
+        200,
+        key=0,
+        osmid=12345,
+        length=1_000.0,
+        speed_kph=60.0,
+        travel_time=60.0,
+    )
+    return graph
+
+
+def test_build_cli_records_exact_graph_provenance_without_live_download(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    fixture_manifest = Path("tests/fixtures/replay-small/manifest.json")
+    copyfile(fixture_manifest, package / "manifest.json")
+    copyfile(
+        Path("tests/fixtures/replay-small/fire_detections.jsonl"),
+        package / "fire_detections.jsonl",
+    )
+    output = package / "roads.graphml.gz"
+    calls: list[tuple[tuple[float, float, float, float], str]] = []
+
+    def retrieve(
+        bbox: tuple[float, float, float, float],
+        network_type: str,
+    ) -> RetrievedRoadGraph:
+        calls.append((bbox, network_type))
+        return RetrievedRoadGraph(_raw_osm_graph(), "2.1.0-test")
+
+    result = main(
+        [
+            "build",
+            "--bbox=-122.40,39.20,-120.30,41.00",
+            "--output",
+            str(output),
+        ],
+        retriever=retrieve,
+        clock=lambda: datetime(2024, 7, 25, 12, 34, 56, tzinfo=UTC),
+    )
+
+    assert result == 0
+    assert calls == [((-122.4, 39.2, -120.3, 41.0), "drive")]
+    assert output.read_bytes().startswith(b"\x1f\x8b")
+    manifest = ReplayManifest.load(package / "manifest.json")
+    assert manifest.package_id == "replay-small-v1"
+    assert manifest.algorithm_config_version == "test-config-v1"
+    assert manifest.road_graph is not None
+    assert manifest.road_graph.filename == "roads.graphml.gz"
+    assert manifest.road_graph.retrieved_at == datetime(
+        2024,
+        7,
+        25,
+        12,
+        34,
+        56,
+        tzinfo=UTC,
+    )
+    assert manifest.road_graph.bbox == (-122.4, 39.2, -120.3, 41.0)
+    assert manifest.road_graph.network_type == "drive"
+    assert manifest.road_graph.osmnx_version == "2.1.0-test"
+    assert manifest.road_graph.edge_count == 1
+    assert manifest.road_graph.graph_digest == sha256(output.read_bytes()).hexdigest()
+    assert manifest.files["roads.graphml.gz"] == manifest.road_graph.graph_digest
+    roads = RoadGraph.load(output)
+    assert len(roads.edge_ids) == 1
+    assert roads.graph_version == manifest.road_graph.graph_version
+    assert ReplayLoader(package).manifest.road_graph == manifest.road_graph
+
+
+@pytest.mark.parametrize("case", ["missing_manifest", "bbox_mismatch"])
+def test_build_preflight_fails_before_retrieval(
+    tmp_path: Path,
+    case: str,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    if case == "bbox_mismatch":
+        payload = json.loads(
+            Path("tests/fixtures/replay-small/manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        payload["region"]["bbox"] = [-122.0, 39.2, -120.3, 41.0]
+        (package / "manifest.json").write_text(
+            json.dumps(payload),
+            encoding="utf-8",
+        )
+    retrieved = False
+
+    def retrieve(
+        bbox: tuple[float, float, float, float],
+        network_type: str,
+    ) -> RetrievedRoadGraph:
+        nonlocal retrieved
+        retrieved = True
+        return RetrievedRoadGraph(_raw_osm_graph(), "2.1.0-test")
+
+    with pytest.raises(RoadGraphBuildError):
+        build_road_graph(
+            bbox=(-122.4, 39.2, -120.3, 41.0),
+            output=package / "roads.graphml.gz",
+            retriever=retrieve,
+            clock=lambda: datetime(2024, 7, 25, 12, tzinfo=UTC),
+        )
+
+    assert retrieved is False
+    assert not (package / "roads.graphml.gz").exists()
+
+
+def test_same_osm_graph_build_is_byte_deterministic(tmp_path: Path) -> None:
+    outputs: list[Path] = []
+    fixture_manifest = Path("tests/fixtures/replay-small/manifest.json")
+    for name in ("first", "second"):
+        package = tmp_path / name
+        package.mkdir()
+        copyfile(fixture_manifest, package / "manifest.json")
+        output = package / "roads.graphml.gz"
+        build_road_graph(
+            bbox=(-122.4, 39.2, -120.3, 41.0),
+            output=output,
+            retriever=lambda bbox, network_type: RetrievedRoadGraph(
+                _raw_osm_graph(),
+                "2.1.0-test",
+            ),
+            clock=lambda: datetime(2024, 7, 25, 12, tzinfo=UTC),
+        )
+        outputs.append(output)
+
+    assert outputs[0].read_bytes() == outputs[1].read_bytes()
+    first = RoadGraph.load(outputs[0])
+    second = RoadGraph.load(outputs[1])
+    assert first.graph_version == second.graph_version
+    assert first.edge_ids == second.edge_ids
+
+
+def test_manifest_publish_failure_rolls_back_the_new_graph(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    manifest_path = package / "manifest.json"
+    copyfile(Path("tests/fixtures/replay-small/manifest.json"), manifest_path)
+    manifest_before = manifest_path.read_bytes()
+    output = package / "roads.graphml.gz"
+    from wildfireops.geospatial import road_graph
+
+    def fail_manifest_replace(source: Path, destination: Path) -> None:
+        if destination == manifest_path:
+            raise OSError("simulated manifest publish failure")
+        source.replace(destination)
+
+    monkeypatch.setattr(road_graph, "_replace_file", fail_manifest_replace)
+
+    with pytest.raises(
+        RoadGraphBuildError,
+        match="simulated manifest publish failure",
+    ):
+        build_road_graph(
+            bbox=(-122.4, 39.2, -120.3, 41.0),
+            output=output,
+            retriever=lambda bbox, network_type: RetrievedRoadGraph(
+                _raw_osm_graph(),
+                "2.1.0-test",
+            ),
+            clock=lambda: datetime(2024, 7, 25, 12, tzinfo=UTC),
+        )
+
+    assert not output.exists()
+    assert manifest_path.read_bytes() == manifest_before

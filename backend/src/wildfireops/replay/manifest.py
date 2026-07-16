@@ -3,7 +3,7 @@ import os
 import re
 import stat
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from math import isfinite
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -21,10 +21,56 @@ _REQUIRED_FIELDS = (
     "files",
 )
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+_ROAD_GRAPH_FIELDS = {
+    "filename",
+    "retrieved_at",
+    "bbox",
+    "network_type",
+    "osmnx_version",
+    "graph_digest",
+    "edge_count",
+}
 
 
 class ReplayManifestInvalid(ValueError):
     """Raised when a replay manifest does not satisfy its schema."""
+
+
+@dataclass(frozen=True, slots=True)
+class RoadGraphMetadata:
+    filename: str
+    retrieved_at: datetime
+    bbox: tuple[float, float, float, float]
+    network_type: str
+    osmnx_version: str
+    graph_digest: str
+    edge_count: int
+
+    def __post_init__(self) -> None:
+        _nonblank_string(self.filename, "road_graph.filename")
+        if not _is_safe_relative_path(self.filename):
+            raise ReplayManifestInvalid(f"unsafe road_graph filename: {self.filename}")
+        _require_utc(self.retrieved_at, "road_graph.retrieved_at")
+        _validate_bbox(self.bbox, "road_graph.bbox")
+        _nonblank_string(self.network_type, "road_graph.network_type")
+        _nonblank_string(self.osmnx_version, "road_graph.osmnx_version")
+        if (
+            not isinstance(self.graph_digest, str)
+            or _SHA256_PATTERN.fullmatch(self.graph_digest) is None
+        ):
+            raise ReplayManifestInvalid("road_graph.graph_digest must be a SHA-256")
+        if (
+            not isinstance(self.edge_count, int)
+            or isinstance(self.edge_count, bool)
+            or self.edge_count < 0
+        ):
+            raise ReplayManifestInvalid(
+                "road_graph.edge_count must be a nonnegative integer"
+            )
+
+    @property
+    def graph_version(self) -> str:
+        return self.graph_digest
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +82,7 @@ class ReplayManifest:
     schema_version: int
     algorithm_config_version: str
     files: Mapping[str, str]
+    road_graph: RoadGraphMetadata | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.schema_version, int) or isinstance(
@@ -57,6 +104,15 @@ class ReplayManifest:
             raise ReplayManifestInvalid("end_at must not precede start_at")
         _validate_bbox(self.region)
         object.__setattr__(self, "files", _validated_files(self.files))
+        if self.road_graph is not None:
+            if not isinstance(self.road_graph, RoadGraphMetadata):
+                raise ReplayManifestInvalid("road_graph must be valid graph metadata")
+            if self.files.get(self.road_graph.filename) != self.road_graph.graph_digest:
+                raise ReplayManifestInvalid("road_graph digest must match files entry")
+            if self.road_graph.bbox != self.region:
+                raise ReplayManifestInvalid(
+                    "road_graph bbox must match manifest region"
+                )
 
     @classmethod
     def load(cls, path: Path) -> "ReplayManifest":
@@ -79,7 +135,7 @@ class ReplayManifest:
         for field in _REQUIRED_FIELDS:
             if field not in payload:
                 raise ReplayManifestInvalid(f"missing required field: {field}")
-        unsupported = sorted(payload.keys() - set(_REQUIRED_FIELDS))
+        unsupported = sorted(payload.keys() - {*_REQUIRED_FIELDS, "road_graph"})
         if unsupported:
             raise ReplayManifestInvalid(f"unsupported manifest field: {unsupported[0]}")
 
@@ -93,7 +149,54 @@ class ReplayManifest:
                 "algorithm_config_version"
             ],
             files=_files(payload["files"]),
+            road_graph=(
+                None
+                if "road_graph" not in payload
+                else _road_graph(payload["road_graph"])
+            ),
         )
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "package_id": self.package_id,
+            "region": {"bbox": list(self.region)},
+            "start_at": _format_timestamp(self.start_at),
+            "end_at": _format_timestamp(self.end_at),
+            "schema_version": self.schema_version,
+            "algorithm_config_version": self.algorithm_config_version,
+            "files": dict(self.files),
+        }
+        if self.road_graph is not None:
+            payload["road_graph"] = {
+                "filename": self.road_graph.filename,
+                "retrieved_at": _format_timestamp(self.road_graph.retrieved_at),
+                "bbox": list(self.road_graph.bbox),
+                "network_type": self.road_graph.network_type,
+                "osmnx_version": self.road_graph.osmnx_version,
+                "graph_digest": self.road_graph.graph_digest,
+                "edge_count": self.road_graph.edge_count,
+            }
+        return payload
+
+    def with_road_graph(self, metadata: RoadGraphMetadata) -> "ReplayManifest":
+        files = dict(self.files)
+        files[metadata.filename] = metadata.graph_digest
+        return replace(self, files=files, road_graph=metadata)
+
+    def write_atomic(self, path: Path) -> None:
+        path = Path(path)
+        temporary = path.with_name(f".{path.name}.tmp")
+        content = _canonical_json(self.to_payload())
+        try:
+            with temporary.open("xb") as file:
+                file.write(content)
+                file.flush()
+                os.fsync(file.fileno())
+            temporary.replace(path)
+        except OSError as error:
+            raise ReplayManifestInvalid(f"cannot write {path.name}: {error}") from error
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def _read_manifest(path: Path) -> bytes:
@@ -190,18 +293,48 @@ def _finite_number(value: object, field: str) -> float:
     return parsed
 
 
-def _validate_bbox(bbox: object) -> None:
+def _validate_bbox(bbox: object, field: str = "region.bbox") -> None:
     if not isinstance(bbox, tuple) or len(bbox) != 4:
-        raise ReplayManifestInvalid("region.bbox must contain four coordinates")
-    west, south, east, north = (_finite_number(value, "region.bbox") for value in bbox)
+        raise ReplayManifestInvalid(f"{field} must contain four coordinates")
+    west, south, east, north = (_finite_number(value, field) for value in bbox)
     if not -180 <= west <= 180 or not -180 <= east <= 180:
-        raise ReplayManifestInvalid("region.bbox longitudes are outside valid range")
+        raise ReplayManifestInvalid(f"{field} longitudes are outside valid range")
     if not -90 <= south <= 90 or not -90 <= north <= 90:
-        raise ReplayManifestInvalid("region.bbox latitudes are outside valid range")
+        raise ReplayManifestInvalid(f"{field} latitudes are outside valid range")
     if west >= east or south >= north:
-        raise ReplayManifestInvalid(
-            "region.bbox must have west < east and south < north"
-        )
+        raise ReplayManifestInvalid(f"{field} must have west < east and south < north")
+
+
+def _road_graph(value: object) -> RoadGraphMetadata:
+    if not isinstance(value, Mapping):
+        raise ReplayManifestInvalid("road_graph must be an object")
+    payload = _string_keyed_mapping(value, "road_graph")
+    missing = sorted(_ROAD_GRAPH_FIELDS - payload.keys())
+    if missing:
+        raise ReplayManifestInvalid(f"road_graph missing required field: {missing[0]}")
+    unsupported = sorted(payload.keys() - _ROAD_GRAPH_FIELDS)
+    if unsupported:
+        raise ReplayManifestInvalid(f"unsupported road_graph field: {unsupported[0]}")
+    bbox = payload["bbox"]
+    if (
+        not isinstance(bbox, Sequence)
+        or isinstance(bbox, (str, bytes, bytearray))
+        or len(bbox) != 4
+    ):
+        raise ReplayManifestInvalid("road_graph.bbox must contain four coordinates")
+    parsed_bbox = tuple(_finite_number(item, "road_graph.bbox") for item in bbox)
+    return RoadGraphMetadata(
+        filename=payload["filename"],  # type: ignore[arg-type]
+        retrieved_at=_strict_utc_timestamp(
+            payload["retrieved_at"],
+            "road_graph.retrieved_at",
+        ),
+        bbox=(parsed_bbox[0], parsed_bbox[1], parsed_bbox[2], parsed_bbox[3]),
+        network_type=payload["network_type"],  # type: ignore[arg-type]
+        osmnx_version=payload["osmnx_version"],  # type: ignore[arg-type]
+        graph_digest=payload["graph_digest"],  # type: ignore[arg-type]
+        edge_count=payload["edge_count"],  # type: ignore[arg-type]
+    )
 
 
 def _files(value: object) -> Mapping[str, str]:
@@ -241,3 +374,20 @@ def _is_safe_relative_path(value: str) -> bool:
         and posix_path.as_posix() == value
         and all(part not in {"", ".", ".."} for part in posix_path.parts)
     )
+
+
+def _format_timestamp(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _canonical_json(payload: object) -> bytes:
+    return (
+        json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
