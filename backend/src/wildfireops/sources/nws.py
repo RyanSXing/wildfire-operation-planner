@@ -181,10 +181,19 @@ def _coordinates(payload: Mapping[str, object]) -> tuple[float, float]:
         or len(coordinates) < 2
     ):
         raise ValueError("geometry coordinates are invalid")
+    return _coordinate_value(coordinates[0]), _coordinate_value(coordinates[1])
+
+
+def _coordinate_value(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError("geometry coordinates are invalid")
     try:
-        return float(coordinates[0]), float(coordinates[1])
-    except (TypeError, ValueError):
+        coordinate = float(value)
+    except (TypeError, ValueError, OverflowError):
         raise ValueError("geometry coordinates are invalid") from None
+    if not isfinite(coordinate):
+        raise ValueError("geometry coordinates are invalid")
+    return coordinate
 
 
 def _wind_speed(properties: Mapping[str, object]) -> float:

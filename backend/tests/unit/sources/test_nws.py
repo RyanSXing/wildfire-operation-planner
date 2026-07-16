@@ -57,6 +57,64 @@ async def test_nws_adapter_normalizes_observation_and_preserves_properties() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("coordinate_index", "invalid_coordinate"),
+    [
+        (0, True),
+        (1, False),
+        (0, "NaN"),
+        (1, "Infinity"),
+        (0, "-Infinity"),
+        (1, "1e309"),
+        (0, "-1e309"),
+        (1, 10**400),
+    ],
+)
+async def test_nws_adapter_quarantines_invalid_coordinate_numbers(
+    coordinate_index: int,
+    invalid_coordinate: Any,
+) -> None:
+    payload = json.loads((FIXTURES / "nws_observation.json").read_text())
+    payload["geometry"]["coordinates"][coordinate_index] = invalid_coordinate
+
+    async with httpx.AsyncClient(transport=json_transport(payload)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.observations == ()
+    assert len(batch.failures) == 1
+    failure = batch.failures[0]
+    assert failure.reason == (
+        "invalid NWS observation: geometry coordinates are invalid"
+    )
+    assert failure.raw_payload == payload["properties"]
+
+
+@pytest.mark.asyncio
+async def test_nws_adapter_accepts_finite_numeric_string_coordinates() -> None:
+    payload = json.loads((FIXTURES / "nws_observation.json").read_text())
+    payload["geometry"]["coordinates"] = ["-121.612", "39.805"]
+
+    async with httpx.AsyncClient(transport=json_transport(payload)) as client:
+        batch = await NwsAdapter(
+            client,
+            client.build_request("GET", REQUEST_URL),
+            USER_AGENT,
+            sleep=no_sleep,
+        ).fetch()
+
+    assert batch.failures == ()
+    observation = batch.observations[0]
+    assert isinstance(observation, WeatherObservation)
+    assert observation.longitude == -121.612
+    assert observation.latitude == 39.805
+
+
+@pytest.mark.asyncio
 async def test_nws_adapter_preserves_missing_optional_temperature() -> None:
     payload = json.loads((FIXTURES / "nws_observation.json").read_text())
     payload["properties"]["temperature"]["value"] = None
