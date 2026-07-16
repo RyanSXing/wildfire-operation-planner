@@ -60,6 +60,7 @@ class ReplayAdapter:
         return SourceBatch(
             observations=tuple(self._loader.iter_until(self._loader.manifest.end_at)),
             failures=(),
+            reference_at=self._loader.manifest.end_at,
         )
 
 

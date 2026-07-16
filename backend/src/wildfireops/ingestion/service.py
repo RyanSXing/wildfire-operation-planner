@@ -1,8 +1,8 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,7 @@ from wildfireops.sources.http import SourceUnavailable
 
 
 type SessionFactory = Callable[[], AsyncSession]
+type UtcClock = Callable[[], datetime]
 type IncidentRefresher = Callable[
     [AsyncSession, tuple[DetectionCluster, ...], float], Awaitable[None]
 ]
@@ -47,14 +48,17 @@ class IngestionService:
         *,
         observation_repository: ObservationRepository | None = None,
         incident_refresher: IncidentRefresher = refresh_incidents,
+        clock: UtcClock = lambda: datetime.now(UTC),
     ) -> None:
         self._session_factory = session_factory
         self._clustering_config = clustering_config
         self._observation_repository = observation_repository or ObservationRepository()
         self._incident_refresher = incident_refresher
+        self._clock = clock
 
     async def run_source(self, adapter: SourceAdapter) -> IngestionRun:
-        attempted_at = datetime.now(UTC)
+        attempted_at = _require_utc(self._clock(), "ingestion clock")
+        status_attempted_at = attempted_at
         try:
             batch = await adapter.fetch()
         except Exception as error:
@@ -78,16 +82,18 @@ class IngestionService:
                             "unsupported observation type: "
                             f"{type(observation).__name__}"
                         )
-                reference_at = max(
-                    (observation.observed_at for observation in batch.observations),
-                    default=attempted_at,
-                )
                 stats = await self._observation_repository.upsert_many(
                     session,
                     (*fire_observations, *weather_observations),
                 )
                 quarantined = await write_quarantine(session, batch.failures)
                 await acquire_incident_refresh_lock(session)
+                reference_at = await _resolve_operational_reference(
+                    session,
+                    explicit_reference_at=batch.reference_at,
+                    attempted_at=attempted_at,
+                )
+                status_attempted_at = reference_at
                 current_detections = await load_current_fire_detections(
                     session,
                     reference_at=reference_at,
@@ -107,7 +113,7 @@ class IngestionService:
                 await _record_source_success(
                     session,
                     source_name=adapter.source_name,
-                    attempted_at=attempted_at,
+                    attempted_at=status_attempted_at,
                     accepted=stats.inserted,
                     deduplicated=stats.deduplicated,
                     quarantined=quarantined,
@@ -121,7 +127,7 @@ class IngestionService:
                 try:
                     await self._record_processing_failure(
                         source_name=adapter.source_name,
-                        attempted_at=attempted_at,
+                        attempted_at=status_attempted_at,
                         error=error,
                     )
                 except Exception:
@@ -213,6 +219,36 @@ async def _record_source_success(
         )
     )
     await session.execute(statement)
+
+
+async def _resolve_operational_reference(
+    session: AsyncSession,
+    *,
+    explicit_reference_at: datetime | None,
+    attempted_at: datetime,
+) -> datetime:
+    if explicit_reference_at is not None:
+        return explicit_reference_at
+    prior_attempted_at, prior_success_at = (
+        await session.execute(
+            select(
+                func.max(SourceStatusModel.last_attempted_at),
+                func.max(SourceStatusModel.last_success_at),
+            )
+        )
+    ).one()
+    candidates = [attempted_at]
+    if prior_attempted_at is not None:
+        candidates.append(_require_utc(prior_attempted_at, "source status"))
+    if prior_success_at is not None:
+        candidates.append(_require_utc(prior_success_at, "source status"))
+    return max(candidates)
+
+
+def _require_utc(value: object, field: str) -> datetime:
+    if not isinstance(value, datetime) or value.utcoffset() != timedelta(0):
+        raise ValueError(f"{field} must return UTC")
+    return value
 
 
 def _sanitized_error_message(error: Exception) -> str:

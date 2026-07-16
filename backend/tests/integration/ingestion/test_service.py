@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from typing import ClassVar, cast
 from uuid import UUID
 
@@ -12,9 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from wildfireops.config import Settings
 from wildfireops.db import create_engine
-from wildfireops.domain.observations import NormalizedObservation, SourceObservation
+from wildfireops.domain.observations import (
+    NormalizedObservation,
+    SourceObservation,
+    WeatherObservation,
+)
 from wildfireops.geospatial.clustering import ClusteringConfig, DetectionCluster
 from wildfireops.ingestion.service import IngestionService
+from wildfireops.ingestion.worker import ReplayAdapter
 from wildfireops.persistence.incidents import (
     load_current_fire_detections,
     refresh_incidents,
@@ -27,6 +33,7 @@ from wildfireops.persistence.observed_models import (
     SourceStatusModel,
     WildfireIncidentModel,
 )
+from wildfireops.replay.loader import ReplayLoader
 from wildfireops.sources.base import (
     SourceBatch,
     SourceValidationFailure,
@@ -35,10 +42,13 @@ from wildfireops.sources.http import SourceUnavailable
 
 
 class _FakeAdapter:
-    source_name = "nasa_firms"
-
-    def __init__(self, batch: SourceBatch) -> None:
+    def __init__(
+        self,
+        batch: SourceBatch,
+        source_name: str = "nasa_firms",
+    ) -> None:
         self._batch = batch
+        self.source_name = source_name
 
     async def fetch(self) -> SourceBatch:
         return self._batch
@@ -129,6 +139,24 @@ def _other_record(
     )
 
 
+def _weather_record(
+    record_id: str,
+    *,
+    observed_at: datetime,
+) -> WeatherObservation:
+    return WeatherObservation(
+        source_name="nws",
+        source_record_id=record_id,
+        observed_at=observed_at,
+        longitude=-121.6,
+        latitude=39.8,
+        wind_speed_mps=4.0,
+        wind_direction_degrees=225.0,
+        temperature_celsius=28.0,
+        raw_payload={"record_id": record_id},
+    )
+
+
 def _batch() -> SourceBatch:
     record = _record()
     return SourceBatch(
@@ -149,6 +177,8 @@ def _service(
     incident_refresher: IncidentRefresher | None = None,
     observation_repository: ObservationRepository | None = None,
     session_class: type[_TrackingSession] = _TrackingSession,
+    temporal_window_seconds: float = 3_600.0,
+    clock: Callable[[], datetime] | None = None,
 ) -> IngestionService:
     assert db_session.bind is not None
     session_class.commit_calls = 0
@@ -164,11 +194,13 @@ def _service(
         kwargs["incident_refresher"] = incident_refresher
     if observation_repository is not None:
         kwargs["observation_repository"] = observation_repository
+    if clock is not None:
+        kwargs["clock"] = clock
     return IngestionService(
         session_factory,
         ClusteringConfig(
             spatial_radius_meters=1_000.0,
-            temporal_window_seconds=3_600.0,
+            temporal_window_seconds=temporal_window_seconds,
             minimum_points=1,
             algorithm_version="dbscan-v1",
         ),
@@ -203,7 +235,10 @@ async def isolated_engine() -> AsyncIterator[AsyncEngine]:
 async def test_run_source_ingests_deduplicates_quarantines_and_commits_once(
     db_session: AsyncSession,
 ) -> None:
-    service = _service(db_session)
+    service = _service(
+        db_session,
+        clock=lambda: datetime(2024, 7, 24, 18, tzinfo=UTC),
+    )
 
     result = await service.run_source(_FakeAdapter(_batch()))
 
@@ -309,7 +344,10 @@ async def test_fetch_failure_updates_source_status_and_returns_failed_run(
 async def test_repeated_ingestion_preserves_incident_identity(
     db_session: AsyncSession,
 ) -> None:
-    service = _service(db_session)
+    service = _service(
+        db_session,
+        clock=lambda: datetime(2024, 7, 24, 18, tzinfo=UTC),
+    )
     adapter = _FakeAdapter(_batch())
 
     first_run = await service.run_source(adapter)
@@ -604,7 +642,13 @@ async def test_replay_reference_excludes_expired_and_future_detections_determini
     await db_session.flush()
     current = _other_record("current", observed_at=reference_at)
     service = _service(db_session)
-    adapter = _FakeAdapter(SourceBatch(observations=(current,), failures=()))
+    adapter = _FakeAdapter(
+        SourceBatch(
+            observations=(current,),
+            failures=(),
+            reference_at=reference_at,
+        )
+    )
 
     await service.run_source(adapter)
     first_state = await _incident_state(db_session)
@@ -653,6 +697,144 @@ async def test_empty_batch_uses_attempt_time_and_deactivates_expired_incident(
     )
 
     assert await _incident_state(db_session) == {incident_id: ("inactive", ())}
+
+
+@pytest.mark.asyncio
+async def test_replay_manifest_end_expires_last_record_and_repeats_deterministically(
+    db_session: AsyncSession,
+) -> None:
+    adapter = ReplayAdapter(ReplayLoader(Path("tests/fixtures/replay-small")))
+    service = _service(
+        db_session,
+        temporal_window_seconds=300.0,
+        clock=lambda: datetime(2026, 7, 16, tzinfo=UTC),
+    )
+
+    first_run = await service.run_source(adapter)
+    first_state = await _incident_state(db_session)
+    second_run = await service.run_source(adapter)
+    second_state = await _incident_state(db_session)
+
+    assert first_run.accepted == 2
+    assert second_run.deduplicated == 2
+    assert first_state == second_state == {}
+    assert await db_session.scalar(
+        select(SourceStatusModel.last_attempted_at).where(
+            SourceStatusModel.source_name == "replay:replay-small-v1"
+        )
+    ) == datetime(2024, 7, 24, 18, 30, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_explicit_replay_reference_ignores_later_persisted_state(
+    db_session: AsyncSession,
+) -> None:
+    reference_at = datetime(2024, 7, 24, 18, 30, tzinfo=UTC)
+    future = _other_record(
+        "future",
+        observed_at=reference_at + timedelta(minutes=2),
+    )
+    await ObservationRepository().upsert_many(db_session, (future,))
+    later_operational_time = reference_at + timedelta(hours=1)
+    db_session.add(
+        SourceStatusModel(
+            source_name="later-live-source",
+            outcome="success",
+            last_attempted_at=later_operational_time,
+            last_success_at=later_operational_time,
+            accepted_count=1,
+            deduplicated_count=0,
+            quarantined_count=0,
+            error_message=None,
+        )
+    )
+    await db_session.flush()
+    replay_record = _other_record(
+        "replay-current",
+        observed_at=reference_at - timedelta(minutes=2),
+    )
+    batch = SourceBatch(
+        observations=(replay_record,),
+        failures=(),
+        reference_at=reference_at,
+    )
+
+    await _service(
+        db_session,
+        temporal_window_seconds=300.0,
+        clock=lambda: datetime(2026, 7, 16, tzinfo=UTC),
+    ).run_source(_FakeAdapter(batch, source_name="replay:test"))
+
+    active_memberships = [
+        members
+        for status, members in (await _incident_state(db_session)).values()
+        if status == "active"
+    ]
+    assert active_memberships == [("nasa_firms:replay-current",)]
+
+
+@pytest.mark.asyncio
+async def test_lagging_weather_and_regressed_clock_do_not_rewind_live_reference(
+    db_session: AsyncSession,
+) -> None:
+    first_reference = datetime(2024, 7, 24, 18, 30, tzinfo=UTC)
+    clock_values = iter((first_reference, first_reference - timedelta(minutes=10)))
+    service = _service(
+        db_session,
+        temporal_window_seconds=600.0,
+        clock=lambda: next(clock_values),
+    )
+    fire = _other_record(
+        "newer-fire",
+        observed_at=first_reference - timedelta(minutes=5),
+    )
+    weather = _weather_record(
+        "lagging-weather",
+        observed_at=first_reference - timedelta(hours=2),
+    )
+
+    await service.run_source(
+        _FakeAdapter(SourceBatch(observations=(fire,), failures=()))
+    )
+    first_state = await _incident_state(db_session)
+    await service.run_source(
+        _FakeAdapter(
+            SourceBatch(observations=(weather,), failures=()),
+            source_name="nws",
+        )
+    )
+    second_state = await _incident_state(db_session)
+
+    assert first_state == second_state
+    assert [
+        members for status, members in second_state.values() if status == "active"
+    ] == [("nasa_firms:newer-fire",)]
+    assert (
+        await db_session.scalar(
+            select(SourceStatusModel.last_attempted_at).where(
+                SourceStatusModel.source_name == "nws"
+            )
+        )
+        == first_reference
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_now",
+    (
+        datetime(2024, 7, 24, 18, 30),
+        datetime(2024, 7, 24, 14, 30, tzinfo=timezone(-timedelta(hours=4))),
+    ),
+)
+async def test_ingestion_clock_requires_exact_utc(
+    db_session: AsyncSession,
+    invalid_now: datetime,
+) -> None:
+    service = _service(db_session, clock=lambda: invalid_now)
+
+    with pytest.raises(ValueError, match="ingestion clock must return UTC"):
+        await service.run_source(_FakeAdapter(SourceBatch((), ())))
 
 
 async def _incident_state(
@@ -1018,11 +1200,13 @@ async def test_overlapping_ingestion_recomputes_after_advisory_lock(
         session_factory,
         config,
         incident_refresher=gated_refresh,
+        clock=lambda: datetime(2024, 7, 24, 18, tzinfo=UTC),
     )
     second_service = IngestionService(
         session_factory,
         config,
         incident_refresher=gated_refresh,
+        clock=lambda: datetime(2024, 7, 24, 17, tzinfo=UTC),
     )
     observed_at = datetime(2024, 7, 24, 18, tzinfo=UTC)
     first_task = asyncio.create_task(
@@ -1080,6 +1264,15 @@ async def test_overlapping_ingestion_recomputes_after_advisory_lock(
     ]
     assert active_memberships == [("nasa_firms:alpha", "nasa_firms:bravo")]
     assert len(state) == 1
+    async with session_factory() as session:
+        assert (
+            await session.scalar(
+                select(SourceStatusModel.last_attempted_at).where(
+                    SourceStatusModel.source_name == "nasa_firms"
+                )
+            )
+            == observed_at
+        )
 
 
 async def _wait_for_advisory_waiter(engine: AsyncEngine) -> None:

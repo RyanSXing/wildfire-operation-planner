@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -264,4 +265,12 @@ async def test_replay_is_offline_and_does_not_build_live_adapters(
         "nasa_firms:detection-1812",
         "nasa_firms:detection-1818",
     ]
+    assert service.batch.reference_at == datetime(
+        2024,
+        7,
+        24,
+        18,
+        30,
+        tzinfo=UTC,
+    )
     assert len(logger.events) == 1

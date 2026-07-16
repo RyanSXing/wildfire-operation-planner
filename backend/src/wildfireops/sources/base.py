@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Protocol
 
 from wildfireops.domain.observations import (
@@ -22,6 +23,14 @@ class SourceValidationFailure:
 class SourceBatch:
     observations: tuple[SourceObservation, ...]
     failures: tuple[SourceValidationFailure, ...]
+    reference_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.reference_at is not None and (
+            not isinstance(self.reference_at, datetime)
+            or self.reference_at.utcoffset() != timedelta(0)
+        ):
+            raise ValueError("reference_at must be UTC")
 
 
 class SourceAdapter(Protocol):
