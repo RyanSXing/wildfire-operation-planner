@@ -1,0 +1,18 @@
+{
+  "package_id": "replay-small-v1",
+  "region": {
+    "bbox": [
+      -122.4,
+      39.2,
+      -120.3,
+      41.0
+    ]
+  },
+  "start_at": "2024-07-24T18:00:00Z",
+  "end_at": "2024-07-24T18:30:00Z",
+  "schema_version": 1,
+  "algorithm_config_version": "test-config-v1",
+  "files": {
+    "fire_detections.jsonl": "4d7b27e9a82e48b0b62965ba272141ec9e6ff697e5a16ebf9f91fa694cde4ce9"
+  }
+}
