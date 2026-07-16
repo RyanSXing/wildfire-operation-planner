@@ -1,0 +1,10 @@
+.superpowers/
+.env
+.venv/
+node_modules/
+dist/
+build/
+coverage/
+htmlcov/
+*.pyc
+__pycache__/
