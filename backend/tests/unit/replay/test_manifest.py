@@ -1,6 +1,8 @@
 import json
 import os
+from dataclasses import replace
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -286,12 +288,75 @@ def test_atomic_write_failure_preserves_a_raced_unique_stage(
         ReplayManifestInvalid,
         match="simulated manifest replace race",
     ):
-        manifest.write_atomic(output)
+        manifest.write_atomic(
+            output,
+            expected_digest=sha256(output.read_bytes()).hexdigest(),
+        )
 
     stages = list(tmp_path.glob(".manifest.json.tmp-*"))
     assert output.read_bytes() == b"original manifest"
     assert len(stages) == 1
     assert stages[0].read_bytes() == unrelated
+
+
+def test_atomic_write_requires_the_digest_of_an_existing_manifest(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "manifest.json"
+    original = FIXTURE_MANIFEST.read_bytes()
+    output.write_bytes(original)
+    updated = replace(ReplayManifest.load(output), package_id="updated")
+
+    with pytest.raises(
+        ReplayManifestInvalid,
+        match=r"^expected_digest is required to replace manifest\.json$",
+    ):
+        updated.write_atomic(output)
+
+    assert output.read_bytes() == original
+
+
+def test_atomic_write_rejects_a_stale_manifest_digest(tmp_path: Path) -> None:
+    output = tmp_path / "manifest.json"
+    original = FIXTURE_MANIFEST.read_bytes()
+    output.write_bytes(original)
+    updated = replace(ReplayManifest.load(output), package_id="updated")
+
+    with pytest.raises(
+        ReplayManifestInvalid,
+        match=r"^manifest\.json changed before write$",
+    ):
+        updated.write_atomic(output, expected_digest="0" * 64)
+
+    assert output.read_bytes() == original
+
+
+def test_atomic_write_replaces_the_exact_manifest_previously_read(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "manifest.json"
+    original = FIXTURE_MANIFEST.read_bytes()
+    output.write_bytes(original)
+    updated = replace(ReplayManifest.load(output), package_id="updated")
+
+    updated.write_atomic(output, expected_digest=sha256(original).hexdigest())
+
+    assert ReplayManifest.load(output) == updated
+
+
+def test_atomic_write_rejects_an_expected_digest_for_a_missing_manifest(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "manifest.json"
+    manifest = ReplayManifest.load(FIXTURE_MANIFEST)
+
+    with pytest.raises(
+        ReplayManifestInvalid,
+        match=r"^cannot replace missing manifest\.json$",
+    ):
+        manifest.write_atomic(output, expected_digest="0" * 64)
+
+    assert not output.exists()
 
 
 def test_road_graph_metadata_digest_must_match_the_file_map(tmp_path: Path) -> None:

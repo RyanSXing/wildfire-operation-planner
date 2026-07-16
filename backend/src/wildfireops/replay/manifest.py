@@ -7,6 +7,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+from hashlib import sha256
 from math import isfinite
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
@@ -187,13 +188,32 @@ class ReplayManifest:
         files[metadata.filename] = metadata.graph_digest
         return replace(self, files=files, road_graph=metadata)
 
-    def write_atomic(self, path: Path) -> None:
+    def write_atomic(
+        self,
+        path: Path,
+        *,
+        expected_digest: str | None = None,
+    ) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = f".{path.name}.tmp-{uuid4().hex}"
         content = _canonical_json(self.to_payload())
         try:
             with replay_package_writer(path.parent) as directory:
+                try:
+                    current = _read_manifest(path, directory=directory)
+                except FileNotFoundError:
+                    if expected_digest is not None:
+                        raise ReplayManifestInvalid(
+                            f"cannot replace missing {path.name}"
+                        ) from None
+                else:
+                    if expected_digest is None:
+                        raise ReplayManifestInvalid(
+                            f"expected_digest is required to replace {path.name}"
+                        )
+                    if sha256(current).hexdigest() != expected_digest:
+                        raise ReplayManifestInvalid(f"{path.name} changed before write")
                 flags = (
                     os.O_WRONLY
                     | os.O_CREAT
@@ -256,9 +276,17 @@ def replay_package_writer(package: Path) -> Iterator[int]:
         os.close(directory)
 
 
-def _read_manifest(path: Path) -> bytes:
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
+def _read_manifest(path: Path, *, directory: int | None = None) -> bytes:
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    if directory is None:
+        descriptor = os.open(path, flags)
+    else:
+        descriptor = os.open(path.name, flags, dir_fd=directory)
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise ReplayManifestInvalid(f"{path.name} must be a regular file")

@@ -421,10 +421,13 @@ def _concurrent_manifest_writer(
         result.write_text("error:timed out waiting for commit", encoding="utf-8")
         return
     try:
-        manifest = ReplayManifest.load(package / "manifest.json")
+        manifest_path = package / "manifest.json"
+        original = manifest_path.read_bytes()
+        manifest = ReplayManifest.load(manifest_path)
         write_started.touch()
         replace(manifest, package_id="concurrent-writer").write_atomic(
-            package / "manifest.json"
+            manifest_path,
+            expected_digest=sha256(original).hexdigest(),
         )
     except Exception as error:
         result.write_text(f"error:{error}", encoding="utf-8")
@@ -649,11 +652,15 @@ def test_manifest_writer_cannot_enter_between_base_check_and_commit(
             writer.join(timeout=5.0)
 
     assert writer.exitcode == 0
-    assert writer_result.read_text(encoding="utf-8") == "ok"
-    assert writer_completed_during_commit is False
-    assert ReplayManifest.load(package / "manifest.json").package_id == (
-        "concurrent-writer"
+    assert writer_result.read_text(encoding="utf-8") == (
+        "error:manifest.json changed before write"
     )
+    assert writer_completed_during_commit is False
+    manifest = ReplayManifest.load(package / "manifest.json")
+    output = package / "roads.graphml.gz"
+    assert manifest.package_id == "replay-small-v1"
+    assert manifest.road_graph is not None
+    assert manifest.road_graph.graph_digest == sha256(output.read_bytes()).hexdigest()
 
 
 def test_graph_path_replacement_at_manifest_commit_restores_the_base_manifest(

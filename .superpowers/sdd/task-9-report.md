@@ -559,3 +559,81 @@ The deletion pass removed 23 net production lines from the first green version. 
 settled production delta is +419/-253 in `road_graph.py`, +66/-9 in `manifest.py`,
 -1 in the SQLAlchemy model, and +35 lines for the required migration. Automated graph
 tests still inject recorded graphs; no test invoked live OSM retrieval.
+
+## Stale manifest writer CAS follow-up
+
+Final review found one remaining cooperative-writer race: a process could read the
+legacy manifest before road-graph publication, wait on the package lock, and then
+replace the newly published graph manifest with its stale update. The shared lock
+serialized replacement but did not prove that the writer's source bytes were still
+current.
+
+`ReplayManifest.write_atomic()` now accepts an explicit `expected_digest`. First
+creation remains valid without a digest. Replacing an existing manifest requires the
+SHA-256 of the exact bytes previously read; a missing target with an expected digest,
+an existing target without one, or a changed digest is rejected before a stage file is
+created. The current target is reopened relative to the pinned package directory and
+validated as a regular, nonsymlink file while the shared package lock is held. Unique
+`O_CREAT|O_EXCL` staging and the no-cleanup-on-failure ownership rule are unchanged.
+The road-graph builder retains its private exact-base commit while already holding the
+same lock, so it does not call the public locking writer or acquire the lock twice.
+
+### CAS RED and GREEN evidence
+
+Focused RED command:
+
+```bash
+cd backend
+.venv/bin/pytest \
+  tests/unit/geospatial/test_road_graph.py::test_manifest_writer_cannot_enter_between_base_check_and_commit \
+  -q
+```
+
+```text
+1 failed in 2.16s
+ReplayManifest.write_atomic() got an unexpected keyword argument 'expected_digest'
+```
+
+After implementing the locked exact-byte comparison, the same command produced:
+
+```text
+1 passed in 2.38s
+```
+
+The regression now proves that the stale process waits until graph publication
+finishes, receives `manifest.json changed before write`, and leaves the original
+package ID, road-graph metadata, and exact graph digest intact. Direct manifest tests
+also cover token-free creation, rejection without a token, stale-token rejection,
+matching-token replacement, and expected-token rejection for a missing target.
+
+### CAS verification
+
+Manifest and road graph:
+
+```text
+71 passed in 3.80s
+```
+
+Replay unit regressions:
+
+```text
+96 passed in 0.45s
+```
+
+Complete Task 9 focused group against PostgreSQL:
+
+```text
+40 passed in 6.56s
+```
+
+The initial sandboxed Task 9 run passed all 29 unit tests but could not open the
+database socket. The database-enabled rerun above passed the full group.
+
+Formatting, lint, typing, and patch integrity:
+
+```text
+3 files already formatted
+All checks passed!
+Success: no issues found in 55 source files
+git diff --check: clean
+```
