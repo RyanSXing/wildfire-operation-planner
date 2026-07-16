@@ -177,7 +177,12 @@ def _region(value: object) -> tuple[float, float, float, float]:
 def _finite_number(value: object, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ReplayManifestInvalid(f"{field} coordinates must be finite numbers")
-    parsed = float(value)
+    try:
+        parsed = float(value)
+    except OverflowError:
+        raise ReplayManifestInvalid(
+            f"{field} coordinates must be finite numbers"
+        ) from None
     if not isfinite(parsed):
         raise ReplayManifestInvalid(f"{field} coordinates must be finite numbers")
     return parsed

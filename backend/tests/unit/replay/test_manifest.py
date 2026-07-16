@@ -152,3 +152,16 @@ def test_manifest_requires_valid_bbox(tmp_path: Path, bbox: list[object]) -> Non
 
     with pytest.raises(ReplayManifestInvalid, match="region.bbox"):
         ReplayManifest.load(_write_manifest(tmp_path, payload))
+
+
+def test_manifest_rejects_an_oversized_integer_bbox_coordinate(
+    tmp_path: Path,
+) -> None:
+    payload = _manifest_payload()
+    payload["region"] = {"bbox": [10**400, 39.2, -120.3, 41.0]}
+
+    with pytest.raises(
+        ReplayManifestInvalid,
+        match=r"^region\.bbox coordinates must be finite numbers$",
+    ):
+        ReplayManifest.load(_write_manifest(tmp_path, payload))

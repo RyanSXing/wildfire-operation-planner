@@ -180,6 +180,21 @@ def test_loader_wraps_a_missing_manifest_as_package_corruption(tmp_path: Path) -
         ReplayLoader(package)
 
 
+def test_loader_wraps_an_oversized_manifest_bbox_as_package_corruption(
+    tmp_path: Path,
+) -> None:
+    package = _copy_package(tmp_path)
+    manifest = _manifest(package)
+    manifest["region"] = {"bbox": [10**400, 39.2, -120.3, 41.0]}
+    _write_manifest(package, manifest)
+
+    with pytest.raises(
+        ReplayPackageCorrupt,
+        match=r"region\.bbox coordinates must be finite numbers",
+    ):
+        ReplayLoader(package)
+
+
 def test_loader_rejects_an_empty_referenced_file(tmp_path: Path) -> None:
     package = _copy_package(tmp_path)
     detections = package / "fire_detections.jsonl"

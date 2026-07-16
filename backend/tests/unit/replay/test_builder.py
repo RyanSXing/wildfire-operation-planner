@@ -183,6 +183,25 @@ def test_builder_canonicalizes_staged_replay_deterministically(
     ] == ["nws:weather", "nasa_firms:a-fire", "nasa_firms:z-fire"]
 
 
+def test_builder_wraps_an_oversized_programmatic_bbox(
+    tmp_path: Path,
+) -> None:
+    source_dir = _staging_directory(tmp_path)
+
+    with pytest.raises(
+        ReplayBuildError,
+        match=r"^region\.bbox coordinates must be finite numbers$",
+    ):
+        build_package(
+            source_dir=source_dir,
+            package_id="park-fire-test-v1",
+            bbox=(10**400, 39.2, -120.3, 41.0),
+            start_at=datetime(2024, 7, 24, 18, tzinfo=UTC),
+            end_at=datetime(2024, 7, 24, 18, 30, tzinfo=UTC),
+            output=tmp_path / "replay",
+        )
+
+
 def test_builder_cli_help_documents_required_offline_source_dir(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
