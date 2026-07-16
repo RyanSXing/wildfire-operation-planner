@@ -66,7 +66,9 @@ class ReplayManifest:
                 object_pairs_hook=_unique_object,
                 parse_constant=_reject_json_constant,
             )
-        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        except ReplayManifestInvalid:
+            raise
+        except ValueError as error:
             raise ReplayManifestInvalid(f"{path.name} is not valid JSON") from error
         except OSError as error:
             raise ReplayManifestInvalid(f"cannot read {path.name}: {error}") from error

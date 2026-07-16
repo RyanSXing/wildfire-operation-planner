@@ -165,3 +165,21 @@ def test_manifest_rejects_an_oversized_integer_bbox_coordinate(
         match=r"^region\.bbox coordinates must be finite numbers$",
     ):
         ReplayManifest.load(_write_manifest(tmp_path, payload))
+
+
+def test_manifest_wraps_an_oversized_integer_token_as_invalid_json(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "manifest.json"
+    raw_manifest = FIXTURE_MANIFEST.read_text(encoding="utf-8").replace(
+        "-122.4",
+        "9" * 5000,
+        1,
+    )
+    path.write_text(raw_manifest, encoding="utf-8")
+
+    with pytest.raises(
+        ReplayManifestInvalid,
+        match=r"^manifest\.json is not valid JSON$",
+    ):
+        ReplayManifest.load(path)

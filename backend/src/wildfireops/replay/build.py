@@ -217,10 +217,10 @@ def _load_metadata(content: bytes) -> _BuildMetadata:
             object_pairs_hook=_unique_json_object,
             parse_constant=_reject_json_constant,
         )
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise ReplayBuildError("metadata.json is not valid JSON") from error
     except _MetadataInvalid as error:
         raise ReplayBuildError(f"invalid metadata.json: {error}") from None
+    except ValueError as error:
+        raise ReplayBuildError("metadata.json is not valid JSON") from error
     if not isinstance(raw_payload, Mapping):
         raise ReplayBuildError("metadata.json must be an object")
     payload = _string_object(raw_payload, "metadata.json")

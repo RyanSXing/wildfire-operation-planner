@@ -195,6 +195,25 @@ def test_loader_wraps_an_oversized_manifest_bbox_as_package_corruption(
         ReplayLoader(package)
 
 
+def test_loader_wraps_an_oversized_manifest_integer_token_as_package_corruption(
+    tmp_path: Path,
+) -> None:
+    package = _copy_package(tmp_path)
+    manifest_path = package / "manifest.json"
+    raw_manifest = manifest_path.read_text(encoding="utf-8").replace(
+        "-122.4",
+        "9" * 5000,
+        1,
+    )
+    manifest_path.write_text(raw_manifest, encoding="utf-8")
+
+    with pytest.raises(
+        ReplayPackageCorrupt,
+        match=r"^invalid manifest: manifest\.json is not valid JSON$",
+    ):
+        ReplayLoader(package)
+
+
 def test_loader_rejects_an_empty_referenced_file(tmp_path: Path) -> None:
     package = _copy_package(tmp_path)
     detections = package / "fire_detections.jsonl"

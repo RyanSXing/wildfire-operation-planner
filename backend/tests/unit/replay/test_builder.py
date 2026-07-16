@@ -202,6 +202,25 @@ def test_builder_wraps_an_oversized_programmatic_bbox(
         )
 
 
+def test_builder_wraps_an_oversized_metadata_integer_token(
+    tmp_path: Path,
+) -> None:
+    source_dir = _staging_directory(tmp_path)
+    metadata = (
+        b'{"algorithm_config_version":"test-config-v1",'
+        b'"static_data_versions":{"oversized":'
+        + b"9" * 5000
+        + b'},"source_citations":{"nasa_firms":"recorded"}}'
+    )
+    (source_dir / "metadata.json").write_bytes(metadata)
+
+    with pytest.raises(
+        ReplayBuildError,
+        match=r"^metadata\.json is not valid JSON$",
+    ):
+        _build(source_dir, tmp_path / "replay")
+
+
 def test_builder_cli_help_documents_required_offline_source_dir(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
