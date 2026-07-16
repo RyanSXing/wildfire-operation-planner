@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
@@ -26,6 +27,11 @@ class IncidentSnapshotModel(Base):
             "incident_id",
             "snapshot_version",
             name="uq_incident_snapshots_incident_version",
+        ),
+        UniqueConstraint(
+            "id",
+            "incident_id",
+            name="uq_incident_snapshots_id_incident",
         ),
     )
 
@@ -71,6 +77,13 @@ class IncidentSnapshotModel(Base):
 
 class ScenarioModel(Base):
     __tablename__ = "scenarios"
+    __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "incident_id",
+            name="uq_scenarios_id_incident",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
@@ -104,6 +117,18 @@ class ScenarioVersionModel(Base):
             "version",
             name="uq_scenario_versions_scenario_version",
         ),
+        ForeignKeyConstraint(
+            ["scenario_id", "incident_id"],
+            ["scenarios.id", "scenarios.incident_id"],
+            name="fk_scenario_versions_scenario_incident",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["incident_snapshot_id", "incident_id"],
+            ["incident_snapshots.id", "incident_snapshots.incident_id"],
+            name="fk_scenario_versions_snapshot_incident",
+            ondelete="RESTRICT",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -113,13 +138,15 @@ class ScenarioVersionModel(Base):
     )
     scenario_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
-        ForeignKey("scenarios.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    incident_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
         nullable=False,
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     incident_snapshot_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
-        ForeignKey("incident_snapshots.id", ondelete="RESTRICT"),
         nullable=False,
     )
     graph_version: Mapped[str | None] = mapped_column(String(255), nullable=True)

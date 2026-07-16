@@ -361,6 +361,11 @@ def upgrade() -> None:
             "snapshot_version",
             name="uq_incident_snapshots_incident_version",
         ),
+        sa.UniqueConstraint(
+            "id",
+            "incident_id",
+            name="uq_incident_snapshots_id_incident",
+        ),
     )
 
     op.create_table(
@@ -387,12 +392,18 @@ def upgrade() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "id",
+            "incident_id",
+            name="uq_scenarios_id_incident",
+        ),
     )
 
     op.create_table(
         "scenario_versions",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("scenario_id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column("incident_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("version", sa.Integer(), nullable=False),
         sa.Column(
             "incident_snapshot_id",
@@ -408,13 +419,15 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
-            ["incident_snapshot_id"],
-            ["incident_snapshots.id"],
+            ["incident_snapshot_id", "incident_id"],
+            ["incident_snapshots.id", "incident_snapshots.incident_id"],
+            name="fk_scenario_versions_snapshot_incident",
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["scenario_id"],
-            ["scenarios.id"],
+            ["scenario_id", "incident_id"],
+            ["scenarios.id", "scenarios.incident_id"],
+            name="fk_scenario_versions_scenario_incident",
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id"),

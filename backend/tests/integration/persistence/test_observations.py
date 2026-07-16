@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import func, select
@@ -86,3 +87,33 @@ def test_from_domain_uses_explicit_type_and_materializes_json() -> None:
     assert type(raw_payload) is dict
     assert isinstance(raw_payload, dict)
     assert type(raw_payload["nested"]) is list
+
+
+@pytest.mark.asyncio
+async def test_upsert_many_leaves_transaction_ownership_to_caller(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = NormalizedObservation(
+        source_name="nasa_firms",
+        source_record_id="viirs-transaction-guard",
+        observed_at=datetime(2024, 7, 24, 18, tzinfo=UTC),
+        longitude=-121.6,
+        latitude=39.8,
+        confidence=0.9,
+        intensity=18.4,
+        raw_payload={"satellite": "NOAA-20"},
+    )
+    commit_spy = AsyncMock(side_effect=AssertionError("repository must not commit"))
+    rollback_spy = AsyncMock(
+        side_effect=AssertionError("repository must not roll back")
+    )
+    monkeypatch.setattr(db_session, "commit", commit_spy)
+    monkeypatch.setattr(db_session, "rollback", rollback_spy)
+
+    result = await ObservationRepository().upsert_many(db_session, [record])
+
+    assert result == IngestStats(inserted=1, deduplicated=0)
+    assert db_session.in_transaction()
+    commit_spy.assert_not_awaited()
+    rollback_spy.assert_not_awaited()
