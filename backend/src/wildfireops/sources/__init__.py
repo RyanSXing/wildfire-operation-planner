@@ -1,0 +1,1 @@
+"""External observation source adapters."""
