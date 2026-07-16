@@ -8,4 +8,11 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "WildfireOps" })).toBeInTheDocument();
     expect(screen.getByText(/portfolio simulation/i)).toBeInTheDocument();
   });
+
+  it("prohibits emergency or life-safety use", () => {
+    render(<App />);
+    expect(
+      screen.getByText(/do not use for emergency or life-safety decisions\./i),
+    ).toBeInTheDocument();
+  });
 });

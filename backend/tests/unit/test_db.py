@@ -17,6 +17,16 @@ async def test_create_engine_uses_settings_database_url() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_engine_enables_pool_pre_ping() -> None:
+    engine = create_engine(Settings())
+
+    try:
+        assert engine.sync_engine.pool._pre_ping is True
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_create_session_factory_is_bound_to_engine() -> None:
     engine = create_engine(Settings())
 
