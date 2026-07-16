@@ -1,4 +1,6 @@
 import json
+import multiprocessing
+import time
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -340,6 +342,122 @@ def _raw_osm_graph() -> nx.MultiDiGraph:
     return graph
 
 
+def _build_test_graph(output: Path) -> Path:
+    return build_road_graph(
+        bbox=(-122.4, 39.2, -120.3, 41.0),
+        output=output,
+        retriever=lambda bbox, network_type: RetrievedRoadGraph(
+            _raw_osm_graph(),
+            "2.1.0-test",
+        ),
+        clock=lambda: datetime(2024, 7, 25, 12, tzinfo=UTC),
+    )
+
+
+def _canonical_json(payload: object) -> str:
+    return (
+        json.dumps(
+            payload,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+
+def _wait_for_path(path: Path, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            return True
+        time.sleep(0.01)
+    return path.exists()
+
+
+def _concurrent_build_worker(
+    package: Path,
+    label: str,
+    entered: Path | None,
+    retrieved: Path,
+    release: Path | None,
+    result: Path,
+) -> None:
+    if entered is not None:
+        entered.touch()
+
+    def retrieve(
+        bbox: tuple[float, float, float, float],
+        network_type: str,
+    ) -> RetrievedRoadGraph:
+        retrieved.touch()
+        if release is not None and not _wait_for_path(release, timeout=10.0):
+            raise RuntimeError("timed out waiting to release retrieval")
+        graph = _raw_osm_graph()
+        graph.edges[100, 200, 0]["length"] = 1_000.0 if label == "first" else 2_000.0
+        return RetrievedRoadGraph(graph, f"2.1.0-{label}")
+
+    try:
+        build_road_graph(
+            bbox=(-122.4, 39.2, -120.3, 41.0),
+            output=package / "roads.graphml.gz",
+            retriever=retrieve,
+            clock=lambda: datetime(2024, 7, 25, 12, tzinfo=UTC),
+        )
+    except RoadGraphBuildError as error:
+        result.write_text(f"error:{error}", encoding="utf-8")
+    else:
+        result.write_text("ok", encoding="utf-8")
+
+
+def _recover_without_retrieval(output: Path) -> ReplayManifest:
+    retrieved = False
+
+    def retrieve(
+        bbox: tuple[float, float, float, float],
+        network_type: str,
+    ) -> RetrievedRoadGraph:
+        nonlocal retrieved
+        retrieved = True
+        return RetrievedRoadGraph(_raw_osm_graph(), "2.1.0-test")
+
+    assert (
+        build_road_graph(
+            bbox=(-122.4, 39.2, -120.3, 41.0),
+            output=output,
+            retriever=retrieve,
+            clock=lambda: datetime(2024, 7, 25, 12, tzinfo=UTC),
+        )
+        == output
+    )
+    assert retrieved is False
+    return ReplayManifest.load(output.parent / "manifest.json")
+
+
+def _interrupt_after_graph_claim(
+    package: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, bytes]:
+    manifest_path = package / "manifest.json"
+    copyfile(Path("tests/fixtures/replay-small/manifest.json"), manifest_path)
+    manifest_before = manifest_path.read_bytes()
+    output = package / "roads.graphml.gz"
+    from wildfireops.geospatial import road_graph
+
+    def interrupt_manifest_replace(source: Path, destination: Path) -> None:
+        if destination == manifest_path:
+            raise KeyboardInterrupt
+        source.replace(destination)
+
+    monkeypatch.setattr(road_graph, "_replace_file", interrupt_manifest_replace)
+    with pytest.raises(KeyboardInterrupt):
+        _build_test_graph(output)
+    monkeypatch.undo()
+    assert output.exists()
+    assert manifest_path.read_bytes() == manifest_before
+    return output, manifest_before
+
+
 def test_build_cli_records_exact_graph_provenance_without_live_download(
     tmp_path: Path,
 ) -> None:
@@ -399,6 +517,67 @@ def test_build_cli_records_exact_graph_provenance_without_live_download(
     assert len(roads.edge_ids) == 1
     assert roads.graph_version == manifest.road_graph.graph_version
     assert ReplayLoader(package).manifest.road_graph == manifest.road_graph
+
+
+def test_concurrent_builds_are_serialized_across_processes(tmp_path: Path) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    copyfile(
+        Path("tests/fixtures/replay-small/manifest.json"), package / "manifest.json"
+    )
+    first_retrieved = tmp_path / "first-retrieved"
+    first_result = tmp_path / "first-result"
+    second_entered = tmp_path / "second-entered"
+    second_retrieved = tmp_path / "second-retrieved"
+    second_result = tmp_path / "second-result"
+    release = tmp_path / "release"
+    context = multiprocessing.get_context("fork")
+    first = context.Process(
+        target=_concurrent_build_worker,
+        args=(
+            package,
+            "first",
+            None,
+            first_retrieved,
+            release,
+            first_result,
+        ),
+    )
+    second = context.Process(
+        target=_concurrent_build_worker,
+        args=(
+            package,
+            "second",
+            second_entered,
+            second_retrieved,
+            None,
+            second_result,
+        ),
+    )
+
+    first.start()
+    assert _wait_for_path(first_retrieved)
+    second.start()
+    try:
+        assert _wait_for_path(second_entered)
+        second_retrieved_before_release = _wait_for_path(
+            second_retrieved,
+            timeout=1.0,
+        )
+    finally:
+        release.touch()
+        first.join(timeout=10.0)
+        second.join(timeout=10.0)
+
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+    assert second_retrieved_before_release is False
+    assert first_result.read_text(encoding="utf-8") == "ok"
+    assert second_result.read_text(encoding="utf-8").startswith("error:")
+    output = package / "roads.graphml.gz"
+    manifest = ReplayManifest.load(package / "manifest.json")
+    assert manifest.road_graph is not None
+    assert manifest.road_graph.graph_digest == sha256(output.read_bytes()).hexdigest()
 
 
 @pytest.mark.parametrize("case", ["missing_manifest", "bbox_mismatch"])
@@ -490,15 +669,133 @@ def test_manifest_publish_failure_rolls_back_the_new_graph(
         RoadGraphBuildError,
         match="simulated manifest publish failure",
     ):
+        _build_test_graph(output)
+
+    assert not output.exists()
+    assert manifest_path.read_bytes() == manifest_before
+
+
+def test_interrupted_publication_recovers_without_retrieval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    output, _ = _interrupt_after_graph_claim(package, monkeypatch)
+    unrelated_temporary = package / ".manifest.json.tmp"
+    unrelated_temporary.write_bytes(b"user-owned temporary")
+
+    manifest = _recover_without_retrieval(output)
+
+    assert unrelated_temporary.read_bytes() == b"user-owned temporary"
+    assert manifest.road_graph is not None
+    assert manifest.road_graph.graph_digest == sha256(output.read_bytes()).hexdigest()
+
+
+def test_recovery_rejects_a_journal_that_changes_the_base_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    output, manifest_before = _interrupt_after_graph_claim(package, monkeypatch)
+    from wildfireops.geospatial import road_graph
+
+    journal_path = package / road_graph._BUILD_JOURNAL_FILENAME
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    staged_manifest = json.loads(journal["manifest"])
+    staged_manifest["package_id"] = "tampered-package"
+    journal["manifest"] = _canonical_json(staged_manifest)
+    journal_path.write_text(
+        _canonical_json(journal),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RoadGraphBuildError, match="journal manifest"):
+        _recover_without_retrieval(output)
+
+    assert (package / "manifest.json").read_bytes() == manifest_before
+    assert output.exists()
+
+
+def test_recovery_preserves_a_base_manifest_changed_after_graph_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    output, _ = _interrupt_after_graph_claim(package, monkeypatch)
+    manifest_path = package / "manifest.json"
+    changed_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    changed_manifest["files"][output.name] = "f" * 64
+    manifest_path.write_text(json.dumps(changed_manifest), encoding="utf-8")
+    changed_bytes = manifest_path.read_bytes()
+
+    with pytest.raises(RoadGraphBuildError, match="base manifest"):
+        _recover_without_retrieval(output)
+
+    assert manifest_path.read_bytes() == changed_bytes
+    assert output.exists()
+
+
+def test_graph_directory_fsync_failure_keeps_recovery_journal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    manifest_path = package / "manifest.json"
+    copyfile(Path("tests/fixtures/replay-small/manifest.json"), manifest_path)
+    output = package / "roads.graphml.gz"
+    from wildfireops.geospatial import road_graph
+
+    original_fsync = road_graph._fsync_directory
+    calls = 0
+
+    def fail_graph_fsync(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated graph directory fsync failure")
+        original_fsync(path)
+
+    monkeypatch.setattr(road_graph, "_fsync_directory", fail_graph_fsync)
+
+    with pytest.raises(
+        RoadGraphBuildError,
+        match="simulated graph directory fsync failure",
+    ):
+        _build_test_graph(output)
+
+    monkeypatch.undo()
+    manifest = _recover_without_retrieval(output)
+    assert manifest.road_graph is not None
+    assert manifest.road_graph.graph_digest == sha256(output.read_bytes()).hexdigest()
+
+
+def test_output_created_after_preflight_is_never_overwritten(tmp_path: Path) -> None:
+    package = tmp_path / "park-fire"
+    package.mkdir()
+    manifest_path = package / "manifest.json"
+    copyfile(Path("tests/fixtures/replay-small/manifest.json"), manifest_path)
+    manifest_before = manifest_path.read_bytes()
+    output = package / "roads.graphml.gz"
+    unrelated = b"user-owned output"
+
+    def retrieve(
+        bbox: tuple[float, float, float, float],
+        network_type: str,
+    ) -> RetrievedRoadGraph:
+        output.write_bytes(unrelated)
+        return RetrievedRoadGraph(_raw_osm_graph(), "2.1.0-test")
+
+    with pytest.raises(RoadGraphBuildError, match="exists"):
         build_road_graph(
             bbox=(-122.4, 39.2, -120.3, 41.0),
             output=output,
-            retriever=lambda bbox, network_type: RetrievedRoadGraph(
-                _raw_osm_graph(),
-                "2.1.0-test",
-            ),
+            retriever=retrieve,
             clock=lambda: datetime(2024, 7, 25, 12, tzinfo=UTC),
         )
 
-    assert not output.exists()
+    assert output.read_bytes() == unrelated
     assert manifest_path.read_bytes() == manifest_before

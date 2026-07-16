@@ -254,3 +254,114 @@ All recorded verification output was warning-free.
 - A caller must roll back its transaction when a scenario command raises; rollback
   behavior for the idempotency claim, version, and child overlays is integration
   tested.
+
+## Publication safety fix
+
+Review found that the road-graph builder preflighted before retrieval and then used
+`os.replace` for both final files. Concurrent builders could therefore interleave one
+builder's graph with another builder's manifest, a late output could be overwritten,
+and process death after graph publication left an unrecoverable orphan.
+
+The builder now holds a package-local `fcntl.flock` from recovery through the
+rechecked preflight, retrieval/build, and publication. It durably stages and validates
+the graph and canonical updated manifest, then fsyncs a strict transaction journal
+before claiming the graph with same-filesystem `os.link` no-replace semantics. The
+journal records the output name, graph digest and inode, exact base-manifest digest,
+and canonical updated manifest. Recovery rolls forward only when the current base
+digest, base-plus-road-graph structure, journal metadata, final graph inode, and graph
+digest all agree. File and package-directory fsyncs cover journal creation, graph
+claim, manifest replacement, and journal removal. Recovery publishes through a
+unique private staging directory and never removes unrelated output or temporary
+files.
+
+### Fix TDD evidence
+
+Initial focused RED command:
+
+```bash
+cd backend
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/unit/geospatial/test_road_graph.py \
+  -k 'concurrent_builds_are_serialized_across_processes or interrupted_publication_recovers_without_retrieval or output_created_after_preflight_is_never_overwritten' \
+  -vv
+```
+
+Result: `3 failed, 19 deselected in 3.82s`. The second process entered retrieval
+while the first was blocked, retry rejected the journal-less orphan as already
+existing, and a late user file was overwritten.
+
+Additional durability/trust-boundary RED checks produced:
+
+```text
+graph directory fsync recovery: 1 failed, 22 deselected in 2.15s
+unrelated manifest temp + tampered journal: 2 failed, 22 deselected in 2.23s
+changed exact base manifest: 1 failed, 24 deselected in 2.72s
+```
+
+Each check then passed after its minimal fix. The final road-graph file contains 25
+passing tests, including cross-process serialization, manifest/graph digest agreement,
+process-interruption recovery without a second retrieval, directory-fsync recovery,
+exact-base and canonical-journal validation, preservation of unrelated manifest temp
+content, and no-replace output publication. Every retrieval remains injected; no test
+made a live OSM request.
+
+### Fix verification
+
+Road graph plus manifest:
+
+```bash
+cd backend
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/unit/geospatial/test_road_graph.py tests/unit/replay/test_manifest.py -q
+```
+
+```text
+61 passed in 3.45s
+```
+
+Replay unit regressions:
+
+```bash
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest tests/unit/replay -q
+```
+
+```text
+90 passed in 0.21s
+```
+
+Task 9 focused verification:
+
+```bash
+WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@10.0.0.151:5432/wildfireops_test \
+  UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run pytest \
+  tests/unit/geospatial/test_road_graph.py \
+  tests/integration/decision/test_scenarios.py -q
+```
+
+```text
+36 passed in 7.42s
+```
+
+The first sandboxed Task 9 attempt passed all 25 unit tests but could not open the
+database socket (`PermissionError: [Errno 1] Operation not permitted`); the approved
+database-enabled rerun above passed all 36 tests.
+
+Formatting, lint, and typing:
+
+```bash
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run ruff format --check \
+  src/wildfireops/geospatial/road_graph.py \
+  tests/unit/geospatial/test_road_graph.py
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run ruff check \
+  src/wildfireops/geospatial/road_graph.py \
+  tests/unit/geospatial/test_road_graph.py
+UV_CACHE_DIR=/private/tmp/wildfireops-uv-cache uv run mypy src
+```
+
+```text
+2 files already formatted
+All checks passed!
+Success: no issues found in 55 source files
+```
+
+An independent final publication review returned `APPROVE` with no concrete issues.
