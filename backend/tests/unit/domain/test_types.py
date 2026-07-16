@@ -1,5 +1,5 @@
 from dataclasses import FrozenInstanceError
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Any
 
 import pytest
@@ -67,11 +67,6 @@ def test_observation_requires_source_identity(field: str) -> None:
         make_normalized_observation(**{field: ""})
 
 
-def test_observation_requires_timezone_aware_timestamp() -> None:
-    with pytest.raises(ValueError, match="observed_at must be timezone-aware"):
-        make_normalized_observation(observed_at=datetime(2024, 7, 24, 18))
-
-
 @pytest.mark.parametrize("longitude", [-180.1, 180.1])
 def test_observation_rejects_longitude_outside_valid_range(
     longitude: float,
@@ -110,6 +105,113 @@ def make_weather_observation(**changes: Any) -> WeatherObservation:
     return WeatherObservation(**values)
 
 
+OBSERVATION_FACTORIES = (make_normalized_observation, make_weather_observation)
+
+
+class UnknownOffset(tzinfo):
+    def utcoffset(self, dt: datetime | None) -> None:
+        return None
+
+
+@pytest.mark.parametrize("observation_factory", OBSERVATION_FACTORIES)
+@pytest.mark.parametrize(
+    "observed_at",
+    [
+        datetime(2024, 7, 24, 18),
+        datetime(2024, 7, 24, 18, tzinfo=UnknownOffset()),
+        datetime(2024, 7, 24, 18, tzinfo=timezone(timedelta(hours=-7))),
+    ],
+)
+def test_observations_reject_timestamps_without_zero_utc_offset(
+    observation_factory: Any,
+    observed_at: datetime,
+) -> None:
+    with pytest.raises(ValueError, match="observed_at must be UTC"):
+        observation_factory(observed_at=observed_at)
+
+
+@pytest.mark.parametrize("observation_factory", OBSERVATION_FACTORIES)
+@pytest.mark.parametrize(
+    "observed_at",
+    [
+        datetime(2024, 7, 24, 18, tzinfo=UTC),
+        datetime(
+            2024,
+            7,
+            24,
+            18,
+            tzinfo=timezone(timedelta(0), name="zero-offset"),
+        ),
+    ],
+)
+def test_observations_accept_zero_utc_offset(
+    observation_factory: Any,
+    observed_at: datetime,
+) -> None:
+    assert observation_factory(observed_at=observed_at).observed_at == observed_at
+
+
+@pytest.mark.parametrize("observation_factory", OBSERVATION_FACTORIES)
+def test_observation_payload_rejects_top_level_mutation(
+    observation_factory: Any,
+) -> None:
+    record = observation_factory(raw_payload={"status": "active"})
+
+    with pytest.raises(TypeError):
+        record.raw_payload["status"] = "inactive"
+
+
+@pytest.mark.parametrize("observation_factory", OBSERVATION_FACTORIES)
+def test_observation_payload_rejects_nested_mapping_mutation(
+    observation_factory: Any,
+) -> None:
+    record = observation_factory(raw_payload={"details": {"status": "active"}})
+
+    with pytest.raises(TypeError):
+        record.raw_payload["details"]["status"] = "inactive"
+
+
+@pytest.mark.parametrize("observation_factory", OBSERVATION_FACTORIES)
+def test_observation_payload_rejects_nested_sequence_mutation(
+    observation_factory: Any,
+) -> None:
+    record = observation_factory(raw_payload={"labels": ["active"]})
+
+    with pytest.raises(TypeError):
+        record.raw_payload["labels"][0] = "inactive"
+
+
+@pytest.mark.parametrize("observation_factory", OBSERVATION_FACTORIES)
+def test_observation_payload_is_isolated_from_caller_mutation(
+    observation_factory: Any,
+) -> None:
+    raw_payload: dict[str, Any] = {
+        "details": {"status": "active", "labels": ["initial"]}
+    }
+    record = observation_factory(raw_payload=raw_payload)
+
+    raw_payload["added"] = True
+    raw_payload["details"]["status"] = "caller-mutated"
+    raw_payload["details"]["labels"].append("caller-mutated")
+
+    assert "added" not in record.raw_payload
+    assert record.raw_payload["details"] == {
+        "status": "active",
+        "labels": ("initial",),
+    }
+
+
+@pytest.mark.parametrize("observation_factory", OBSERVATION_FACTORIES)
+def test_observation_payload_rejects_unsupported_json_values(
+    observation_factory: Any,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="raw_payload contains unsupported JSON value: set",
+    ):
+        observation_factory(raw_payload={"unsupported": {"not-json"}})
+
+
 def test_weather_observation_is_a_source_observation() -> None:
     record: SourceObservation = make_weather_observation()
     assert record.identity == "nws:forecast-42"
@@ -119,11 +221,6 @@ def test_weather_observation_is_a_source_observation() -> None:
 def test_weather_observation_requires_source_identity(field: str) -> None:
     with pytest.raises(ValueError, match="source identity is required"):
         make_weather_observation(**{field: ""})
-
-
-def test_weather_observation_requires_timezone_aware_timestamp() -> None:
-    with pytest.raises(ValueError, match="observed_at must be timezone-aware"):
-        make_weather_observation(observed_at=datetime(2024, 7, 24, 18))
 
 
 @pytest.mark.parametrize("longitude", [-180.1, 180.1])

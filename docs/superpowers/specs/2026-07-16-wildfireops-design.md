@@ -107,14 +107,22 @@ Each external observation stores:
 
 - `source_name`
 - `source_record_id` or deterministic content hash
-- `observed_at`
+- `observed_at`, represented by a timezone-aware `datetime` whose UTC offset is
+  exactly zero; missing or nonzero offsets are rejected at the domain boundary
 - `ingested_at`
 - `source_version` when available
-- `raw_payload_reference`
+- `raw_payload`, represented in the domain as `FrozenJsonObject` with recursive
+  `FrozenJsonValue` content: string-keyed read-only mappings, tuples for JSON
+  sequences, and immutable JSON scalar values
 - validation status
 - freshness status derived from source-specific thresholds
 
 Source adapters must never silently invent missing measurements. Missing values remain null, fail validation when required, or reduce the confidence contribution to a risk score.
+
+Observation construction defensively copies and recursively freezes source payloads, so
+later mutation of caller-owned mappings or sequences cannot change observed reality.
+Unsupported non-JSON values fail validation. Persistence adapters materialize plain JSON
+containers only at the serialization boundary.
 
 ## 7. System architecture
 
