@@ -1,12 +1,16 @@
+import "maplibre-gl/dist/maplibre-gl.css";
+
+import "./App.css";
+import { AppProviders } from "./app/AppProviders";
+import { AppShell } from "./app/AppShell";
+import { ErrorBoundary } from "./app/ErrorBoundary";
+
 export default function App() {
   return (
-    <main>
-      <header>
-        <h1>WildfireOps</h1>
-        <p role="note">
-          Portfolio simulation only. Do not use for emergency or life-safety decisions.
-        </p>
-      </header>
-    </main>
+    <ErrorBoundary>
+      <AppProviders>
+        <AppShell />
+      </AppProviders>
+    </ErrorBoundary>
   );
 }

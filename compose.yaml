@@ -54,6 +54,8 @@ services:
     command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
     depends_on:
       - api
+    environment:
+      WILDFIREOPS_API_PROXY_TARGET: http://api:8000
     ports:
       - "5173:5173"
     volumes:
