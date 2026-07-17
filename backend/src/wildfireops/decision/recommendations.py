@@ -12,6 +12,7 @@ from uuid import UUID
 
 from wildfireops.decision.explanations import explain_result
 from wildfireops.decision.optimizer import (
+    ALLOCATION_ALGORITHM_VERSION,
     CandidateRoute,
     OptimizationRequest,
     OptimizationResult,
@@ -184,10 +185,12 @@ class RecommendationService:
         graphs: Mapping[str, RoadGraph],
         risk_config: RiskConfig,
         repository: RecommendationRepository,
+        allocation_algorithm_version: str = ALLOCATION_ALGORITHM_VERSION,
     ) -> None:
         self._graphs = MappingProxyType(dict(graphs))
         self._risk_config = risk_config
         self._repository = repository
+        self._allocation_algorithm_version = allocation_algorithm_version
 
     async def generate(
         self,
@@ -242,7 +245,7 @@ class RecommendationService:
         try:
             source_versions = _json_object(context.source_versions, "source_versions")
             incident_state = _json_object(context.incident_state, "incident_state")
-            assets = _exposures(context.asset_state)
+            assets = _exposures(context.asset_state, source_versions)
             resources = _resources(context.resource_state, context.resource_overrides)
             detections, weather = _observations(
                 source_versions,
@@ -290,6 +293,7 @@ class RecommendationService:
                     routes=routes,
                     max_response_minutes=normalized.max_response_minutes,
                     max_solver_seconds=normalized.max_solver_seconds,
+                    algorithm_version=self._allocation_algorithm_version,
                 )
             )
         except RecommendationInputsInvalid:
@@ -301,8 +305,17 @@ class RecommendationService:
             risk,
             normalized_risk.raw_evidence,
         )
-        staleness = _staleness_payload(context, source_versions)
-        input_version = recommendation_input_version(context)
+        staleness = _staleness_payload(
+            context,
+            source_versions,
+            risk_version=self._risk_config.algorithm_version,
+            allocation_version=self._allocation_algorithm_version,
+        )
+        input_version = recommendation_input_version(
+            context,
+            risk_version=self._risk_config.algorithm_version,
+            allocation_version=self._allocation_algorithm_version,
+        )
         route_map = {
             (route.resource_id, route.destination_id): route.route for route in routes
         }
@@ -536,7 +549,10 @@ def _observations(
     return tuple(detections), tuple(weather)
 
 
-def _exposures(value: object) -> tuple[ExposedAssetExposure, ...]:
+def _exposures(
+    value: object,
+    source_versions: Mapping[str, object],
+) -> tuple[ExposedAssetExposure, ...]:
     if not isinstance(value, list):
         raise RecommendationInputsInvalid("asset_state must be a list")
     exposures: list[ExposedAssetExposure] = []
@@ -579,6 +595,24 @@ def _exposures(value: object) -> tuple[ExposedAssetExposure, ...]:
         )
     if len({item.asset_id for item in exposures}) != len(exposures):
         raise RecommendationInputsInvalid("asset_state contains duplicate IDs")
+    pins = source_versions.get("asset_inputs")
+    if not isinstance(pins, list):
+        raise RecommendationInputsInvalid("source_versions asset_inputs is invalid")
+    pinned_pairs: list[tuple[str | None, str | None]] = []
+    for raw in pins:
+        item = _json_object(raw, "source_versions asset input")
+        pair = (
+            _optional_string(item.get("source_name"), "source_name"),
+            _optional_string(item.get("source_version"), "source_version"),
+        )
+        if (pair[0] is None) != (pair[1] is None):
+            raise RecommendationInputsInvalid("asset input pin is incomplete")
+        pinned_pairs.append(pair)
+    if len(set(pinned_pairs)) != len(pinned_pairs):
+        raise RecommendationInputsInvalid("asset input pins contain duplicates")
+    exposure_pairs = {(item.source_name, item.source_version) for item in exposures}
+    if exposure_pairs != set(pinned_pairs):
+        raise RecommendationInputsInvalid("asset input pins do not match asset_state")
     return tuple(sorted(exposures, key=lambda item: item.asset_id))
 
 
@@ -693,6 +727,9 @@ def _candidate_routes(
 def _staleness_payload(
     context: RecommendationContext,
     source_versions: Mapping[str, object],
+    *,
+    risk_version: str,
+    allocation_version: str,
 ) -> dict[str, object]:
     snapshot_digest = _digest(
         {
@@ -713,14 +750,26 @@ def _staleness_payload(
         "incident_snapshot_version": context.snapshot_version,
         "incident_snapshot_digest": snapshot_digest,
         "graph_version": context.graph_version,
-        "risk_version": "risk-v1",
-        "allocation_version": "allocation-v1",
+        "risk_version": risk_version,
+        "allocation_version": allocation_version,
     }
 
 
-def recommendation_input_version(context: RecommendationContext) -> str:
+def recommendation_input_version(
+    context: RecommendationContext,
+    *,
+    risk_version: str,
+    allocation_version: str,
+) -> str:
     source_versions = _json_object(context.source_versions, "source_versions")
-    return _digest(_staleness_payload(context, source_versions))
+    return _digest(
+        _staleness_payload(
+            context,
+            source_versions,
+            risk_version=risk_version,
+            allocation_version=allocation_version,
+        )
+    )
 
 
 def _route_payload(route: RouteResult) -> dict[str, object]:

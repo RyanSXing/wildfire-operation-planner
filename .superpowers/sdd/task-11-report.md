@@ -19,6 +19,7 @@ provider owns transaction scope while session-bound repositories only flush.
 - `backend/src/wildfireops/api/schemas/scenarios.py`
 - `backend/src/wildfireops/application/commands.py`
 - `backend/src/wildfireops/decision/commands.py`
+- `backend/src/wildfireops/decision/optimizer.py`
 - `backend/src/wildfireops/decision/recommendations.py`
 - `backend/src/wildfireops/decision/scenarios.py`
 - `backend/src/wildfireops/geospatial/road_graph.py`
@@ -28,6 +29,8 @@ provider owns transaction scope while session-bound repositories only flush.
 - `backend/src/wildfireops/persistence/recommendations.py`
 - `backend/tests/integration/api/test_decision_flow.py`
 - `backend/tests/integration/decision/test_audit_transaction.py`
+- `backend/tests/integration/decision/test_scenarios.py`
+- `backend/tests/unit/decision/test_commands.py`
 - `.superpowers/sdd/task-11-report.md`
 
 ## RED evidence
@@ -155,18 +158,22 @@ decision/audit constraints; downgrade removes them in dependency order.
 - `CommandServiceProvider` is the only transaction owner. API code depends on
   transport-neutral services, and repositories remain session-bound flush-only
   adapters.
-- Generation reconstructs pinned detections, weather, exposures, demands, and
-  resources from immutable snapshot identities. It never falls back to live
-  latest source rows.
+- Generation locks the incident-refresh advisory lock and then the parent
+  scenario row before reading latest scenario/snapshot versions. It queries
+  source observations only by the exact `(source_name, source_record_id)` pairs
+  pinned in the snapshot and requires the snapshot asset pin set to match every
+  exposure exactly; it never falls back to live latest source rows.
 - One deterministic O(N) nearest-node scan is public in the road-graph module;
   callers never access `RoadGraph._graph`.
 - All closure-aware candidate routes are stored in canonical request inputs so
   edits resolve route, time, closure hash, and capacity from the immutable
   recommendation rather than client data.
-- Approve/edit acquire the incident-refresh advisory lock, recompute the
-  staleness token, lock the recommendation, then lock selected live resources in
-  stable order. Reject remains valid when stale because it creates no active
-  assignment.
+- Approve/edit lock the recommendation row, acquire the incident-refresh
+  advisory lock, lock the parent scenario row while recomputing current inputs,
+  and then lock selected live resources in stable order. The recomputed token
+  uses the provider's current risk/allocation versions, and the service rejects
+  unavailable or mismatched pinned graphs. Reject skips these staleness checks
+  because it creates no active assignment.
 - Proposal assignments stay immutable. Final assignments, terminal decision,
   audit event, and completed idempotency response share one transaction.
 - Audit JSON records proposal/final pairs, actor/note, scenario and snapshot
@@ -179,3 +186,65 @@ No Task 11 correctness concern remains. Deployment still must populate the
 application road-graph registry with the immutable graph versions it serves,
 which is the existing Task 9 dependency-injection contract rather than new Task
 11 scope.
+
+## Review-gap follow-up evidence
+
+The release-blocking review gaps were reproduced before the follow-up production
+changes:
+
+1. Malformed edit tuples and persisted-route validation:
+
+   ```text
+   pytest -q tests/unit/decision/test_commands.py
+   FFFFFF
+   6 failed in 0.49s
+   ```
+
+   The failures showed raw tuple-unpacking `ValueError`, accepted `NaN` and
+   negative travel, the wrong infinity error, and an accepted graph mismatch.
+
+2. Immutable pin reads and runtime staleness:
+
+   ```text
+   pytest -q tests/integration/api/test_decision_flow.py -k \
+     'exact_canonical_asset_input_pins or reads_only_observations_pinned or \
+      runtime_algorithm_version_drift or unavailable_pinned_graph'
+   FFFFFFFF
+   8 failed in 2.89s
+   ```
+
+   All four bad asset-pin censuses returned `201`; the observation SQL had no
+   `WHERE`; risk/allocation drift and an unavailable graph also returned `201`.
+
+3. Scenario-version serialization:
+
+   ```text
+   pytest -q tests/integration/decision/test_scenarios.py \
+     -k recommendation_context_read_blocks_concurrent_add_version
+   FF
+   2 failed in 7.73s
+   ```
+
+   Both generation and current-approval context paths failed with
+   `add-version never waited on the scenario row lock`.
+
+After the minimal fixes, the combined focused command passed:
+
+```text
+pytest -q tests/unit/decision/test_commands.py \
+  tests/integration/api/test_decision_flow.py \
+  tests/integration/decision/test_audit_transaction.py \
+  tests/integration/decision/test_scenarios.py
+40 passed in 8.47s
+```
+
+Fresh final verification:
+
+- Full backend: `547 passed, 3 warnings in 20.63s`.
+- Ruff format: `3 files reformatted, 100 files left unchanged`.
+- Ruff check: `All checks passed!`.
+- Mypy source gate: `Success: no issues found in 68 source files`.
+- `git diff --check`: clean.
+
+The three warnings remain the existing Python multiprocessing `fork()`
+deprecation warnings from road-graph concurrency tests.

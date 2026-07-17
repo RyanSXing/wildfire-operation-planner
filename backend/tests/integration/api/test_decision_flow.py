@@ -6,8 +6,8 @@ import pytest
 from fastapi import FastAPI
 from geoalchemy2.elements import WKTElement
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import event, func, select, text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from wildfireops.geospatial.road_graph import RoadGraph
 from wildfireops.main import create_app
@@ -456,6 +456,175 @@ async def test_generation_rejects_malformed_snapshot_resource_json(
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "recommendation_inputs_invalid"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "asset_inputs",
+    (
+        [],
+        [
+            {"source_name": "census", "source_version": "2024"},
+            {"source_name": "other", "source_version": "v1"},
+        ],
+        [{"source_name": "census", "source_version": "2025"}],
+        [
+            {"source_name": "census", "source_version": "2024"},
+            {"source_name": "census", "source_version": "2024"},
+        ],
+    ),
+    ids=("missing", "extra", "mismatched", "duplicate"),
+)
+async def test_generation_requires_exact_canonical_asset_input_pins(
+    db_session: AsyncSession,
+    asset_inputs: list[dict[str, object]],
+) -> None:
+    graph = _road_graph()
+    version_id = await _seed_decision_flow(db_session, graph)
+    snapshot = await db_session.scalar(select(IncidentSnapshotModel))
+    assert snapshot is not None
+    snapshot.source_versions = {
+        **snapshot.source_versions,
+        "asset_inputs": asset_inputs,
+    }
+    await db_session.flush()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=_test_app(db_session, graph)),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            f"/api/scenario-versions/{version_id}/recommendations",
+            headers={"Idempotency-Key": "asset-pins"},
+            json={},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "recommendation_inputs_invalid"
+
+
+@pytest.mark.asyncio
+async def test_generation_reads_only_observations_pinned_by_the_snapshot(
+    db_session: AsyncSession,
+) -> None:
+    graph = _road_graph()
+    version_id = await _seed_decision_flow(db_session, graph)
+    db_session.add(
+        SourceObservationModel(
+            source_name="unrelated",
+            source_record_id="noise-1",
+            observation_kind="fire",
+            observed_at=_REFERENCE,
+            geometry=WKTElement("POINT(-100 40)", srid=4326),
+            confidence=0.1,
+            raw_payload={"source_version": "noise-v1"},
+        )
+    )
+    await db_session.flush()
+    assert isinstance(db_session.bind, AsyncConnection)
+    captured: list[tuple[str, object]] = []
+
+    def capture_observation_sql(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        parameters: object,
+        _context: object,
+        _executemany: object,
+    ) -> None:
+        if "ST_X(source_observations.geometry)" in statement:
+            captured.append((statement, parameters))
+
+    event.listen(
+        db_session.bind.sync_connection,
+        "before_cursor_execute",
+        capture_observation_sql,
+    )
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=_test_app(db_session, graph)),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                f"/api/scenario-versions/{version_id}/recommendations",
+                headers={"Idempotency-Key": "bounded-observations"},
+                json={},
+            )
+    finally:
+        event.remove(
+            db_session.bind.sync_connection,
+            "before_cursor_execute",
+            capture_observation_sql,
+        )
+
+    assert response.status_code == 201, response.text
+    assert len(captured) == 1
+    statement, parameters = captured[0]
+    assert "WHERE" in statement.upper()
+    assert "source_observations.source_name" in statement
+    assert "source_observations.source_record_id" in statement
+    assert {"firms", "fire-1", "nws", "weather-1"} <= set(
+        str(parameters).replace("'", "").replace("(", "").replace(")", "").split(", ")
+    )
+    assert "unrelated" not in str(parameters)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "stale_version"),
+    (("risk_version", "risk-v0"), ("algorithm_version", "allocation-v0")),
+)
+async def test_approve_rejects_runtime_algorithm_version_drift(
+    db_session: AsyncSession,
+    field: str,
+    stale_version: str,
+) -> None:
+    graph = _road_graph()
+    version_id = await _seed_decision_flow(db_session, graph)
+    app = _test_app(db_session, graph)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        recommendation = await _generate(client, version_id)
+        model = await db_session.get(
+            RecommendationModel,
+            UUID(str(recommendation["id"])),
+        )
+        assert model is not None
+        setattr(model, field, stale_version)
+        await db_session.flush()
+        response = await client.post(
+            f"/api/recommendations/{recommendation['id']}/decisions",
+            headers={"Idempotency-Key": f"stale-{field}"},
+            json={"action": "approve", "note": "Dispatch"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "recommendation_stale"
+
+
+@pytest.mark.asyncio
+async def test_approve_rejects_an_unavailable_pinned_graph(
+    db_session: AsyncSession,
+) -> None:
+    graph = _road_graph()
+    version_id = await _seed_decision_flow(db_session, graph)
+    app = _test_app(db_session, graph)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        recommendation = await _generate(client, version_id)
+        app.state.graphs = {}
+        response = await client.post(
+            f"/api/recommendations/{recommendation['id']}/decisions",
+            headers={"Idempotency-Key": "missing-graph"},
+            json={"action": "approve", "note": "Dispatch"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "recommendation_stale"
 
 
 @pytest.mark.asyncio

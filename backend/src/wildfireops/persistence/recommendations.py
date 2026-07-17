@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from wildfireops.decision.recommendations import (
@@ -15,6 +15,7 @@ from wildfireops.persistence.decision_models import (
     IncidentSnapshotModel,
     RecommendationAssignmentModel,
     RecommendationModel,
+    ScenarioModel,
     ScenarioResourceOverrideModel,
     ScenarioRoadClosureModel,
     ScenarioVersionModel,
@@ -65,6 +66,13 @@ class RecommendationRepository:
         version = await self._session.get(ScenarioVersionModel, version_id)
         if version is None or version.graph_version is None:
             return None
+        locked_scenario_id = await self._session.scalar(
+            select(ScenarioModel.id)
+            .where(ScenarioModel.id == version.scenario_id)
+            .with_for_update()
+        )
+        if locked_scenario_id is None:
+            return None
         snapshot = await self._session.get(
             IncidentSnapshotModel,
             version.incident_snapshot_id,
@@ -113,27 +121,39 @@ class RecommendationRepository:
                 .order_by(ScenarioResourceOverrideModel.resource_id)
             )
         ).all()
+        observation_pairs = _observation_pairs(snapshot.source_versions)
         observation_rows = (
-            await self._session.execute(
-                select(
-                    SourceObservationModel.source_name,
-                    SourceObservationModel.source_record_id,
-                    SourceObservationModel.observation_kind,
-                    SourceObservationModel.observed_at,
-                    func.ST_X(SourceObservationModel.geometry).label("longitude"),
-                    func.ST_Y(SourceObservationModel.geometry).label("latitude"),
-                    SourceObservationModel.confidence,
-                    SourceObservationModel.intensity,
-                    SourceObservationModel.wind_speed_mps,
-                    SourceObservationModel.wind_direction_degrees,
-                    SourceObservationModel.temperature_celsius,
-                    SourceObservationModel.raw_payload,
-                ).order_by(
-                    SourceObservationModel.source_name,
-                    SourceObservationModel.source_record_id,
+            (
+                await self._session.execute(
+                    select(
+                        SourceObservationModel.source_name,
+                        SourceObservationModel.source_record_id,
+                        SourceObservationModel.observation_kind,
+                        SourceObservationModel.observed_at,
+                        func.ST_X(SourceObservationModel.geometry).label("longitude"),
+                        func.ST_Y(SourceObservationModel.geometry).label("latitude"),
+                        SourceObservationModel.confidence,
+                        SourceObservationModel.intensity,
+                        SourceObservationModel.wind_speed_mps,
+                        SourceObservationModel.wind_direction_degrees,
+                        SourceObservationModel.temperature_celsius,
+                        SourceObservationModel.raw_payload,
+                    )
+                    .where(
+                        tuple_(
+                            SourceObservationModel.source_name,
+                            SourceObservationModel.source_record_id,
+                        ).in_(observation_pairs)
+                    )
+                    .order_by(
+                        SourceObservationModel.source_name,
+                        SourceObservationModel.source_record_id,
+                    )
                 )
-            )
-        ).all()
+            ).all()
+            if observation_pairs
+            else ()
+        )
         return RecommendationContext(
             version_id=version.id,
             scenario_id=version.scenario_id,
@@ -259,3 +279,29 @@ class RecommendationRepository:
                 for row in rows
             ),
         )
+
+
+def _observation_pairs(source_versions: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(source_versions, dict):
+        return ()
+    inputs = source_versions.get("observation_inputs")
+    if not isinstance(inputs, list):
+        return ()
+    pairs: list[tuple[str, str]] = []
+    for raw in inputs:
+        if not isinstance(raw, dict):
+            return ()
+        source_name = raw.get("source_name")
+        record_ids = raw.get("record_ids")
+        if (
+            not isinstance(source_name, str)
+            or not source_name.strip()
+            or not isinstance(record_ids, list)
+            or not record_ids
+        ):
+            return ()
+        for record_id in record_ids:
+            if not isinstance(record_id, str) or not record_id.strip():
+                return ()
+            pairs.append((source_name.strip(), record_id.strip()))
+    return tuple(pairs)

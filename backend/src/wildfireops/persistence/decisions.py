@@ -128,6 +128,9 @@ class DecisionRepository:
     async def current_input_version(
         self,
         recommendation: DecisionRecommendation,
+        *,
+        risk_version: str,
+        allocation_version: str,
     ) -> str | None:
         context = await RecommendationRepository(self._session).load_context(
             recommendation.scenario_version_id
@@ -139,7 +142,11 @@ class DecisionRepository:
             or context.snapshot_id != recommendation.incident_snapshot_id
         ):
             return None
-        return recommendation_input_version(context)
+        return recommendation_input_version(
+            context,
+            risk_version=risk_version,
+            allocation_version=allocation_version,
+        )
 
     async def lock_resources(
         self,

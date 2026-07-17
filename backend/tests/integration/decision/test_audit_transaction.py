@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+import networkx as nx
 import pytest
 from geoalchemy2.elements import WKTElement
 from sqlalchemy import func, select
@@ -11,6 +12,7 @@ from wildfireops.decision.commands import (
     DecisionRecommendation,
     DecisionRequest,
 )
+from wildfireops.geospatial.road_graph import RoadGraph
 from wildfireops.persistence.decision_models import (
     AuditEventModel,
     DecisionActionModel,
@@ -37,7 +39,11 @@ class _CurrentDecisionRepository(DecisionRepository):
     async def current_input_version(
         self,
         recommendation: DecisionRecommendation,
+        *,
+        risk_version: str,
+        allocation_version: str,
     ) -> str:
+        del risk_version, allocation_version
         return recommendation.input_version
 
 
@@ -45,7 +51,8 @@ class _CurrentDecisionRepository(DecisionRepository):
 async def test_assignment_audit_failure_rolls_back_and_same_key_retries(
     db_session: AsyncSession,
 ) -> None:
-    recommendation_id = str(await _seed_recommendation(db_session))
+    graph = _road_graph()
+    recommendation_id = str(await _seed_recommendation(db_session, graph.graph_version))
 
     async def fail_after_assignments() -> None:
         raise RuntimeError("injected audit failure")
@@ -62,7 +69,10 @@ async def test_assignment_audit_failure_rolls_back_and_same_key_retries(
                     _CurrentDecisionRepository(
                         session,
                         after_assignment_insert=fail_after_assignments,
-                    )
+                    ),
+                    graphs={graph.graph_version: graph},
+                    risk_version="risk-v1",
+                    allocation_version="allocation-v1",
                 )
                 await service.decide(
                     recommendation_id,
@@ -90,7 +100,10 @@ async def test_assignment_audit_failure_rolls_back_and_same_key_retries(
     ) as session:
         async with session.begin():
             stored = await DecisionCommandService(
-                _CurrentDecisionRepository(session)
+                _CurrentDecisionRepository(session),
+                graphs={graph.graph_version: graph},
+                risk_version="risk-v1",
+                allocation_version="allocation-v1",
             ).decide(
                 recommendation_id,
                 DecisionRequest("approve", "Dispatch"),
@@ -118,7 +131,22 @@ async def _count(session: AsyncSession, model: type[object]) -> int:
     return value
 
 
-async def _seed_recommendation(session: AsyncSession) -> UUID:
+def _road_graph() -> RoadGraph:
+    graph = nx.MultiDiGraph()
+    graph.add_edge(
+        "origin",
+        "destination",
+        edge_id="edge-1",
+        travel_minutes=5.0,
+        distance_meters=1_000.0,
+    )
+    return RoadGraph.from_graph(graph)
+
+
+async def _seed_recommendation(
+    session: AsyncSession,
+    graph_version: str,
+) -> UUID:
     incident = WildfireIncidentModel(
         geometry=WKTElement("POINT(-121.6 39.8)", srid=4326),
         first_observed_at=_REFERENCE,
@@ -168,7 +196,7 @@ async def _seed_recommendation(session: AsyncSession) -> UUID:
         incident_id=incident.id,
         version=1,
         incident_snapshot_id=snapshot.id,
-        graph_version="graph-v1",
+        graph_version=graph_version,
         created_by="demo-operator",
     )
     session.add(version)
@@ -177,7 +205,7 @@ async def _seed_recommendation(session: AsyncSession) -> UUID:
         scenario_version_id=version.id,
         input_version="a" * 64,
         source_versions={},
-        graph_version="graph-v1",
+        graph_version=graph_version,
         risk_version="risk-v1",
         algorithm_version="allocation-v1",
         solver_status="OPTIMAL",
@@ -203,7 +231,7 @@ async def _seed_recommendation(session: AsyncSession) -> UUID:
                 "edge_ids": ["edge-1"],
                 "distance_meters": 1_000.0,
                 "travel_minutes": 5.0,
-                "graph_version": "graph-v1",
+                "graph_version": graph_version,
                 "closure_hash": "b" * 64,
             },
             travel_minutes=5.0,

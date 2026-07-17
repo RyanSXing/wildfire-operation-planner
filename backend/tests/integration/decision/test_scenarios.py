@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import (
 
 from wildfireops.config import Settings
 from wildfireops.db import create_engine
+from wildfireops.decision.commands import DecisionRecommendation
 from wildfireops.decision.scenarios import IdempotencyConflict, ScenarioService
 from wildfireops.decision.scenarios import ScenarioValidationError
 from wildfireops.domain.scenarios import (
@@ -37,6 +38,8 @@ from wildfireops.persistence.observed_models import (
     ResourceUnitModel,
     WildfireIncidentModel,
 )
+from wildfireops.persistence.decisions import DecisionRepository
+from wildfireops.persistence.recommendations import RecommendationRepository
 from wildfireops.persistence.scenarios import ScenarioRepository
 
 
@@ -502,6 +505,73 @@ async def test_concurrent_version_commands_serialize_without_colliding(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("context_reader", ("generation", "approval"))
+async def test_recommendation_context_read_blocks_concurrent_add_version(
+    isolated_engine: AsyncEngine,
+    context_reader: str,
+) -> None:
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    async with factory.begin() as seed_session:
+        _, version_1, roads, _ = await _create_scenario(seed_session)
+    scenario_id = UUID(version_1.scenario.scenario_id)
+
+    async def add_version() -> StoredScenarioVersion:
+        async with factory.begin() as session:
+            return await ScenarioService(
+                graphs={roads.graph_version: roads},
+                repository=ScenarioRepository(session),
+            ).add_version(
+                scenario_id=scenario_id,
+                created_by="demo-operator",
+                idempotency_key=f"blocked-{context_reader}",
+                road_closures=(RoadClosure("BC"),),
+            )
+
+    add_task: asyncio.Task[StoredScenarioVersion] | None = None
+    try:
+        async with factory.begin() as context_session:
+            if context_reader == "generation":
+                context = await RecommendationRepository(context_session).load_context(
+                    version_1.version_id
+                )
+                assert context is not None
+            else:
+                current = await DecisionRepository(
+                    context_session
+                ).current_input_version(
+                    DecisionRecommendation(
+                        id=UUID(int=1),
+                        scenario_version_id=version_1.version_id,
+                        incident_snapshot_id=UUID(
+                            version_1.scenario.incident_snapshot_id
+                        ),
+                        input_version="unused",
+                        source_versions={},
+                        graph_version=roads.graph_version,
+                        risk_version="risk-v1",
+                        algorithm_version="allocation-v1",
+                        solver_status="OPTIMAL",
+                        request_inputs={},
+                        proposals=(),
+                        terminal_decision_id=None,
+                    ),
+                    risk_version="risk-v1",
+                    allocation_version="allocation-v1",
+                )
+                assert current is not None
+            add_task = asyncio.create_task(add_version())
+            await _wait_for_row_lock_waiter(isolated_engine)
+    except BaseException:
+        if add_task is not None:
+            await asyncio.gather(add_task, return_exceptions=True)
+        raise
+
+    assert add_task is not None
+    version_2 = await add_task
+    assert version_2.scenario.version == 2
+
+
+@pytest.mark.asyncio
 async def test_concurrent_same_idempotency_key_returns_one_version(
     isolated_engine: AsyncEngine,
 ) -> None:
@@ -574,3 +644,19 @@ async def test_caller_rollback_removes_version_children_and_idempotency_claim(
             )
             == 0
         )
+
+
+async def _wait_for_row_lock_waiter(engine: AsyncEngine) -> None:
+    deadline = asyncio.get_running_loop().time() + 3.0
+    while asyncio.get_running_loop().time() < deadline:
+        async with engine.connect() as connection:
+            waiting = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM pg_locks "
+                    "WHERE locktype = 'transactionid' AND NOT granted"
+                )
+            )
+        if waiting:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("add-version never waited on the scenario row lock")

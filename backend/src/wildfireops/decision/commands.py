@@ -5,11 +5,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
+from math import isfinite
+from types import MappingProxyType
 from typing import Literal, Protocol
 from uuid import UUID
 
 from wildfireops.decision.recommendations import StoredRecommendationAssignment
 from wildfireops.domain.scenario_versions import IdempotencyClaim
+from wildfireops.geospatial.road_graph import RoadGraph
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +98,9 @@ class DecisionRepository(Protocol):
     async def current_input_version(
         self,
         recommendation: DecisionRecommendation,
+        *,
+        risk_version: str,
+        allocation_version: str,
     ) -> str | None: ...
 
     async def lock_resources(
@@ -171,8 +177,18 @@ class AuditEventNotFound(DecisionError):
 
 
 class DecisionCommandService:
-    def __init__(self, repository: DecisionRepository) -> None:
+    def __init__(
+        self,
+        repository: DecisionRepository,
+        *,
+        graphs: Mapping[str, RoadGraph],
+        risk_version: str,
+        allocation_version: str,
+    ) -> None:
         self._repository = repository
+        self._graphs = MappingProxyType(dict(graphs))
+        self._risk_version = risk_version
+        self._allocation_version = allocation_version
 
     async def decide(
         self,
@@ -219,8 +235,18 @@ class DecisionCommandService:
             raise RecommendationAlreadyDecided("recommendation is already decided")
         if normalized.action != "reject":
             await self._repository.acquire_incident_refresh_lock()
+            graph = self._graphs.get(recommendation.graph_version)
+            if (
+                graph is None
+                or graph.graph_version != recommendation.graph_version
+                or recommendation.risk_version != self._risk_version
+                or recommendation.algorithm_version != self._allocation_version
+            ):
+                raise RecommendationStale("recommendation runtime is no longer current")
             current_input_version = await self._repository.current_input_version(
-                recommendation
+                recommendation,
+                risk_version=self._risk_version,
+                allocation_version=self._allocation_version,
             )
             if current_input_version != recommendation.input_version:
                 raise RecommendationStale("recommendation inputs are no longer current")
@@ -284,13 +310,19 @@ def _normalize_request(request: object) -> DecisionRequest:
         raise DecisionValidationError("note must not exceed 2000 characters")
     if not isinstance(request.edited_assignments, tuple):
         raise DecisionValidationError("edited_assignments must be a tuple")
-    pairs = tuple(
-        (
-            _nonblank(resource_id, "resource_id"),
-            _nonblank(destination_id, "destination_id"),
+    pairs: list[tuple[str, str]] = []
+    for item in request.edited_assignments:
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise DecisionValidationError(
+                "edited_assignments must contain resource and destination pairs"
+            )
+        resource_id, destination_id = item
+        pairs.append(
+            (
+                _nonblank(resource_id, "resource_id"),
+                _nonblank(destination_id, "destination_id"),
+            )
         )
-        for resource_id, destination_id in request.edited_assignments
-    )
     return DecisionRequest(request.action, note, tuple(sorted(pairs)))
 
 
@@ -409,11 +441,18 @@ def _edited_assignments(
             )
         if route.get("closure_hash") != expected_closure_hash:
             raise DecisionValidationError("candidate route closure hash is invalid")
+        if route.get("graph_version") != recommendation.graph_version:
+            raise DecisionValidationError("candidate route graph version is invalid")
         if (
             isinstance(travel_minutes, bool)
             or not isinstance(travel_minutes, int | float)
-            or travel_minutes > max_response
+            or not isfinite(float(travel_minutes))
+            or travel_minutes < 0
         ):
+            raise DecisionValidationError(
+                "route travel_minutes must be finite and nonnegative"
+            )
+        if travel_minutes > max_response:
             raise DecisionValidationError(
                 f"response time exceeds limit: {resource_id} -> {destination_id}"
             )

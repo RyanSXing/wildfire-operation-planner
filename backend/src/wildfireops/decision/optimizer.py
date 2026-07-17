@@ -10,6 +10,9 @@ from wildfireops.domain.operations import DemandPoint, ResourceUnit
 from wildfireops.geospatial.road_graph import RouteResult, RouteStatus
 
 
+ALLOCATION_ALGORITHM_VERSION = "allocation-v1"
+
+
 @dataclass(frozen=True, slots=True)
 class CandidateRoute:
     resource_id: str
@@ -24,7 +27,7 @@ class OptimizationRequest:
     routes: tuple[CandidateRoute, ...]
     max_response_minutes: int
     max_solver_seconds: float = 2.0
-    algorithm_version: str = "allocation-v1"
+    algorithm_version: str = ALLOCATION_ALGORITHM_VERSION
 
 
 @dataclass(frozen=True, slots=True)

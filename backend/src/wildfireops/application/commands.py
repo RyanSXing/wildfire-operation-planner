@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from wildfireops.config import Settings
 from wildfireops.decision.commands import AuditQueryService, DecisionCommandService
+from wildfireops.decision.optimizer import ALLOCATION_ALGORITHM_VERSION
 from wildfireops.decision.recommendations import RecommendationService
 from wildfireops.decision.risk import RiskConfig
 from wildfireops.decision.scenarios import ScenarioService
@@ -48,13 +49,19 @@ class CommandServiceProvider:
                     graphs=self._graphs(),
                     risk_config=self._risk_config,
                     repository=RecommendationRepository(session),
+                    allocation_algorithm_version=ALLOCATION_ALGORITHM_VERSION,
                 )
 
     @asynccontextmanager
     async def decisions(self) -> AsyncIterator[DecisionCommandService]:
         async with self._session_factory() as session:
             async with session.begin():
-                yield DecisionCommandService(DecisionRepository(session))
+                yield DecisionCommandService(
+                    DecisionRepository(session),
+                    graphs=self._graphs(),
+                    risk_version=self._risk_config.algorithm_version,
+                    allocation_version=ALLOCATION_ALGORITHM_VERSION,
+                )
 
     @asynccontextmanager
     async def audits(self) -> AsyncIterator[AuditQueryService]:
