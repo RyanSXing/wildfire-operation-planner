@@ -1,4 +1,5 @@
 import type { FeatureCollection, Geometry } from "geojson";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
@@ -12,11 +13,13 @@ import { HttpResponse, delay, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MAP_SOURCE_IDS } from "../features/map/layers";
+import { queryKeys } from "../api/hooks";
 import {
   BEAR_ID,
   REDWOOD_ID,
   baselineRecommendationResponse,
   baselineScenarioVersionResponse,
+  bearDetailResponse,
   incidentListResponse,
   incidentDetailResponse,
   redwoodRoadEdgesResponse,
@@ -78,11 +81,17 @@ class TestEventSource {
   }
 }
 
-function renderShell() {
+function renderShell(queryClient?: QueryClient) {
   return render(
-    <AppProviders>
-      <AppShell />
-    </AppProviders>,
+    queryClient ? (
+      <QueryClientProvider client={queryClient}>
+        <AppShell />
+      </QueryClientProvider>
+    ) : (
+      <AppProviders>
+        <AppShell />
+      </AppProviders>
+    ),
   );
 }
 
@@ -135,6 +144,9 @@ describe("AppShell", () => {
     await user.click(await screen.findByRole("radio", { name: "Scenario version 1" }));
     await waitFor(() => expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(2));
 
+    await user.click(screen.getByRole("button", { name: /Redwood Creek/i }));
+    await waitFor(() => expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(2));
+
     newerSnapshot = true;
     act(() => TestEventSource.instances[0].emit("incident-updated", { incidentId: REDWOOD_ID }));
     await waitFor(() => {
@@ -150,11 +162,26 @@ describe("AppShell", () => {
     const calls: Array<{ path: string; body: unknown; key: string | null }> = [];
     installSuccessfulPlanningCommands(calls);
     let exactRoadAttempts = 0;
+    const exactRoadRequests: string[][] = [];
     server.use(
+      http.post("/api/scenario-versions/:versionId/recommendations", () =>
+        HttpResponse.json({
+          ...baselineRecommendationResponse,
+          assignments: [
+            ...baselineRecommendationResponse.assignments,
+            {
+              ...baselineRecommendationResponse.assignments[0],
+              route: { ...baselineRecommendationResponse.assignments[0].route, graphVersion: "roads-v2", edgeIds: ["edge-1", "edge-wrong-graph"] },
+            },
+          ],
+        }, { status: 201 }),
+      ),
       http.get("/api/road-graphs/:graphVersion/edges", ({ request }) => {
-        if (new URL(request.url).searchParams.getAll("edgeId").length === 0) {
+        const edgeIds = new URL(request.url).searchParams.getAll("edgeId");
+        if (edgeIds.length === 0) {
           return HttpResponse.json(redwoodRoadEdgesResponse);
         }
+        exactRoadRequests.push(edgeIds);
         exactRoadAttempts += 1;
         return exactRoadAttempts === 1
           ? HttpResponse.json({ error: { code: "road_unavailable", message: "hidden", details: {} } }, { status: 503 })
@@ -174,10 +201,14 @@ describe("AppShell", () => {
     await user.click(screen.getByRole("button", { name: "Retry road geometry" }));
     await waitFor(() => {
       const routes = map.sources.get(MAP_SOURCE_IDS.routes)?.data as FeatureCollection<Geometry> | undefined;
-      expect(routes?.features).toHaveLength(2);
+      expect(routes?.features).toHaveLength(1);
     });
     expect(exactRoadAttempts).toBe(2);
-    expect(screen.getByRole("region", { name: "Scenario map status" })).toHaveTextContent("Scenario version 1");
+    expect(exactRoadRequests).toEqual([["edge-3"], ["edge-3"]]);
+    const planningStatus = screen.getByRole("region", { name: "Scenario map status" });
+    expect(planningStatus).toHaveClass("planning-map-status");
+    expect(planningStatus).toHaveTextContent("Scenario version 1");
+    expect(planningStatus).toHaveTextContent("unresolved 2 (edge-1, edge-wrong-graph)");
 
     fireEvent.change(screen.getByRole("slider", { name: "Replay position" }), {
       target: { value: String(Date.parse("2024-07-24T18:05:00Z")) },
@@ -192,8 +223,22 @@ describe("AppShell", () => {
     });
     await waitFor(() => {
       const routes = map.sources.get(MAP_SOURCE_IDS.routes)?.data as FeatureCollection<Geometry> | undefined;
-      expect(routes?.features).toHaveLength(2);
+      expect(routes?.features).toHaveLength(1);
     });
+  });
+
+  it("rejects an incident detail response owned by another incident", async () => {
+    server.use(
+      http.get("/api/incidents/:incidentId", () => HttpResponse.json(incidentDetailResponse)),
+    );
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByRole("combobox", { name: "Road graph" });
+
+    await user.click(screen.getByRole("button", { name: /Bear Ridge/i }));
+
+    expect(await screen.findByRole("alert", { name: "Incident details unavailable" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Incident overview" })).not.toBeInTheDocument();
   });
 
   it("renders the required observe surface in server order and updates the workspace when Bear Ridge is selected", async () => {
@@ -625,15 +670,30 @@ describe("AppShell", () => {
     ).toBeVisible();
   });
 
-  it("destroys ephemeral planning state when the selected incident changes", async () => {
+  it("clears lifted planning overlays during a fast return from a delayed incident", async () => {
     const calls: Array<{
       path: string;
       body: unknown;
       key: string | null;
     }> = [];
     installSuccessfulPlanningCommands(calls);
+    let releaseBearDetail: (() => void) | undefined;
+    const bearDetail = new Promise<void>((resolve) => {
+      releaseBearDetail = resolve;
+    });
+    server.use(
+      http.get("/api/incidents/:incidentId", async ({ params }) => {
+        if (String(params.incidentId) === BEAR_ID) {
+          await bearDetail;
+          return HttpResponse.json(bearDetailResponse);
+        }
+        return HttpResponse.json(incidentDetailResponse);
+      }),
+    );
     const user = userEvent.setup();
-    renderShell();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(queryKeys.incidents.detail(BEAR_ID), incidentDetailResponse);
+    renderShell(queryClient);
 
     await screen.findByRole("combobox", { name: "Road graph" });
     const map = onlyMap();
@@ -652,32 +712,24 @@ describe("AppShell", () => {
     });
 
     await user.click(screen.getByRole("button", { name: /Bear Ridge/i }));
+    expect(await screen.findByText("Loading incident details…")).toBeVisible();
     await waitFor(() => {
       expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(0);
       expect(screen.getByRole("region", { name: "Scenario map status" })).toHaveTextContent("Observed baseline");
     });
-    expect(
-      await screen.findByRole("combobox", { name: "Road graph" }),
-    ).toHaveValue("roads-bear-v1");
-    expect(
-      screen.queryByRole("region", { name: "Recommendation result" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("textbox", { name: "Scenario name (optional)" }),
-    ).toHaveValue("");
-
     await user.click(screen.getByRole("button", { name: /Redwood Creek/i }));
-    expect(
-      await screen.findByRole("combobox", { name: "Road graph" }),
-    ).toHaveValue("roads-v1");
-    expect(
-      screen.queryByRole("region", { name: "Recommendation result" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", {
-        name: "Create baseline and generate recommendation",
-      }),
-    ).toBeEnabled();
+    await waitFor(() => {
+      expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(0);
+      expect(screen.getByRole("region", { name: "Scenario map status" })).toHaveTextContent("Observed baseline");
+      expect(screen.queryByRole("region", { name: "Recommendation result" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("radio", { name: "Scenario version 1" })).not.toBeInTheDocument();
+    });
+    expect(await screen.findByRole("button", { name: "Create baseline and generate recommendation" })).toBeEnabled();
+    releaseBearDetail?.();
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Road graph" })).toHaveValue("roads-v1");
+      expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(0);
+    });
   });
 
   it("passes historical replay policy to planning while keeping read tools usable", async () => {

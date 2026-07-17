@@ -29,6 +29,8 @@ import { ReplayTimeline } from "../features/incidents/ReplayTimeline";
 import type { OperationsFeatureCollection } from "../features/map/OperationsMap";
 import {
   buildPlanningOverlays,
+  isRenderablePlanningSelection,
+  planningRouteEdges,
   type PlanningMapSelection,
   type PlanningOverlayResult,
 } from "../features/map/planningOverlays";
@@ -73,6 +75,17 @@ export function AppShell() {
   }, [activeIncidentId, selectedIncidentId]);
 
   const incidentQuery = useIncident(activeIncidentId ?? "");
+  const incident =
+    incidentQuery.data?.id === activeIncidentId ? incidentQuery.data : undefined;
+  const incidentDetailMismatched =
+    incidentQuery.data !== undefined && incident === undefined;
+  const incidentDetailLoading =
+    incidentQuery.isPending ||
+    (incidentDetailMismatched && incidentQuery.isFetching);
+  const incidentDetailFailed =
+    incidentQuery.isError ||
+    (incidentDetailMismatched && !incidentQuery.isFetching) ||
+    (!incident && !incidentDetailLoading);
   const timelineQuery = useIncidentTimeline(activeIncidentId ?? "");
   const frames = timelineQuery.data?.items ?? EMPTY_FRAMES;
   const startTime = frames[0]?.referenceAt ?? null;
@@ -80,7 +93,7 @@ export function AppShell() {
   const [replayTime, setReplayTime] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [planningSelection, setPlanningSelection] = useState<PlanningMapSelection | null>(null);
-  const currentPanelKey = incidentQuery.data?.id ?? "";
+  const currentPanelKey = activeIncidentId ?? "";
   const currentPanelKeyRef = useRef(currentPanelKey);
   currentPanelKeyRef.current = currentPanelKey;
 
@@ -108,26 +121,21 @@ export function AppShell() {
   }, [frameIndex, frames, playing]);
 
   const mapData = useMemo(
-    () => shapeMapData(incidentQuery.data, replaying ? activeFrame : undefined),
-    [activeFrame, incidentQuery.data, replaying],
+    () => shapeMapData(incident, replaying ? activeFrame : undefined),
+    [activeFrame, incident, replaying],
   );
   const ownedPlanningSelection =
-    planningSelection?.incidentId === activeIncidentId &&
-    planningSelection.incidentId === incidentQuery.data?.id
-      ? planningSelection
-      : null;
+    activeIncidentId === incident?.id &&
+    isRenderablePlanningSelection(incident, planningSelection)
+    ? planningSelection
+    : null;
   const requestedPlanningEdgeIds = useMemo(
     () => {
       if (!ownedPlanningSelection) return [];
-      const { scenarioVersion, recommendation } = ownedPlanningSelection;
-      const matchingRecommendation =
-        recommendation?.scenarioVersionId === scenarioVersion.id &&
-        recommendation.graphVersion === scenarioVersion.graphVersion
-          ? recommendation
-          : null;
+      const { scenarioVersion } = ownedPlanningSelection;
       return [
         ...scenarioVersion.roadClosures.map(({ edgeId }) => edgeId),
-        ...(matchingRecommendation?.assignments.flatMap((assignment) => assignment.route.edgeIds) ?? []),
+        ...planningRouteEdges(ownedPlanningSelection).requested,
       ];
     },
     [ownedPlanningSelection],
@@ -148,7 +156,7 @@ export function AppShell() {
   const planningOverlays = useMemo(
     () =>
       buildPlanningOverlays({
-        incident: incidentQuery.data,
+        incident,
         selection: ownedPlanningSelection,
         roads: exactRoads.query.data,
         requestedEdgeIds: exactRoads.requestedEdgeIds,
@@ -156,7 +164,7 @@ export function AppShell() {
         omittedEdgeIds: exactRoads.omittedEdgeIds,
         roadState,
       }),
-    [exactRoads.omittedEdgeIds, exactRoads.queriedEdgeIds, exactRoads.query.data, exactRoads.requestedEdgeIds, incidentQuery.data, ownedPlanningSelection, roadState],
+    [exactRoads.omittedEdgeIds, exactRoads.queriedEdgeIds, exactRoads.query.data, exactRoads.requestedEdgeIds, incident, ownedPlanningSelection, roadState],
   );
   const handlePlanningSelection = useCallback(
     (selection: PlanningMapSelection | null, ownerIncidentId: string) => {
@@ -204,6 +212,7 @@ export function AppShell() {
             incidents={incidents}
             selectedIncidentId={activeIncidentId}
             onSelect={(incidentId) => {
+              if (incidentId !== activeIncidentId) setPlanningSelection(null);
               setSelectedIncidentId(incidentId);
               setPlaying(false);
               setReplayTime(null);
@@ -235,7 +244,7 @@ export function AppShell() {
                   selection={ownedPlanningSelection}
                   overlays={planningOverlays}
                   roadState={roadState}
-                  activeSnapshotId={incidentQuery.data?.snapshotId ?? ""}
+                  activeSnapshotId={incident?.snapshotId ?? ""}
                   onRetry={() => void exactRoads.query.refetch()}
                   replaying={replaying}
                 />
@@ -275,11 +284,11 @@ export function AppShell() {
                 )}
               </section>
 
-              {incidentQuery.isPending ? (
+              {incidentDetailLoading ? (
                 <p className="decision-workspace shell-state" role="status">
                   Loading incident details…
                 </p>
-              ) : incidentQuery.isError || !incidentQuery.data ? (
+              ) : incidentDetailFailed || !incident ? (
                 <LocalFailure
                   className="decision-workspace"
                   label="Incident details unavailable"
@@ -289,17 +298,17 @@ export function AppShell() {
                 />
               ) : (
                 <IncidentDetails
-                  incident={incidentQuery.data}
+                  incident={incident}
                   visualizedRisk={
                     replaying && activeFrame
                       ? activeFrame.risk
-                      : incidentQuery.data.risk
+                      : incident.risk
                   }
                   riskContext={replaying ? "Replay frame" : "Current snapshot"}
                 >
                   <ScenarioPlanningPanel
                     key={currentPanelKey}
-                    incident={incidentQuery.data}
+                    incident={incident}
                     planningDisabled={replaying}
                     freshnessToken={planningFreshnessToken}
                     onPlanningMapSelection={handlePlanningSelection}
@@ -330,7 +339,7 @@ function PlanningMapStatus({
   replaying: boolean;
 }) {
   return (
-    <section aria-label="Scenario map status">
+    <section className="planning-map-status" aria-label="Scenario map status">
       {selection ? <>
         <p>Scenario version {selection.scenarioVersion.version}; scenario snapshot {selection.scenarioVersion.incidentSnapshotId}; active snapshot {activeSnapshotId}; {selection.freshness === "stale" ? "Stale" : "Current"}.</p>
         <OverlayMetadata label="Routes" metadata={overlays.metadata.routes} />

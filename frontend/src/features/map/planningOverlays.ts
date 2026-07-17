@@ -75,15 +75,14 @@ export function buildPlanningOverlays({
   omittedEdgeIds,
   roadState,
 }: BuildPlanningOverlaysInput): PlanningOverlayResult {
-  if (!incident || !selection || selection.incidentId !== incident.id) {
+  if (!incident || !isRenderablePlanningSelection(incident, selection)) {
     return emptyResult();
   }
 
   const version = selection.scenarioVersion;
-  const recommendation = matchingRecommendation(selection);
-  const routeIds = sorted(
-    recommendation?.assignments.flatMap((assignment) => assignment.route.edgeIds) ?? [],
-  );
+  const recommendation = matchingPlanningRecommendation(selection);
+  const routeEdges = planningRouteEdges(selection);
+  const routeIds = routeEdges.requested;
   const closureIds = sorted(version.roadClosures.map(({ edgeId }) => edgeId));
   const exact = indexExactRoads(roads, queriedEdgeIds, roadState);
   const requested = new Set(requestedEdgeIds);
@@ -97,7 +96,7 @@ export function buildPlanningOverlays({
     closures: collection(closures),
     unavailableResources: collection(unavailable.features),
     metadata: {
-      routes: edgeMetadata(routeIds, exact, requested, omitted),
+      routes: edgeMetadata(routeIds, exact, requested, omitted, routeEdges.unresolved),
       closures: edgeMetadata(closureIds, exact, requested, omitted),
       unavailableResources: unavailable.metadata,
     },
@@ -113,13 +112,53 @@ export function buildPlanningOverlays({
   };
 }
 
-function matchingRecommendation(selection: PlanningMapSelection): Recommendation | null {
+export function isRenderablePlanningSelection(
+  incident: IncidentDetail | undefined,
+  selection: PlanningMapSelection | null,
+): selection is PlanningMapSelection {
+  return Boolean(
+    incident &&
+      selection &&
+      selection.incidentId === incident.id &&
+      selection.scenarioVersion.incidentId === incident.id &&
+      (selection.freshness === "stale" ||
+        selection.scenarioVersion.incidentSnapshotId === incident.snapshotId),
+  );
+}
+
+export function matchingPlanningRecommendation(selection: PlanningMapSelection): Recommendation | null {
   const recommendation = selection.recommendation;
   return recommendation &&
     recommendation.scenarioVersionId === selection.scenarioVersion.id &&
-    recommendation.graphVersion === selection.scenarioVersion.graphVersion
+    recommendation.graphVersion === selection.scenarioVersion.graphVersion &&
+    recommendation.incidentSnapshotId === selection.scenarioVersion.incidentSnapshotId
     ? recommendation
     : null;
+}
+
+export function planningRouteEdges(selection: PlanningMapSelection): Readonly<{
+  requested: readonly string[];
+  unresolved: readonly string[];
+}> {
+  const recommendation = matchingPlanningRecommendation(selection);
+  if (!recommendation) return { requested: [], unresolved: [] };
+
+  const graphVersion = selection.scenarioVersion.graphVersion;
+  const unresolved = sorted(
+    recommendation.assignments
+      .filter((assignment) => assignment.route.graphVersion !== graphVersion)
+      .flatMap((assignment) => assignment.route.edgeIds),
+  );
+  const unresolvedSet = new Set(unresolved);
+  return {
+    requested: sorted(
+      recommendation.assignments
+        .filter((assignment) => assignment.route.graphVersion === graphVersion)
+        .flatMap((assignment) => assignment.route.edgeIds)
+        .filter((edgeId) => !unresolvedSet.has(edgeId)),
+    ),
+    unresolved,
+  };
 }
 
 function indexExactRoads(
@@ -162,6 +201,7 @@ function edgeMetadata(
   exact: ReturnType<typeof indexExactRoads>,
   requested: ReadonlySet<string>,
   omitted: ReadonlySet<string>,
+  extraUnresolved: readonly string[] = [],
 ): EdgeMetadata {
   const requestedForKind = sorted(ids.filter((id) => requested.has(id)));
   const pick = (matches: (id: string) => boolean) => requestedForKind.filter(matches);
@@ -169,7 +209,10 @@ function edgeMetadata(
   const mapped = pick((id) => !omitted.has(id) && exact.mapped.has(id));
   const nullGeometry = pick((id) => !omitted.has(id) && exact.nullGeometry.has(id));
   const missing = pick((id) => !omitted.has(id) && exact.missing.has(id));
-  const unresolved = pick((id) => !omitted.has(id) && exact.unresolved.has(id));
+  const unresolved = sorted([
+    ...pick((id) => !omitted.has(id) && exact.unresolved.has(id)),
+    ...extraUnresolved,
+  ]);
   return { requested: requestedForKind, mapped, nullGeometry, missing, omitted: omittedIds, unresolved };
 }
 
@@ -181,8 +224,16 @@ function routeFeatures(
   freshness: PlanningMapSelection["freshness"],
 ): Feature<GeoJsonGeometry, OverlayProperties>[] {
   if (!recommendation) return [];
-  return recommendation.assignments.flatMap((assignment) =>
-    assignment.route.edgeIds.flatMap((edgeId) => {
+  const { requested } = planningRouteEdges({
+    incidentId: incident.id,
+    scenarioVersion: version,
+    recommendation,
+    freshness,
+  });
+  return recommendation.assignments
+    .filter((assignment) => assignment.route.graphVersion === version.graphVersion)
+    .flatMap((assignment) =>
+    assignment.route.edgeIds.filter((edgeId) => requested.includes(edgeId)).flatMap((edgeId) => {
       const road = roads.get(edgeId);
       return road?.geometry ? [feature(road.geometry, {
         sourceKind: "recommendation-route", recommendationId: recommendation.id,
@@ -207,6 +258,7 @@ function closureFeatures(
     const road = roads.get(edgeId);
     return road?.geometry ? [feature(road.geometry, {
       sourceKind: "scenario-road-closure", edgeId, graphVersion: version.graphVersion,
+      scenarioVersionId: version.id,
       incidentId: incident.id, scenarioSnapshotId: version.incidentSnapshotId,
       activeIncidentSnapshotId: incident.snapshotId, freshness,
     })] : [];

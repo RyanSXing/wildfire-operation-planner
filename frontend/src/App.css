@@ -314,6 +314,40 @@
   overflow: hidden;
 }
 
+.planning-map-status {
+  z-index: 2;
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  max-width: min(480px, calc(100% - 24px));
+  max-height: calc(100% - 164px);
+  padding: 10px 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  color: #ffffff;
+  background: rgb(15 23 42 / 96%);
+  border: 1px solid var(--slate-400);
+  border-radius: 3px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.planning-map-status p + p {
+  margin-top: 6px;
+}
+
+.planning-map-status button {
+  min-height: 36px;
+  margin-top: 4px;
+  padding: 6px 10px;
+  color: #ffffff;
+  background: var(--slate-800);
+  border: 1px solid var(--slate-300);
+  border-radius: 2px;
+  font-weight: 750;
+}
+
 .map-loading {
   display: grid;
   min-height: 420px;
