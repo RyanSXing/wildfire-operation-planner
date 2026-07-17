@@ -199,7 +199,9 @@ async def test_park_fire_replay_matches_golden_semantics(
         closed_edge_id not in assignment["route"]["edge_ids"]
         for assignment in actual["closure_scenario"]["recommendation"]["assignments"]
     )
-    assert _consequential(actual["baseline"], actual["closure_scenario"]["recommendation"])
+    assert _consequential(
+        actual["baseline"], actual["closure_scenario"]["recommendation"]
+    )
     assert actual == expected
 
 
@@ -290,20 +292,14 @@ def _recommendation_semantics(recommendation: dict[str, Any]) -> dict[str, Any]:
             "uncovered_risk_penalty": recommendation["objectiveComponents"][
                 "uncoveredRiskPenalty"
             ],
-            "objective_value": recommendation["objectiveComponents"][
-                "objectiveValue"
-            ],
+            "objective_value": recommendation["objectiveComponents"]["objectiveValue"],
         },
         "outcome": {
-            "weighted_risk_covered": recommendation["outcome"][
-                "weightedRiskCovered"
-            ],
+            "weighted_risk_covered": recommendation["outcome"]["weightedRiskCovered"],
             "weighted_risk_uncovered": recommendation["outcome"][
                 "weightedRiskUncovered"
             ],
-            "total_travel_minutes": recommendation["outcome"][
-                "totalTravelMinutes"
-            ],
+            "total_travel_minutes": recommendation["outcome"]["totalTravelMinutes"],
             "unreachable_destination_ids": recommendation["outcome"][
                 "unreachableDestinationIds"
             ],

@@ -49,7 +49,9 @@ def create_app(
                 resolved.replay_package / loader.manifest.road_graph.filename
             )
             if graph.graph_version != loader.manifest.road_graph.graph_version:
-                raise RoadGraphInvalid("road graph version does not match replay manifest")
+                raise RoadGraphInvalid(
+                    "road graph version does not match replay manifest"
+                )
             graphs[graph.graph_version] = graph
     engine = create_engine(resolved)
 

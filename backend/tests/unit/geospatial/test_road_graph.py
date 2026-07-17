@@ -142,7 +142,9 @@ def test_present_graph_node_coordinates_must_be_finite_numbers(
     coordinates: dict[str, object] = {"x": -121.7, "y": 39.7}
     coordinates[coordinate] = value
 
-    with pytest.raises(RoadGraphInvalid, match=f"node {coordinate} must be a finite number"):
+    with pytest.raises(
+        RoadGraphInvalid, match=f"node {coordinate} must be a finite number"
+    ):
         RoadGraph.from_graph(_coordinate_graph(**coordinates))
 
 
