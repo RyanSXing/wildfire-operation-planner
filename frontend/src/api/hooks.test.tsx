@@ -7,14 +7,75 @@ import { StrictMode, type PropsWithChildren, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BEAR_ID, REDWOOD_ID } from "../test/fixtures";
+import { ApiClientError, apiClient } from "./client";
 import {
   queryKeys,
+  useCreateScenarioMutation,
+  useCreateScenarioVersionMutation,
+  useDecisionContext,
+  useGenerateRecommendationMutation,
   useIncident,
   useIncidentEvents,
   useIncidentTimeline,
   useIncidents,
+  useRoadEdges,
   useSourceStatus,
 } from "./hooks";
+
+const scenarioVersion = {
+  id: "version-1",
+  scenarioId: "scenario-1",
+  incidentId: REDWOOD_ID,
+  incidentSnapshotId: "snapshot-1",
+  version: 1,
+  graphVersion: "roads-v1",
+  roadClosures: [],
+  weatherOverrides: [],
+  resourceOverrides: [],
+};
+
+const recommendation = {
+  id: "recommendation-1",
+  scenarioVersionId: "version-1",
+  incidentSnapshotId: "snapshot-1",
+  assignments: [],
+  uncoveredDestinationIds: [],
+  objectiveComponents: {
+    travelCost: 0,
+    uncoveredRiskPenalty: 0,
+    objectiveValue: 0,
+  },
+  solverStatus: "OPTIMAL",
+  runtimeMilliseconds: 1,
+  graphVersion: "roads-v1",
+  riskVersion: "risk-v1",
+  algorithmVersion: "allocation-v1",
+  inputVersion: "input-v1",
+  sourceVersions: {},
+  explanation: {},
+  outcome: {
+    scenarioRisk: {
+      score: 10,
+      algorithmVersion: "risk-v1",
+      contributions: [],
+    },
+    weightedRiskCovered: 10,
+    weightedRiskUncovered: 0,
+    totalTravelMinutes: 0,
+    unreachableDestinationIds: [],
+    unavailableResourceIds: [],
+  },
+};
+
+const createScenarioVariables = {
+  incidentId: REDWOOD_ID,
+  body: {
+    graphVersion: "roads-v1",
+    objective: "minimize-response-time",
+    name: "Morning plan",
+    algorithmConfigVersion: "scenario-v1",
+  },
+};
 
 type EventListenerValue = EventListenerOrEventListenerObject;
 
@@ -160,6 +221,240 @@ describe("incident read hooks", () => {
     expect(result.current.incident.data?.id).toBe(REDWOOD_ID);
     expect(result.current.timeline.data?.items[0].snapshotVersion).toBe(1);
     expect(result.current.sources.data?.items.length).toBeGreaterThan(0);
+  });
+});
+
+describe("planning read hooks", () => {
+  it("uses deterministic keys and stays disabled without required scope", async () => {
+    const contextRequest = vi.spyOn(apiClient, "getDecisionContext").mockResolvedValue({
+      incidentId: REDWOOD_ID,
+      defaultGraphVersion: "roads-v1",
+      availableGraphs: [{ graphVersion: "roads-v1", edgeCount: 2 }],
+    });
+    const edgeRequest = vi.spyOn(apiClient, "listRoadEdges").mockResolvedValue({
+      items: [],
+      total: 0,
+      missingEdgeIds: [],
+    });
+    const { wrapper } = createHarness();
+    const { result, rerender } = renderHook(
+      ({ incidentId, graphVersion }) => ({
+        context: useDecisionContext(incidentId),
+        edges: useRoadEdges(
+          graphVersion,
+          { q: "forest", edgeIds: ["edge-1"], limit: 200 },
+        ),
+      }),
+      {
+        wrapper,
+        initialProps: { incidentId: "", graphVersion: "" },
+      },
+    );
+
+    expect(result.current.context.fetchStatus).toBe("idle");
+    expect(result.current.edges.fetchStatus).toBe("idle");
+    expect(contextRequest).not.toHaveBeenCalled();
+    expect(edgeRequest).not.toHaveBeenCalled();
+
+    rerender({ incidentId: REDWOOD_ID, graphVersion: "roads-v1" });
+    await waitFor(() => {
+      expect(result.current.context.isSuccess).toBe(true);
+      expect(result.current.edges.isSuccess).toBe(true);
+    });
+
+    expect(queryKeys.incidents.decisionContext(REDWOOD_ID)).toEqual([
+      "incidents",
+      "decision-context",
+      REDWOOD_ID,
+    ]);
+    expect(
+      queryKeys.roadGraphs.edges("roads-v1", {
+        q: "forest",
+        edgeIds: ["edge-1"],
+        limit: 200,
+      }),
+    ).toEqual([
+      "road-graphs",
+      "edges",
+      "roads-v1",
+      "forest",
+      ["edge-1"],
+      200,
+    ]);
+    expect(contextRequest).toHaveBeenCalledWith(REDWOOD_ID, expect.any(AbortSignal));
+    expect(edgeRequest).toHaveBeenCalledWith(
+      "roads-v1",
+      { q: "forest", edgeIds: ["edge-1"], limit: 200 },
+      expect.any(AbortSignal),
+    );
+  });
+});
+
+describe("planning command hooks", () => {
+  it("routes all three typed commands with nonblank caller-owned keys", async () => {
+    const createScenario = vi
+      .spyOn(apiClient, "createScenario")
+      .mockResolvedValue(scenarioVersion);
+    const createVersion = vi
+      .spyOn(apiClient, "createScenarioVersion")
+      .mockResolvedValue({ ...scenarioVersion, id: "version-2", version: 2 });
+    const generate = vi
+      .spyOn(apiClient, "generateRecommendation")
+      .mockResolvedValue(recommendation);
+    const { wrapper } = createHarness();
+    const { result } = renderHook(
+      () => ({
+        createScenario: useCreateScenarioMutation(),
+        createVersion: useCreateScenarioVersionMutation(),
+        generate: useGenerateRecommendationMutation(),
+      }),
+      { wrapper },
+    );
+
+    await act(async () => {
+      await result.current.createScenario.mutateAsync(createScenarioVariables);
+      await result.current.createVersion.mutateAsync({
+        scenarioId: "scenario-1",
+        body: {
+          roadClosures: [{ edgeId: "edge-1" }],
+          weatherOverrides: [],
+          resourceOverrides: [],
+        },
+      });
+      await result.current.generate.mutateAsync({
+        versionId: "version-2",
+        body: { maxResponseMinutes: 30, maxSolverSeconds: 2 },
+      });
+    });
+
+    expect(createScenario).toHaveBeenCalledWith(
+      REDWOOD_ID,
+      createScenarioVariables.body,
+      expect.stringMatching(/\S/),
+    );
+    expect(createVersion).toHaveBeenCalledWith(
+      "scenario-1",
+      {
+        roadClosures: [{ edgeId: "edge-1" }],
+        weatherOverrides: [],
+        resourceOverrides: [],
+      },
+      expect.stringMatching(/\S/),
+    );
+    expect(generate).toHaveBeenCalledWith(
+      "version-2",
+      { maxResponseMinutes: 30, maxSolverSeconds: 2 },
+      expect.stringMatching(/\S/),
+    );
+  });
+
+  it.each([
+    new ApiClientError("network_error", "hidden", {}, 0),
+    new ApiClientError("request_timeout", "hidden", {}, 408),
+    new ApiClientError("rate_limited", "hidden", {}, 429),
+    new ApiClientError("service_unavailable", "hidden", {}, 503),
+  ])("reuses one key for an unchanged retryable failure", async (failure) => {
+    const command = vi
+      .spyOn(apiClient, "createScenario")
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(scenarioVersion);
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useCreateScenarioMutation(), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync(createScenarioVariables),
+      ).rejects.toBe(failure);
+      await result.current.mutateAsync(createScenarioVariables);
+    });
+
+    expect(command.mock.calls[0][2]).toBe(command.mock.calls[1][2]);
+  });
+
+  it("replaces retry intent when scope or body changes", async () => {
+    const command = vi
+      .spyOn(apiClient, "createScenario")
+      .mockRejectedValueOnce(
+        new ApiClientError("network_error", "hidden", {}, 0),
+      )
+      .mockResolvedValueOnce(scenarioVersion);
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useCreateScenarioMutation(), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync(createScenarioVariables),
+      ).rejects.toBeInstanceOf(ApiClientError);
+      await result.current.mutateAsync({
+        ...createScenarioVariables,
+        body: { ...createScenarioVariables.body, name: "Changed plan" },
+      });
+    });
+
+    expect(command.mock.calls[0][2]).not.toBe(command.mock.calls[1][2]);
+  });
+
+  it.each([
+    { first: "success" as const },
+    {
+      first: new ApiClientError("invalid_request", "hidden", {}, 400),
+    },
+  ])("consumes keys after success or terminal failure", async ({ first }) => {
+    const command = vi.spyOn(apiClient, "createScenario");
+    if (first === "success") {
+      command.mockResolvedValueOnce(scenarioVersion);
+    } else {
+      command.mockRejectedValueOnce(first);
+    }
+    command.mockResolvedValueOnce(scenarioVersion);
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useCreateScenarioMutation(), {
+      wrapper,
+    });
+
+    await act(async () => {
+      if (first === "success") {
+        await result.current.mutateAsync(createScenarioVariables);
+      } else {
+        await expect(
+          result.current.mutateAsync(createScenarioVariables),
+        ).rejects.toBe(first);
+      }
+      await result.current.mutateAsync(createScenarioVariables);
+    });
+
+    expect(command.mock.calls[0][2]).not.toBe(command.mock.calls[1][2]);
+  });
+
+  it("reset discards retry intent and mutation error state", async () => {
+    const failure = new ApiClientError("network_error", "hidden", {}, 0);
+    const command = vi
+      .spyOn(apiClient, "createScenario")
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(scenarioVersion);
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useCreateScenarioMutation(), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync(createScenarioVariables),
+      ).rejects.toBe(failure);
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    act(() => result.current.reset());
+    await waitFor(() => expect(result.current.isError).toBe(false));
+    await act(async () => {
+      await result.current.mutateAsync(createScenarioVariables);
+    });
+
+    expect(command.mock.calls[0][2]).not.toBe(command.mock.calls[1][2]);
   });
 });
 

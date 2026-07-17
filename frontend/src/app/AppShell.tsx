@@ -26,6 +26,7 @@ import { IncidentDetails } from "../features/incidents/IncidentDetails";
 import { IncidentQueue } from "../features/incidents/IncidentQueue";
 import { ReplayTimeline } from "../features/incidents/ReplayTimeline";
 import type { OperationsFeatureCollection } from "../features/map/OperationsMap";
+import { ScenarioPlanningPanel } from "../features/scenarios/ScenarioPlanningPanel";
 
 const OperationsMap = lazy(() =>
   import("../features/map/OperationsMap").then((module) => ({
@@ -101,7 +102,7 @@ export function AppShell() {
       <header className="topbar">
         <div className="topbar__identity">
           <h1>WildfireOps</h1>
-          <span className="mode-indicator">Observe mode</span>
+          <span className="mode-indicator">Observe + plan</span>
         </div>
         <SourceFreshness
           statuses={sourcesQuery.data?.items}
@@ -214,7 +215,13 @@ export function AppShell() {
                       : incidentQuery.data.risk
                   }
                   riskContext={replaying ? "Replay frame" : "Current snapshot"}
-                />
+                >
+                  <ScenarioPlanningPanel
+                    key={incidentQuery.data.id}
+                    incident={incidentQuery.data}
+                    planningDisabled={replaying}
+                  />
+                </IncidentDetails>
               )}
             </>
           ) : null}

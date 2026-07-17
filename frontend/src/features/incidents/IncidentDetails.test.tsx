@@ -184,6 +184,29 @@ describe("IncidentDetails", () => {
       screen.getByText("No detection provenance is available."),
     ).toBeVisible();
   });
+
+  it("renders a planning child after the current incident evidence", () => {
+    render(
+      <IncidentDetails
+        incident={incident}
+        visualizedRisk={incident.risk}
+        riskContext="Current snapshot"
+      >
+        <section aria-label="Planning child">Planning workspace</section>
+      </IncidentDetails>,
+    );
+
+    const resources = screen.getByRole("region", {
+      name: "Simulated resources",
+    });
+    const planning = screen.getByRole("region", { name: "Planning child" });
+
+    expect(planning).toHaveTextContent("Planning workspace");
+    expect(
+      resources.compareDocumentPosition(planning) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
 });
 
 function listItemForHeading(container: HTMLElement, name: string): HTMLElement {

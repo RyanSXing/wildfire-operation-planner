@@ -62,7 +62,7 @@ export function ScenarioComparison({
 
   return (
     <section aria-label="Scenario outcome comparison">
-      <h2>Scenario outcome comparison</h2>
+      <h4>Scenario outcome comparison</h4>
       <ComparisonTable label="Outcome metrics comparison" rows={metrics} />
       <ComparisonTable
         label="Risk factor contribution comparison"
@@ -140,10 +140,10 @@ function IdentifierDetails({
 }) {
   return (
     <section aria-label={label}>
-      <h3>{label}</h3>
-      <h4>Baseline</h4>
+      <h5>{label}</h5>
+      <h6>Baseline</h6>
       <IdentifierList prefix="Baseline" label={itemLabel} ids={baseline} />
-      <h4>Scenario</h4>
+      <h6>Scenario</h6>
       <IdentifierList prefix="Scenario" label={itemLabel} ids={scenario} />
     </section>
   );

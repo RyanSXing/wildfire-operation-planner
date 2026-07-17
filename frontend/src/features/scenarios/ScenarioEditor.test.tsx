@@ -359,6 +359,90 @@ describe("ScenarioEditor", () => {
     ).toBeDisabled();
   });
 
+  it("retains selected road IDs when bounded search results change", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ScenarioEditor
+        roadEdges={[roadEdges[0]]}
+        resources={resources}
+        version={null}
+        busy={false}
+        errorMessage={null}
+        onSubmit={vi.fn()}
+      />,
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "Zulu Road (edge-9)" }),
+    );
+
+    rerender(
+      <ScenarioEditor
+        roadEdges={[roadEdges[1]]}
+        resources={resources}
+        version={null}
+        busy={false}
+        errorMessage={null}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("checkbox", { name: "edge-9" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Alpha Road (edge-2)" }),
+    ).not.toBeChecked();
+  });
+
+  it("uses a distinct disabled state without reporting a save in progress", () => {
+    render(
+      <ScenarioEditor
+        roadEdges={roadEdges}
+        resources={resources}
+        version={null}
+        busy={false}
+        disabled
+        errorMessage={null}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    for (const control of screen.getAllByRole("checkbox")) {
+      expect(control).toBeDisabled();
+    }
+    expect(screen.getByLabelText("Wind speed (m/s)")).toBeDisabled();
+    expect(screen.getByLabelText("Wind direction (degrees)")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Save scenario version" }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Saving scenario version" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("freezes every draft control while a save is in flight", () => {
+    render(
+      <ScenarioEditor
+        roadEdges={roadEdges}
+        resources={resources}
+        version={null}
+        busy
+        disabled={false}
+        errorMessage={null}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    for (const control of screen.getAllByRole("checkbox")) {
+      expect(control).toBeDisabled();
+    }
+    expect(screen.getByLabelText("Wind speed (m/s)")).toBeDisabled();
+    expect(screen.getByLabelText("Wind direction (degrees)")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Saving scenario version" }),
+    ).toBeDisabled();
+  });
+
   it("orders resource replacements by deterministic code units", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();

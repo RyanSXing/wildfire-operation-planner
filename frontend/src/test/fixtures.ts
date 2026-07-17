@@ -1,4 +1,10 @@
-import { incidentListSchema } from "../api/types";
+import {
+  decisionContextSchema,
+  incidentListSchema,
+  recommendationSchema,
+  roadEdgeListSchema,
+  scenarioVersionSchema,
+} from "../api/types";
 
 export const REDWOOD_ID = "00000000-0000-0000-0000-000000000801";
 export const BEAR_ID = "00000000-0000-0000-0000-000000000802";
@@ -275,3 +281,184 @@ export const incidentTimelinesById: Record<string, object> = {
   [REDWOOD_ID]: incidentTimelineResponse,
   [BEAR_ID]: bearTimelineResponse,
 };
+
+export const redwoodDecisionContextResponse = decisionContextSchema.parse({
+  incidentId: REDWOOD_ID,
+  defaultGraphVersion: "roads-v1",
+  availableGraphs: [
+    { graphVersion: "roads-v1", edgeCount: 205 },
+    { graphVersion: "roads-v2", edgeCount: 1 },
+  ],
+});
+
+export const bearDecisionContextResponse = decisionContextSchema.parse({
+  incidentId: BEAR_ID,
+  defaultGraphVersion: "roads-bear-v1",
+  availableGraphs: [{ graphVersion: "roads-bear-v1", edgeCount: 0 }],
+});
+
+export const decisionContextsByIncidentId: Record<string, object> = {
+  [REDWOOD_ID]: redwoodDecisionContextResponse,
+  [BEAR_ID]: bearDecisionContextResponse,
+};
+
+export const redwoodRoadEdgesResponse = roadEdgeListSchema.parse({
+  items: [
+    {
+      edgeId: "edge-1",
+      label: "County Road 1",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [-121.7, 39.7],
+          [-121.63, 39.78],
+        ],
+      },
+      travelMinutes: 8,
+      distanceMeters: 6400,
+    },
+    {
+      edgeId: "edge-2",
+      label: "Alpha Road",
+      geometry: null,
+      travelMinutes: 12,
+      distanceMeters: 9100,
+    },
+    {
+      edgeId: "edge-3",
+      label: "Pine Junction Route",
+      geometry: {
+        type: "LineString",
+        coordinates: [
+          [-121.63, 39.78],
+          [-121.51, 39.8],
+        ],
+      },
+      travelMinutes: 10,
+      distanceMeters: 7900,
+    },
+  ],
+  total: 205,
+  missingEdgeIds: [],
+});
+
+export const roadEdgesByGraphVersion: Record<string, object> = {
+  "roads-v1": redwoodRoadEdgesResponse,
+  "roads-v2": roadEdgeListSchema.parse({
+    items: [redwoodRoadEdgesResponse.items[0]],
+    total: 1,
+    missingEdgeIds: [],
+  }),
+  "roads-bear-v1": roadEdgeListSchema.parse({
+    items: [],
+    total: 0,
+    missingEdgeIds: [],
+  }),
+};
+
+export const baselineScenarioVersionResponse = scenarioVersionSchema.parse({
+  id: "scenario-version-redwood-1",
+  scenarioId: "scenario-redwood",
+  incidentId: REDWOOD_ID,
+  incidentSnapshotId: incidentDetailResponse.snapshotId,
+  version: 1,
+  graphVersion: "roads-v1",
+  roadClosures: [],
+  weatherOverrides: [],
+  resourceOverrides: [],
+});
+
+export const scenarioVersionTwoResponse = scenarioVersionSchema.parse({
+  ...baselineScenarioVersionResponse,
+  id: "scenario-version-redwood-2",
+  version: 2,
+  roadClosures: [{ edgeId: "edge-2" }],
+  weatherOverrides: [
+    { windSpeedMps: 14.5, windDirectionDegrees: 225 },
+  ],
+  resourceOverrides: [{ resourceId: "engine-1", available: false }],
+});
+
+const baselineOutcome = {
+  scenarioRisk: {
+    score: 82,
+    algorithmVersion: "risk-v1",
+    contributions: redwoodContributions,
+  },
+  weightedRiskCovered: 75,
+  weightedRiskUncovered: 7,
+  totalTravelMinutes: 18,
+  unreachableDestinationIds: [],
+  unavailableResourceIds: [],
+};
+
+export const baselineRecommendationResponse = recommendationSchema.parse({
+  id: "recommendation-redwood-1",
+  scenarioVersionId: baselineScenarioVersionResponse.id,
+  incidentSnapshotId: incidentDetailResponse.snapshotId,
+  assignments: [
+    {
+      resourceId: "engine-1",
+      destinationId: "community-1",
+      route: {
+        status: "reachable",
+        edgeIds: ["edge-1", "edge-3"],
+        distanceMeters: 14300,
+        travelMinutes: 18,
+        graphVersion: "roads-v1",
+        closureHash: "closures-none",
+      },
+      travelMinutes: 18,
+      capacity: 4,
+    },
+  ],
+  uncoveredDestinationIds: [],
+  objectiveComponents: {
+    travelCost: 18,
+    uncoveredRiskPenalty: 0,
+    objectiveValue: 18,
+  },
+  solverStatus: "OPTIMAL",
+  runtimeMilliseconds: 34,
+  graphVersion: "roads-v1",
+  riskVersion: "risk-v1",
+  algorithmVersion: "allocation-v1",
+  inputVersion: "scenario-input-v1",
+  sourceVersions: { road_graph: "roads-v1", risk: "risk-v1" },
+  explanation: {
+    binding_constraints: ["max_response_minutes"],
+    unassigned_resource_ids: [],
+  },
+  outcome: baselineOutcome,
+});
+
+export const scenarioRecommendationResponse = recommendationSchema.parse({
+  ...baselineRecommendationResponse,
+  id: "recommendation-redwood-2",
+  scenarioVersionId: scenarioVersionTwoResponse.id,
+  assignments: [],
+  uncoveredDestinationIds: ["community-1"],
+  objectiveComponents: {
+    travelCost: 0,
+    uncoveredRiskPenalty: 76,
+    objectiveValue: 76,
+  },
+  solverStatus: "FEASIBLE",
+  runtimeMilliseconds: 41,
+  explanation: {
+    binding_constraints: ["road_closures"],
+    unassigned_resource_ids: ["engine-1"],
+  },
+  outcome: {
+    ...baselineOutcome,
+    scenarioRisk: {
+      ...baselineOutcome.scenarioRisk,
+      score: 76,
+    },
+    weightedRiskCovered: 0,
+    weightedRiskUncovered: 76,
+    totalTravelMinutes: 0,
+    unreachableDestinationIds: ["community-1"],
+    unavailableResourceIds: ["engine-1"],
+  },
+});

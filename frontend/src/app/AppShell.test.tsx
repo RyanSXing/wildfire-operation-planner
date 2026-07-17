@@ -15,7 +15,11 @@ import { MAP_SOURCE_IDS } from "../features/map/layers";
 import {
   BEAR_ID,
   REDWOOD_ID,
+  baselineRecommendationResponse,
+  baselineScenarioVersionResponse,
   incidentListResponse,
+  scenarioRecommendationResponse,
+  scenarioVersionTwoResponse,
 } from "../test/fixtures";
 import {
   mapLibreMock,
@@ -86,7 +90,7 @@ describe("AppShell", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "WildfireOps" }),
     ).toBeVisible();
-    expect(screen.getByText("Observe mode")).toBeVisible();
+    expect(screen.getByText("Observe + plan")).toBeVisible();
     expect(screen.getByRole("note")).toHaveTextContent(
       "Portfolio simulation only. Do not use for emergency or life-safety decisions.",
     );
@@ -300,4 +304,203 @@ describe("AppShell", () => {
     expect(await screen.findByText("Loading replay…")).toBeVisible();
     expect(screen.queryByText("Replay unavailable.")).not.toBeInTheDocument();
   });
+
+  it("runs the complete baseline, immutable branch, and recommendation comparison flow without hiding observe tools", async () => {
+    const calls: Array<{
+      path: string;
+      body: unknown;
+      key: string | null;
+    }> = [];
+    installSuccessfulPlanningCommands(calls);
+    const user = userEvent.setup();
+    renderShell();
+
+    const overview = await screen.findByRole("region", {
+      name: "Incident overview",
+    });
+    expect(within(overview).getByText("Redwood Creek")).toBeVisible();
+    await user.type(
+      await screen.findByRole("textbox", { name: "Scenario name (optional)" }),
+      "Redwood production drill",
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+
+    expect(
+      await screen.findByText("Baseline scenario version 1"),
+    ).toBeVisible();
+    expect(calls.slice(0, 2)).toEqual([
+      {
+        path: `/api/incidents/${REDWOOD_ID}/scenarios`,
+        body: {
+          graphVersion: "roads-v1",
+          objective: "minimize-response-time",
+          name: "Redwood production drill",
+          algorithmConfigVersion: "scenario-v1",
+        },
+        key: expect.any(String),
+      },
+      {
+        path: `/api/scenario-versions/${baselineScenarioVersionResponse.id}/recommendations`,
+        body: { maxResponseMinutes: 30, maxSolverSeconds: 2 },
+        key: expect.any(String),
+      },
+    ]);
+    expect(calls[0].key).not.toBe("");
+    expect(calls[1].key).not.toBe("");
+
+    await user.click(screen.getByRole("checkbox", { name: /Alpha Road/ }));
+    await user.type(screen.getByLabelText("Wind speed (m/s)"), "14.5");
+    await user.type(screen.getByLabelText("Wind direction (degrees)"), "225");
+    await user.click(screen.getByRole("checkbox", { name: /engine-1/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Save scenario version" }),
+    );
+    expect(
+      await screen.findByText(
+        "Active version 2 has no successful recommendation yet.",
+      ),
+    ).toBeVisible();
+    expect(calls[2]).toEqual({
+      path: `/api/scenarios/${baselineScenarioVersionResponse.scenarioId}/versions`,
+      body: {
+        roadClosures: [{ edgeId: "edge-2" }],
+        weatherOverrides: [
+          { windSpeedMps: 14.5, windDirectionDegrees: 225 },
+        ],
+        resourceOverrides: [{ resourceId: "engine-1", available: false }],
+      },
+      key: expect.any(String),
+    });
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Generate recommendation for version 2",
+      }),
+    );
+    expect(await screen.findByText("Current scenario version 2")).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Scenario outcome comparison" }),
+    ).toBeVisible();
+    expect(calls[3]).toEqual({
+      path: `/api/scenario-versions/${scenarioVersionTwoResponse.id}/recommendations`,
+      body: { maxResponseMinutes: 30, maxSolverSeconds: 2 },
+      key: expect.any(String),
+    });
+
+    expect(within(overview).getByText("Redwood Creek")).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Wildfire operations map" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Incident replay timeline" }),
+    ).toBeVisible();
+    expect(screen.getByRole("note")).toBeVisible();
+  });
+
+  it("destroys ephemeral planning state when the selected incident changes", async () => {
+    const calls: Array<{
+      path: string;
+      body: unknown;
+      key: string | null;
+    }> = [];
+    installSuccessfulPlanningCommands(calls);
+    const user = userEvent.setup();
+    renderShell();
+
+    await screen.findByRole("combobox", { name: "Road graph" });
+    await user.click(
+      screen.getByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    expect(
+      await screen.findByText("Baseline scenario version 1"),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /Bear Ridge/i }));
+    expect(
+      await screen.findByRole("combobox", { name: "Road graph" }),
+    ).toHaveValue("roads-bear-v1");
+    expect(
+      screen.queryByRole("region", { name: "Recommendation result" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Scenario name (optional)" }),
+    ).toHaveValue("");
+
+    await user.click(screen.getByRole("button", { name: /Redwood Creek/i }));
+    expect(
+      await screen.findByRole("combobox", { name: "Road graph" }),
+    ).toHaveValue("roads-v1");
+    expect(
+      screen.queryByRole("region", { name: "Recommendation result" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    ).toBeEnabled();
+  });
+
+  it("passes historical replay policy to planning while keeping read tools usable", async () => {
+    renderShell();
+
+    await screen.findByRole("combobox", { name: "Road graph" });
+    fireEvent.change(
+      screen.getByRole("slider", { name: "Replay position" }),
+      { target: { value: String(Date.parse("2024-07-24T18:00:00Z")) } },
+    );
+
+    expect(
+      await screen.findByText("Return to the current snapshot to plan."),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Search roads" })).toBeEnabled();
+    expect(screen.getByText(/Replay frame: 1 incident feature/i)).toBeVisible();
+  });
 });
+
+function installSuccessfulPlanningCommands(
+  calls: Array<{ path: string; body: unknown; key: string | null }>,
+) {
+  const record = async (request: Request) => {
+    calls.push({
+      path: new URL(request.url).pathname,
+      body: await request.json(),
+      key: request.headers.get("Idempotency-Key"),
+    });
+  };
+  server.use(
+    http.post("/api/incidents/:incidentId/scenarios", async ({ request }) => {
+      await record(request);
+      return HttpResponse.json(baselineScenarioVersionResponse, { status: 201 });
+    }),
+    http.post(
+      "/api/scenarios/:scenarioId/versions",
+      async ({ request }) => {
+        await record(request);
+        return HttpResponse.json(scenarioVersionTwoResponse, { status: 201 });
+      },
+    ),
+    http.post(
+      "/api/scenario-versions/:versionId/recommendations",
+      async ({ params, request }) => {
+        await record(request);
+        return HttpResponse.json(
+          String(params.versionId) === baselineScenarioVersionResponse.id
+            ? baselineRecommendationResponse
+            : scenarioRecommendationResponse,
+          { status: 201 },
+        );
+      },
+    ),
+  );
+}

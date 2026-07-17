@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type {
   ExposedAsset,
   IncidentDetail,
@@ -13,6 +15,7 @@ export type IncidentDetailsProps = {
   incident: IncidentDetail;
   visualizedRisk: Risk;
   riskContext: RiskContext;
+  children?: ReactNode;
 };
 
 const numberFormatter = new Intl.NumberFormat("en-CA", {
@@ -23,6 +26,7 @@ export function IncidentDetails({
   incident,
   visualizedRisk,
   riskContext,
+  children,
 }: IncidentDetailsProps) {
   return (
     <article className="decision-workspace" aria-labelledby="decision-workspace-heading">
@@ -183,6 +187,7 @@ export function IncidentDetails({
           </ul>
         )}
       </section>
+      {children}
     </article>
   );
 }

@@ -13,6 +13,7 @@ export type ScenarioEditorProps = {
   resources: readonly SimulatedResource[];
   version?: ScenarioVersion | null;
   busy: boolean;
+  disabled?: boolean;
   errorMessage?: string | null;
   onSubmit: (request: ScenarioVersionCreateRequest) => void;
 };
@@ -30,6 +31,7 @@ export function ScenarioEditor({
   resources,
   version,
   busy,
+  disabled = false,
   errorMessage,
   onSubmit,
 }: ScenarioEditorProps) {
@@ -40,6 +42,7 @@ export function ScenarioEditor({
       resources={resources}
       version={version}
       busy={busy}
+      disabled={disabled}
       errorMessage={errorMessage}
       onSubmit={onSubmit}
     />
@@ -51,6 +54,7 @@ function ScenarioEditorForm({
   resources,
   version,
   busy,
+  disabled = false,
   errorMessage,
   onSubmit,
 }: ScenarioEditorProps) {
@@ -91,20 +95,20 @@ function ScenarioEditorForm({
   const initialRequest = initialReplacement(resources, version);
   const unchanged =
     request !== null && JSON.stringify(request) === JSON.stringify(initialRequest);
-  const disabled = busy || request === null || unchanged;
-  const roads = roadOptions(roadEdges, version);
+  const submitDisabled = disabled || busy || request === null || unchanged;
+  const roads = roadOptions(roadEdges, version, selectedRoadIds);
 
   return (
     <form
       aria-label="Scenario version editor"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!disabled && request) {
+        if (!submitDisabled && request) {
           onSubmit(request);
         }
       }}
     >
-      <fieldset>
+      <fieldset disabled={disabled || busy}>
         <legend>Road closures</legend>
         {roads.map(({ edgeId, label }) => (
           <label key={edgeId}>
@@ -128,7 +132,7 @@ function ScenarioEditorForm({
         ) : null}
       </fieldset>
 
-      <fieldset>
+      <fieldset disabled={disabled || busy}>
         <legend>Weather override</legend>
         {multipleWeather ? (
           <>
@@ -198,7 +202,7 @@ function ScenarioEditorForm({
         ) : null}
       </fieldset>
 
-      <fieldset>
+      <fieldset disabled={disabled || busy}>
         <legend>Resource availability</legend>
         {[...resources]
           .sort((left, right) =>
@@ -227,7 +231,7 @@ function ScenarioEditorForm({
       </fieldset>
 
       {errorMessage ? <p role="alert">{errorMessage}</p> : null}
-      <button type="submit" disabled={disabled}>
+      <button type="submit" disabled={submitDisabled}>
         {busy ? "Saving scenario version" : "Save scenario version"}
       </button>
     </form>
@@ -249,11 +253,17 @@ function normalizedRoadIds(version?: ScenarioVersion | null): string[] {
 function roadOptions(
   roadEdges: readonly RoadEdge[],
   version?: ScenarioVersion | null,
+  selectedRoadIds: readonly string[] = [],
 ): Array<{ edgeId: string; label: string }> {
   const options = new Map(
     roadEdges.map(({ edgeId, label }) => [edgeId, label] as const),
   );
   for (const { edgeId } of version?.roadClosures ?? []) {
+    if (!options.has(edgeId)) {
+      options.set(edgeId, edgeId);
+    }
+  }
+  for (const edgeId of selectedRoadIds) {
     if (!options.has(edgeId)) {
       options.set(edgeId, edgeId);
     }
