@@ -183,7 +183,7 @@ def _write_metadata(source_dir: Path, payload: dict[str, Any]) -> None:
 def _build(source_dir: Path, output: Path) -> Path:
     return build_package(
         source_dir=source_dir,
-        package_id="park-fire-test-v1",
+        package_id="synthetic-replay-test-v1",
         bbox=(-122.4, 39.2, -120.3, 41.0),
         start_at=datetime(2024, 7, 24, 18, tzinfo=UTC),
         end_at=datetime(2024, 7, 24, 18, 30, tzinfo=UTC),
@@ -204,7 +204,7 @@ def test_builder_canonicalizes_staged_replay_deterministically(
     assert (
         build_package(
             source_dir=source_dir,
-            package_id="park-fire-test-v1",
+            package_id="synthetic-replay-test-v1",
             bbox=(-122.4, 39.2, -120.3, 41.0),
             start_at=start_at,
             end_at=end_at,
@@ -215,7 +215,7 @@ def test_builder_canonicalizes_staged_replay_deterministically(
     assert (
         build_package(
             source_dir=source_dir,
-            package_id="park-fire-test-v1",
+            package_id="synthetic-replay-test-v1",
             bbox=(-122.4, 39.2, -120.3, 41.0),
             start_at=start_at,
             end_at=end_at,
@@ -353,7 +353,7 @@ def test_builder_wraps_an_oversized_programmatic_bbox(
     ):
         build_package(
             source_dir=source_dir,
-            package_id="park-fire-test-v1",
+            package_id="synthetic-replay-test-v1",
             bbox=(10**400, 39.2, -120.3, 41.0),
             start_at=datetime(2024, 7, 24, 18, tzinfo=UTC),
             end_at=datetime(2024, 7, 24, 18, 30, tzinfo=UTC),
@@ -414,7 +414,7 @@ def test_builder_rejects_path_traversal_in_metadata_keys(
     with pytest.raises(ReplayBuildError, match=rf"unsafe {field} key"):
         build_package(
             source_dir=source_dir,
-            package_id="park-fire-test-v1",
+            package_id="synthetic-replay-test-v1",
             bbox=(-122.4, 39.2, -120.3, 41.0),
             start_at=datetime(2024, 7, 24, 18, tzinfo=UTC),
             end_at=datetime(2024, 7, 24, 18, 30, tzinfo=UTC),
@@ -472,7 +472,7 @@ def test_builder_atomically_replaces_an_existing_empty_output(tmp_path: Path) ->
 
     assert _build(source_dir, output) == output
 
-    assert ReplayLoader(output).manifest.package_id == "park-fire-test-v1"
+    assert ReplayLoader(output).manifest.package_id == "synthetic-replay-test-v1"
     assert list(tmp_path.glob(".replay.tmp-*")) == []
 
 
@@ -527,7 +527,7 @@ def test_builder_cli_builds_from_the_approved_offline_contract(tmp_path: Path) -
             "--source-dir",
             str(source_dir),
             "--package-id",
-            "park-fire-test-v1",
+            "synthetic-replay-test-v1",
             "--bbox=-122.40,39.20,-120.30,41.00",
             "--start",
             "2024-07-24T18:00:00Z",
@@ -539,7 +539,7 @@ def test_builder_cli_builds_from_the_approved_offline_contract(tmp_path: Path) -
     )
 
     assert result == 0
-    assert ReplayLoader(output).manifest.package_id == "park-fire-test-v1"
+    assert ReplayLoader(output).manifest.package_id == "synthetic-replay-test-v1"
 
 
 def test_builder_preserves_unicode_line_separators_inside_raw_payload(
@@ -582,7 +582,7 @@ def test_builder_cli_rejects_the_unknown_utc_offset(tmp_path: Path) -> None:
                 "--source-dir",
                 str(source_dir),
                 "--package-id",
-                "park-fire-test-v1",
+                "synthetic-replay-test-v1",
                 "--bbox=-122.40,39.20,-120.30,41.00",
                 "--start",
                 "2024-07-24T18:00:00-00:00",
