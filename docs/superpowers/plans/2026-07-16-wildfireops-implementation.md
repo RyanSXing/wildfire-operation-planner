@@ -1909,11 +1909,14 @@ uv run python -m wildfireops.replay.build \
 uv run python -m wildfireops.geospatial.road_graph build \
   --bbox=-122.40,39.20,-120.30,41.00 \
   --output ../data/replay/park-fire/roads.graphml.gz
+uv run alembic upgrade head
+uv run python -m wildfireops.replay.seed ../data/replay/park-fire
 ~~~
 
 The replay builder's final `ReplayLoader(temporary)` call validates the replay
 package; the road-graph builder then attaches graph metadata to the completed
-package.
+package. The database must be empty for a new replay seed. An identical rerun
+is a no-op; changed package or configuration contents conflict.
 
 Expected: every manifest hash and schema check passes, every file is nonempty, and no secret appears in the package.
 
@@ -1934,7 +1937,7 @@ Review the file against the UI and source records before committing it.
 
 - [ ] **Step 3: Write the golden integration test**
 
-The test loads the package into an empty database, advances the replay clock to `manifest.end_at`, runs clustering, exposure, risk, routing, and allocation, and compares stable semantic outputs with golden_outputs.json. Exclude wall-clock runtime and generated database UUIDs from equality.
+The test consumes the already seeded operational state rather than implementing another loader-to-database path, advances the replay clock to `manifest.end_at`, runs clustering, exposure, risk, routing, and allocation, and compares stable semantic outputs with golden_outputs.json. Exclude wall-clock runtime and generated database UUIDs from equality.
 
 - [ ] **Step 4: Write explicit degraded-mode tests**
 

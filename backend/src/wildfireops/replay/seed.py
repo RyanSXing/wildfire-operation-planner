@@ -1,9 +1,13 @@
-"""Deterministic replay seed identity and result serialization."""
+"""Deterministic replay seed identity, serialization, and command."""
 
+import argparse
+import asyncio
 import json
+import sys
 from dataclasses import asdict, dataclass
 from hashlib import sha256
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Literal
 
 from geoalchemy2.elements import WKTElement
@@ -11,10 +15,13 @@ from shapely.geometry import shape  # type: ignore[import-untyped]
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from wildfireops.config import get_settings
+from wildfireops.db import create_engine, create_session_factory
 from wildfireops.decision.risk import RiskConfig
 from wildfireops.geospatial.clustering import ClusteringConfig
 from wildfireops.geospatial.clustering import cluster_detections
 from wildfireops.geospatial.exposure import ExposureConfig
+from wildfireops.ingestion.worker import build_exposure_config, build_risk_config
 from wildfireops.persistence.exposures import refresh_exposure_and_risk
 from wildfireops.persistence.incidents import (
     acquire_incident_refresh_lock,
@@ -32,7 +39,7 @@ from wildfireops.persistence.observed_models import (
     materialize_json_object,
 )
 from wildfireops.persistence.scenarios import ScenarioRepository
-from wildfireops.replay.loader import ReplayLoader
+from wildfireops.replay.loader import ReplayLoader, ReplayPackageCorrupt
 from wildfireops.replay.manifest import ReplayManifest
 
 
@@ -267,3 +274,47 @@ async def seed_replay_package(
                 incidents_created=incidents_created,
                 snapshots_created=len(snapshot_ids),
             )
+
+
+def _argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Seed an offline replay package.")
+    parser.add_argument("package", type=Path, metavar="PACKAGE")
+    return parser
+
+
+async def _async_main(package: Path) -> int:
+    settings = get_settings()
+    loader = ReplayLoader(package)
+    engine = create_engine(settings)
+    try:
+        result = await seed_replay_package(
+            loader=loader,
+            session_factory=create_session_factory(engine),
+            clustering_config=ClusteringConfig(
+                spatial_radius_meters=settings.clustering_spatial_radius_meters,
+                temporal_window_seconds=settings.clustering_temporal_window_seconds,
+                minimum_points=settings.clustering_minimum_points,
+                algorithm_version=settings.clustering_algorithm_version,
+            ),
+            exposure_config=build_exposure_config(settings),
+            risk_config=build_risk_config(settings),
+        )
+        print(_result_json(result))
+        return 0
+    finally:
+        await engine.dispose()
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    package = _argument_parser().parse_args(argv).package
+    try:
+        return asyncio.run(_async_main(package))
+    except (ReplayPackageCorrupt, ReplaySeedError) as error:
+        print(f"replay seed failed: {error}", file=sys.stderr)
+    except Exception as error:
+        print(f"replay seed failed: {type(error).__name__}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

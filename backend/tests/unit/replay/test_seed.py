@@ -1,11 +1,20 @@
 from dataclasses import fields, replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from unittest.mock import AsyncMock
 
+import pytest
+
+from wildfireops.config import Settings
 from wildfireops.decision.risk import RiskConfig
 from wildfireops.geospatial.clustering import ClusteringConfig
 from wildfireops.geospatial.exposure import ExposureConfig
+from wildfireops.ingestion.worker import build_risk_config
+from wildfireops.replay import seed
+from wildfireops.replay.loader import ReplayPackageCorrupt
 from wildfireops.replay.manifest import ReplayManifest, RoadGraphMetadata
 from wildfireops.replay.seed import (
+    ReplaySeedError,
     ReplaySeedResult,
     _package_digest,
     _result_json,
@@ -174,3 +183,145 @@ def test_result_json_represents_an_already_seeded_result() -> None:
         '"package_id":"synthetic-replay-v1","resources_inserted":0,'
         '"snapshots_created":0,"status":"already_seeded"}'
     )
+
+
+def test_seed_cli_uses_the_package_and_settings_then_disposes_engine(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings = Settings(
+        clustering_spatial_radius_meters=123.0,
+        clustering_temporal_window_seconds=456.0,
+        clustering_minimum_points=7,
+        clustering_algorithm_version="configured-cluster-v1",
+        exposure_buffer_meters=789.0,
+    )
+    package = Path("recorded-package")
+    loader = object()
+    session_factory = object()
+    calls: list[str] = []
+    captured: dict[str, object] = {}
+
+    class Engine:
+        async def dispose(self) -> None:
+            calls.append("dispose")
+
+    engine = Engine()
+    result = ReplaySeedResult(
+        package_id="synthetic-replay-v1",
+        package_digest="a" * 64,
+        status="seeded",
+        assets_inserted=1,
+        resources_inserted=2,
+        observations_inserted=3,
+        incidents_created=4,
+        snapshots_created=5,
+    )
+
+    monkeypatch.setattr(seed, "get_settings", lambda: settings)
+
+    def replay_loader(value: Path) -> object:
+        calls.append("loader")
+        captured["package"] = value
+        return loader
+
+    monkeypatch.setattr(seed, "ReplayLoader", replay_loader)
+
+    def create_engine(value: Settings) -> Engine:
+        calls.append("engine")
+        captured["engine_settings"] = value
+        return engine
+
+    monkeypatch.setattr(seed, "create_engine", create_engine)
+
+    def create_session_factory(value: Engine) -> object:
+        calls.append("session_factory")
+        captured["session_engine"] = value
+        return session_factory
+
+    monkeypatch.setattr(seed, "create_session_factory", create_session_factory)
+
+    async def seed_package(**kwargs: object) -> ReplaySeedResult:
+        calls.append("seed")
+        captured.update(kwargs)
+        return result
+
+    monkeypatch.setattr(seed, "seed_replay_package", seed_package)
+
+    assert seed.main([str(package)]) == 0
+    assert capsys.readouterr().out == f"{_result_json(result)}\n"
+    assert calls == ["loader", "engine", "session_factory", "seed", "dispose"]
+    assert captured == {
+        "package": package,
+        "engine_settings": settings,
+        "session_engine": engine,
+        "loader": loader,
+        "session_factory": session_factory,
+        "clustering_config": ClusteringConfig(
+            spatial_radius_meters=123.0,
+            temporal_window_seconds=456.0,
+            minimum_points=7,
+            algorithm_version="configured-cluster-v1",
+        ),
+        "exposure_config": ExposureConfig(buffer_meters=789.0),
+        "risk_config": build_risk_config(settings),
+    }
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            ReplayPackageCorrupt("invalid manifest"),
+            "replay seed failed: invalid manifest\n",
+        ),
+        (
+            ReplaySeedError("no incident clusters"),
+            "replay seed failed: no incident clusters\n",
+        ),
+    ],
+)
+def test_seed_cli_prints_safe_known_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error: Exception,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(seed, "get_settings", Settings)
+    monkeypatch.setattr(seed, "ReplayLoader", lambda package: object())
+    monkeypatch.setattr(
+        seed,
+        "create_engine",
+        lambda settings: type("Engine", (), {"dispose": AsyncMock()})(),
+    )
+    monkeypatch.setattr(seed, "create_session_factory", lambda engine: object())
+
+    async def seed_package(**kwargs: object) -> ReplaySeedResult:
+        raise error
+
+    monkeypatch.setattr(seed, "seed_replay_package", seed_package)
+
+    assert seed.main(["recorded-package"]) == 1
+    assert capsys.readouterr().err == expected
+
+
+def test_seed_cli_hides_unexpected_error_messages(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(seed, "get_settings", Settings)
+    monkeypatch.setattr(seed, "ReplayLoader", lambda package: object())
+    monkeypatch.setattr(
+        seed,
+        "create_engine",
+        lambda settings: type("Engine", (), {"dispose": AsyncMock()})(),
+    )
+    monkeypatch.setattr(seed, "create_session_factory", lambda engine: object())
+
+    async def seed_package(**kwargs: object) -> ReplaySeedResult:
+        raise RuntimeError("database credentials must remain hidden")
+
+    monkeypatch.setattr(seed, "seed_replay_package", seed_package)
+
+    assert seed.main(["recorded-package"]) == 1
+    assert capsys.readouterr().err == "replay seed failed: RuntimeError\n"
