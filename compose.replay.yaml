@@ -1,4 +1,7 @@
 services:
+  db:
+    ports: !reset []
+
   api:
     command: >-
       sh -c "uv sync --frozen &&

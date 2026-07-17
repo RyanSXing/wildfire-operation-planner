@@ -4,31 +4,12 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
-const compose = ["compose", "-f", "compose.yaml", "-f", "compose.replay.yaml"];
+const replayPreview = fileURLToPath(
+  new URL("../../scripts/replay-preview", import.meta.url),
+);
 
 export default async function replayGlobalSetup(): Promise<void> {
-  await dockerCompose("up", "-d", "db");
-  await waitFor("database", async () => {
-    await dockerCompose("exec", "-T", "db", "pg_isready", "-U", "wildfireops", "-d", "template1");
-  });
-  await dockerCompose("stop", "api", "frontend", "worker");
-  await dockerCompose(
-    "exec",
-    "-T",
-    "db",
-    "psql",
-    "-v",
-    "ON_ERROR_STOP=1",
-    "-U",
-    "wildfireops",
-    "-d",
-    "template1",
-    "-c",
-    "DROP DATABASE IF EXISTS wildfireops WITH (FORCE);",
-    "-c",
-    "CREATE DATABASE wildfireops OWNER wildfireops TEMPLATE template_postgis;",
-  );
-  await dockerCompose("up", "-d", "--force-recreate", "db", "api", "frontend");
+  await run(replayPreview, [], { cwd: projectRoot });
   await waitFor("replay API", async () => {
     const response = await fetch("http://127.0.0.1:8000/api/health");
     if (!response.ok) throw new Error(`health returned ${response.status}`);
@@ -46,10 +27,6 @@ export default async function replayGlobalSetup(): Promise<void> {
       throw new Error("incidents are not ready");
     }
   });
-}
-
-async function dockerCompose(...args: string[]): Promise<void> {
-  await run("docker", [...compose, ...args], { cwd: projectRoot });
 }
 
 async function waitFor(label: string, check: () => Promise<void>): Promise<void> {

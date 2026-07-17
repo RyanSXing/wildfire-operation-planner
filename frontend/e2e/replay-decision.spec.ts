@@ -29,10 +29,32 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
   await planning.getByRole("button", { name: "Create baseline and generate recommendation" }).click();
   await expect(planning.getByRole("form", { name: "Scenario version editor" })).toBeVisible();
 
+  const baselineAssignment = planning
+    .getByRole("list", { name: "Recommendation assignments" })
+    .getByRole("listitem")
+    .first();
+  await expect(baselineAssignment).toContainText("Route statusreachable");
+  const baselineEdgeIds = (await baselineAssignment
+    .getByLabel("Route edge IDs")
+    .innerText())
+    .split(",")
+    .map((edgeId) => edgeId.trim())
+    .filter(Boolean);
+  expect(baselineEdgeIds).not.toHaveLength(0);
+  const closedEdgeId = baselineEdgeIds[0];
+  const baselineDestination = await baselineAssignment
+    .getByLabel("Assignment destination ID")
+    .innerText();
+
+  await planning.getByLabel("Search road edges").fill(closedEdgeId);
+  await planning.getByRole("button", { name: "Search roads" }).click();
+
   const editor = planning.getByRole("form", { name: "Scenario version editor" });
-  const closures = editor.getByRole("group", { name: "Road closures" }).getByRole("checkbox");
-  expect(await closures.count()).toBeGreaterThan(0);
-  await closures.first().check();
+  const closure = editor
+    .getByRole("group", { name: "Road closures" })
+    .getByRole("checkbox", { name: new RegExp(closedEdgeId) });
+  await expect(closure).toHaveCount(1);
+  await closure.check();
   await editor.getByRole("button", { name: "Save scenario version" }).click();
   await expect(planning).toContainText("Active scenario version 2");
   await planning.getByRole("button", { name: "Generate recommendation for version 2" }).click();
@@ -40,6 +62,16 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
   const outcomes = comparison.getByRole("table", { name: "Outcome metrics comparison" });
   await expect(outcomes).toContainText("Baseline");
   await expect(outcomes).toContainText("Scenario");
+  await expect(planning).toContainText("No assignments were returned.");
+  await expect(
+    planning.getByRole("list", { name: "Uncovered destinations" }),
+  ).toContainText(baselineDestination);
+  const uncoveredRow = outcomes.getByRole("row", {
+    name: /Weighted risk uncovered/,
+  });
+  await expect(uncoveredRow).not.toContainText(
+    /^Weighted risk uncovered\s+0\s+0\s+/,
+  );
 
   const decisions = page.getByRole("region", { name: "Recommendation decision controls" });
   await decisions.getByRole("button", { name: "Approve recommendation" }).click();
