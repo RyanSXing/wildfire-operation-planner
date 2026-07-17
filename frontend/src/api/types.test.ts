@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { geometrySchema } from "./types";
+import { geometrySchema, jsonValueSchema } from "./types";
+
+function nestedObject(depth: number): unknown {
+  let value: unknown = "leaf";
+  for (let index = 0; index < depth; index += 1) {
+    value = { child: value };
+  }
+  return value;
+}
+
+function nestedGeometryCollection(depth: number): unknown {
+  let geometry: unknown = {
+    type: "Point",
+    coordinates: [-121.6, 39.8],
+  };
+  for (let index = 0; index < depth; index += 1) {
+    geometry = { type: "GeometryCollection", geometries: [geometry] };
+  }
+  return geometry;
+}
+
+describe("bounded JSON schemas", () => {
+  it("rejects excessively nested JSON without throwing", () => {
+    expect(() => jsonValueSchema.safeParse(nestedObject(80))).not.toThrow();
+    expect(jsonValueSchema.safeParse(nestedObject(80)).success).toBe(false);
+  });
+});
 
 describe("geometrySchema", () => {
   it("rejects unknown or structurally incomplete GeoJSON geometry", () => {
@@ -62,6 +88,15 @@ describe("geometrySchema", () => {
         type: "GeometryCollection",
         geometries: [{ type: "Banana", coordinates: [0] }],
       }).success,
+    ).toBe(false);
+  });
+
+  it("rejects excessively nested GeometryCollections without throwing", () => {
+    expect(() =>
+      geometrySchema.safeParse(nestedGeometryCollection(80)),
+    ).not.toThrow();
+    expect(
+      geometrySchema.safeParse(nestedGeometryCollection(80)).success,
     ).toBe(false);
   });
 });

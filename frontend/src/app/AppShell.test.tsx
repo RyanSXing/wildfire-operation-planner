@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, delay, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MAP_SOURCE_IDS } from "../features/map/layers";
@@ -272,5 +272,32 @@ describe("AppShell", () => {
     expect(
       screen.getByRole("heading", { name: "Decision workspace" }),
     ).toBeVisible();
+  });
+
+  it("does not report an empty source-status response as fresh", async () => {
+    server.use(
+      http.get("/api/sources/status", () => HttpResponse.json({ items: [] })),
+    );
+
+    renderShell();
+
+    expect(
+      await screen.findByText("No source status is available."),
+    ).toBeVisible();
+    expect(screen.queryByText(/Sources fresh/i)).not.toBeInTheDocument();
+  });
+
+  it("distinguishes a pending timeline from an empty replay", async () => {
+    server.use(
+      http.get("/api/incidents/:incidentId/timeline", async () => {
+        await delay("infinite");
+        return HttpResponse.json({ items: [] });
+      }),
+    );
+
+    renderShell();
+
+    expect(await screen.findByText("Loading replay…")).toBeVisible();
+    expect(screen.queryByText("Replay unavailable.")).not.toBeInTheDocument();
   });
 });

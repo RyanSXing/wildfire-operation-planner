@@ -1,7 +1,19 @@
 import { z } from "zod";
 
 export const freshnessSchema = z.enum(["fresh", "stale", "unavailable"]);
-export const jsonValueSchema = z.json();
+const MAX_NESTING_DEPTH = 64;
+
+type JsonValueShape =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValueShape[]
+  | { [key: string]: JsonValueShape };
+
+export const jsonValueSchema = z.custom<JsonValueShape>(isBoundedJsonValue, {
+  error: "Expected a bounded JSON value",
+});
 export const jsonObjectSchema = z.record(z.string(), jsonValueSchema);
 export const timestampSchema = z.iso.datetime({ offset: true });
 const positionSchema = z.tuple([z.number(), z.number()]).rest(z.number());
@@ -53,17 +65,104 @@ type GeometryValue =
       [key: string]: unknown;
     };
 
-export const geometrySchema: z.ZodType<GeometryValue> = z.lazy(() =>
-  z.union([
-    coordinateGeometrySchema,
-    z
-      .object({
-        type: z.literal("GeometryCollection"),
-        geometries: z.array(geometrySchema),
-      })
-      .passthrough(),
-  ]),
-);
+export const geometrySchema = z.custom<GeometryValue>(isBoundedGeometry, {
+  error: "Expected bounded GeoJSON geometry",
+});
+
+function isBoundedJsonValue(value: unknown): value is JsonValueShape {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value, depth: 0 },
+  ];
+  const visited = new WeakSet<object>();
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) {
+      break;
+    }
+
+    if (
+      current.value === null ||
+      typeof current.value === "string" ||
+      typeof current.value === "boolean"
+    ) {
+      continue;
+    }
+    if (typeof current.value === "number") {
+      if (!Number.isFinite(current.value)) {
+        return false;
+      }
+      continue;
+    }
+    if (
+      current.depth >= MAX_NESTING_DEPTH ||
+      typeof current.value !== "object" ||
+      visited.has(current.value)
+    ) {
+      return false;
+    }
+
+    visited.add(current.value);
+    if (Array.isArray(current.value)) {
+      for (const item of current.value) {
+        pending.push({ value: item, depth: current.depth + 1 });
+      }
+      continue;
+    }
+    if (!isPlainRecord(current.value)) {
+      return false;
+    }
+    for (const item of Object.values(current.value)) {
+      pending.push({ value: item, depth: current.depth + 1 });
+    }
+  }
+
+  return true;
+}
+
+function isBoundedGeometry(value: unknown): value is GeometryValue {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value, depth: 0 },
+  ];
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current || !isPlainRecord(current.value)) {
+      return false;
+    }
+
+    if (current.value.type === "GeometryCollection") {
+      if (
+        current.depth >= MAX_NESTING_DEPTH ||
+        !Array.isArray(current.value.geometries)
+      ) {
+        return false;
+      }
+      for (const geometry of current.value.geometries) {
+        pending.push({ value: geometry, depth: current.depth + 1 });
+      }
+      continue;
+    }
+
+    try {
+      if (!coordinateGeometrySchema.safeParse(current.value).success) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
 
 export const riskContributionSchema = z.object({
   name: z.string().min(1),

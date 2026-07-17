@@ -265,9 +265,25 @@
 }
 
 .topbar .freshness-badge {
-  color: #ffffff;
-  background: transparent;
   border-color: var(--slate-500);
+}
+
+.topbar .freshness-badge--fresh {
+  color: #bbf7d0;
+  background: rgb(20 83 45 / 35%);
+  border-color: #4ade80;
+}
+
+.topbar .freshness-badge--stale {
+  color: #fde68a;
+  background: rgb(120 53 15 / 35%);
+  border-color: #fbbf24;
+}
+
+.topbar .freshness-badge--unavailable {
+  color: #fecaca;
+  background: rgb(127 29 29 / 35%);
+  border-color: #f87171;
 }
 
 .empty-state,
@@ -708,9 +724,6 @@
     grid-template-columns: 210px minmax(0, 1fr) minmax(300px, 310px);
   }
 
-  .source-summary li > span:first-child {
-    display: none;
-  }
 }
 
 @media (max-width: 900px) {

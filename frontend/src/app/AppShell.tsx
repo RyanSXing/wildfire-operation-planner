@@ -158,7 +158,11 @@ export function AppShell() {
                   />
                 </Suspense>
 
-                {timelineQuery.isError ? (
+                {timelineQuery.isPending ? (
+                  <p className="replay-timeline replay-timeline__loading" role="status">
+                    Loading replay…
+                  </p>
+                ) : timelineQuery.isError ? (
                   <LocalFailure
                     label="Replay timeline unavailable"
                     message="Replay data could not be loaded."
@@ -248,6 +252,19 @@ function SourceFreshness({
       <p className="source-summary" role="status">
         Sources loading…
       </p>
+    );
+  }
+
+  if (statuses.length === 0) {
+    return (
+      <section
+        className="source-summary"
+        aria-label="Source freshness"
+        role="status"
+      >
+        <strong>Sources unavailable</strong>
+        <span>No source status is available.</span>
+      </section>
     );
   }
 

@@ -76,29 +76,39 @@ export class ApiClient {
 
     if (!response.ok) {
       const errorPayload = await safeJson(response, signal);
-      const parsedError = apiErrorEnvelopeSchema.safeParse(errorPayload);
-      if (parsedError.success) {
-        throw new ApiClientError(
-          parsedError.data.error.code,
-          parsedError.data.error.message,
-          parsedError.data.error.details,
-          response.status,
-        );
+      try {
+        const parsedError = apiErrorEnvelopeSchema.safeParse(errorPayload);
+        if (parsedError.success) {
+          throw new ApiClientError(
+            parsedError.data.error.code,
+            parsedError.data.error.message,
+            parsedError.data.error.details,
+            response.status,
+          );
+        }
+      } catch (error) {
+        if (error instanceof ApiClientError) {
+          throw error;
+        }
       }
       throw new ApiClientError("http_error", "Request failed", {}, response.status);
     }
 
     const payload = await safeJson(response, signal);
-    const parsed = schema.safeParse(payload);
-    if (!parsed.success) {
-      throw new ApiClientError(
-        "invalid_response",
-        "Server returned an invalid response",
-        {},
-        response.status,
-      );
+    try {
+      const parsed = schema.safeParse(payload);
+      if (parsed.success) {
+        return parsed.data;
+      }
+    } catch {
+      // Schema evaluation failures use the same sanitized invalid-response path.
     }
-    return parsed.data;
+    throw new ApiClientError(
+      "invalid_response",
+      "Server returned an invalid response",
+      {},
+      response.status,
+    );
   }
 }
 

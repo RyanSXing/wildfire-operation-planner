@@ -66,6 +66,50 @@ describe("ApiClient", () => {
     expect(String(error)).not.toContain("response-secret");
   });
 
+  it("sanitizes schema failures for excessively nested response data", async () => {
+    let rawValue: unknown = "response-secret-leaf";
+    for (let index = 0; index < 5_000; index += 1) {
+      rawValue = { child: rawValue };
+    }
+    const payload = {
+      ...incidentListResponse,
+      items: [
+        {
+          ...incidentListResponse.items[0],
+          risk: {
+            ...incidentListResponse.items[0].risk,
+            contributions: [
+              {
+                ...incidentListResponse.items[0].risk.contributions[0],
+                rawValue,
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => payload,
+    } as unknown as Response);
+
+    let error: ApiClientError;
+    try {
+      error = await capturedError(client.listIncidents());
+    } finally {
+      fetchSpy.mockRestore();
+    }
+
+    expect(error).toMatchObject({
+      code: "invalid_response",
+      message: "Server returned an invalid response",
+      details: {},
+      status: 200,
+    });
+    expect(String(error)).not.toContain("response-secret");
+  });
+
   it("rejects malformed GeoJSON before it reaches the map", async () => {
     server.use(
       http.get(`/api/incidents/${REDWOOD_ID}`, () =>
