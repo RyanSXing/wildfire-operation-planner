@@ -11,7 +11,11 @@ from typing import Literal, cast
 from pydantic import JsonValue
 
 
-type EventName = Literal["incident-updated", "source-status-updated"]
+type EventName = Literal[
+    "incident-updated",
+    "source-status-updated",
+    "resync-required",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,23 +35,23 @@ class EventBusEvent:
 
 class EventQueue(asyncio.Queue[EventBusEvent]):
     def offer(self, event: EventBusEvent) -> None:
+        queued = cast(deque[EventBusEvent], getattr(self, "_queue"))
+        if any(queued_event.name == "resync-required" for queued_event in queued):
+            return
         if not self.full():
             self.put_nowait(event)
             return
 
-        queued = cast(deque[EventBusEvent], getattr(self, "_queue"))
-        incident_index = next(
-            (
-                index
-                for index, queued_event in enumerate(queued)
-                if queued_event.name == "incident-updated"
-            ),
-            None,
+        removed_count = len(queued)
+        queued.clear()
+        queued.append(
+            EventBusEvent(
+                name="resync-required",
+                _encoded_data="{}",
+            )
         )
-        if incident_index is None:
-            return
-        del queued[incident_index]
-        queued.append(event)
+        unfinished_tasks = cast(int, getattr(self, "_unfinished_tasks"))
+        setattr(self, "_unfinished_tasks", unfinished_tasks - removed_count + 1)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -59,9 +63,8 @@ class _Subscription:
 class EventBus:
     """Bounded, nonblocking fan-out for one API process.
 
-    When a subscriber queue is full, the oldest queued incident update is
-    evicted and the new event is appended. If the queue contains only source
-    status events, the incoming event is dropped so their order is preserved.
+    A full subscriber queue collapses to one resync marker. Further targeted
+    updates are coalesced while that marker remains queued.
     """
 
     def __init__(self, queue_size: int = 64) -> None:
@@ -93,7 +96,11 @@ class EventBus:
                 self._subscribers.discard(subscription)
 
     def publish(self, name: EventName, data: Mapping[str, object]) -> None:
-        if name not in {"incident-updated", "source-status-updated"}:
+        if name not in {
+            "incident-updated",
+            "source-status-updated",
+            "resync-required",
+        }:
             raise ValueError("event name is not supported")
         encoded_data = _canonical_payload(data)
         with self._subscribers_lock:

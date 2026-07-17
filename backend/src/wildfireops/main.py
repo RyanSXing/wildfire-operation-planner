@@ -1,6 +1,8 @@
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -8,6 +10,7 @@ from wildfireops.api.routes.audit import router as audit_router
 from wildfireops.api.routes.decisions import router as decisions_router
 from wildfireops.api.errors import register_error_handlers
 from wildfireops.api.event_bus import EventBus
+from wildfireops.api.postgres_events import relay_postgres_events
 from wildfireops.api.request_metrics import RequestMetricsMiddleware
 from wildfireops.api.routes.events import router as events_router
 from wildfireops.api.routes.incidents import router as incidents_router
@@ -23,17 +26,33 @@ from wildfireops.db import (
 from wildfireops.observability import configure_observability
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+type EventRelay = Callable[[str, EventBus], Coroutine[Any, Any, None]]
+
+
+def create_app(
+    settings: Settings | None = None,
+    *,
+    event_relay: EventRelay = relay_postgres_events,
+) -> FastAPI:
     resolved = settings or get_settings()
     engine = create_engine(resolved)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         del application
+        relay_task: asyncio.Task[None] = asyncio.create_task(
+            event_relay(resolved.database_url, app.state.event_bus)
+        )
         try:
             yield
         finally:
-            await engine.dispose()
+            relay_task.cancel()
+            try:
+                await relay_task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                await engine.dispose()
 
     app = FastAPI(title="WildfireOps", lifespan=lifespan)
     app.state.settings = resolved

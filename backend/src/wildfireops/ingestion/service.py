@@ -25,6 +25,10 @@ from wildfireops.persistence.incidents import (
 )
 from wildfireops.persistence.observations import ObservationRepository
 from wildfireops.persistence.observed_models import SourceStatusModel
+from wildfireops.persistence.notifications import (
+    notify_ingestion_success,
+    notify_source_status,
+)
 from wildfireops.sources.base import SourceAdapter
 from wildfireops.sources.http import SourceUnavailable
 
@@ -133,7 +137,7 @@ class IngestionService:
                     clusters,
                     self._clustering_config.spatial_radius_meters,
                 )
-                await self._exposure_risk_refresher(
+                snapshot_ids = await self._exposure_risk_refresher(
                     session,
                     reference_at=reference_at,
                     exposure_config=self._exposure_config,
@@ -149,6 +153,11 @@ class IngestionService:
                     accepted=stats.inserted,
                     deduplicated=stats.deduplicated,
                     quarantined=quarantined,
+                )
+                await notify_ingestion_success(
+                    session,
+                    snapshot_ids=snapshot_ids,
+                    source_name=adapter.source_name,
                 )
                 await session.commit()
             except Exception as error:
@@ -189,6 +198,7 @@ class IngestionService:
                     attempted_at=attempted_at,
                     error_message=_sanitized_error_message(error),
                 )
+                await notify_source_status(session, source_name=source_name)
                 await session.commit()
             except Exception:
                 await session.rollback()
@@ -210,6 +220,7 @@ class IngestionService:
                     attempted_at=attempted_at,
                     error_message=error_message,
                 )
+                await notify_source_status(session, source_name=source_name)
                 await session.commit()
             except Exception:
                 await session.rollback()

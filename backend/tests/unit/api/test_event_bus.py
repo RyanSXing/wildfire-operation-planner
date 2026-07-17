@@ -32,39 +32,38 @@ async def test_publish_preserves_order_and_isolates_subscribers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slow_subscriber_replaces_oldest_incident_and_preserves_source_order() -> (
-    None
-):
+async def test_full_queue_collapses_to_one_resync_marker() -> None:
     bus = EventBus(queue_size=2)
 
     async with bus.subscribe() as queue:
         bus.publish("source-status-updated", {"sourceName": "nws"})
         bus.publish("incident-updated", {"incidentId": "incident-old"})
         bus.publish("incident-updated", {"incidentId": "incident-new"})
+        bus.publish("source-status-updated", {"sourceName": "nasa_firms"})
 
-        events = [queue.get_nowait(), queue.get_nowait()]
+        events = [queue.get_nowait()]
 
     assert [(event.name, dict(event.data)) for event in events] == [
-        ("source-status-updated", {"sourceName": "nws"}),
-        ("incident-updated", {"incidentId": "incident-new"}),
+        ("resync-required", {}),
     ]
 
 
 @pytest.mark.asyncio
-async def test_full_source_only_queue_drops_new_incident_without_blocking() -> None:
+async def test_sse_serializes_resync_with_named_event_format() -> None:
     bus = EventBus(queue_size=2)
+    stream = stream_events(bus, heartbeat_seconds=1)
+    pending = asyncio.create_task(anext(stream))
+    for _ in range(10):
+        if bus.subscriber_count == 1:
+            break
+        await asyncio.sleep(0)
 
-    async with bus.subscribe() as queue:
-        bus.publish("source-status-updated", {"sourceName": "nws"})
-        bus.publish("source-status-updated", {"sourceName": "nasa_firms"})
-        bus.publish("incident-updated", {"incidentId": "incident-dropped"})
+    bus.publish("resync-required", {})
 
-        events = [queue.get_nowait(), queue.get_nowait()]
-
-    assert [dict(event.data) for event in events] == [
-        {"sourceName": "nws"},
-        {"sourceName": "nasa_firms"},
-    ]
+    try:
+        assert await pending == "event: resync-required\ndata: {}\n\n"
+    finally:
+        await stream.aclose()
 
 
 @pytest.mark.asyncio
@@ -187,8 +186,7 @@ async def test_coalescing_never_temporarily_completes_queue_join() -> None:
         join_task = asyncio.create_task(queue.join())
         await asyncio.sleep(0)
         assert not join_task.done()
-        queue.get_nowait()
-        queue.task_done()
-        queue.get_nowait()
+        event = queue.get_nowait()
+        assert event.name == "resync-required"
         queue.task_done()
         await asyncio.wait_for(join_task, timeout=1)
