@@ -1,0 +1,70 @@
+services:
+  db:
+    image: postgis/postgis:16-3.5
+    environment:
+      POSTGRES_DB: wildfireops
+      POSTGRES_PASSWORD: wildfireops
+      POSTGRES_USER: wildfireops
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wildfireops -d wildfireops"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+
+  api:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    command: >-
+      sh -c "uv sync --frozen &&
+      uv run uvicorn wildfireops.main:app --host 0.0.0.0 --port 8000 --reload"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WILDFIREOPS_DATABASE_URL: postgresql+asyncpg://wildfireops:wildfireops@db:5432/wildfireops
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - backend-venv:/app/.venv
+    working_dir: /app
+
+  worker:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    command: >-
+      sh -c "uv sync --frozen &&
+      uv run python -m wildfireops.ingestion.worker"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WILDFIREOPS_DATABASE_URL: postgresql+asyncpg://wildfireops:wildfireops@db:5432/wildfireops
+      WILDFIREOPS_FIRMS_MAP_KEY: ${WILDFIREOPS_FIRMS_MAP_KEY:-}
+    volumes:
+      - ./backend:/app
+      - worker-venv:/app/.venv
+    working_dir: /app
+
+  frontend:
+    image: node:22-alpine
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      - api
+    environment:
+      WILDFIREOPS_API_PROXY_TARGET: http://api:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    working_dir: /app
+
+volumes:
+  backend-venv:
+  frontend-node-modules:
+  postgres-data:
+  worker-venv:

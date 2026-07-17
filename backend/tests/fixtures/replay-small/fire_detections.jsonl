@@ -1,0 +1,2 @@
+{"observation_type":"fire_detection","source_name":"nasa_firms","source_record_id":"detection-1818","observed_at":"2024-07-24T18:18:00Z","longitude":-121.45,"latitude":39.82,"confidence":0.95,"intensity":331.2,"raw_payload":{"satellite":"N20","instrument":"VIIRS","recorded":true}}
+{"observation_type":"fire_detection","source_name":"nasa_firms","source_record_id":"detection-1812","observed_at":"2024-07-24T18:12:00Z","longitude":-121.47,"latitude":39.8,"confidence":0.75,"intensity":327.4,"raw_payload":{"satellite":"N20","instrument":"VIIRS","recorded":true}}

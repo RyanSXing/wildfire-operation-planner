@@ -271,6 +271,10 @@ git commit -m "chore: scaffold WildfireOps application"
 
 ### Task 2: Immutable domain types and invariants
 
+> **Resolved contract:** Observation timestamps must have a UTC offset of exactly zero,
+> and observation payloads must be defensively copied into recursively immutable JSON
+> values. These stronger invariants supersede the original sample wherever it differed.
+
 **Files:**
 - Create: backend/src/wildfireops/domain/enums.py
 - Create: backend/src/wildfireops/domain/observations.py
@@ -324,6 +328,11 @@ def test_scenario_version_is_immutable() -> None:
         scenario.version = 2
 ~~~
 
+Also add shared, parameterized coverage for both observation types that rejects missing
+and nonzero UTC offsets, accepts zero-offset aware timestamps, rejects mutation of the
+top-level payload and nested mappings/sequences, proves caller-owned input mutation is
+isolated after construction, and rejects unsupported non-JSON values.
+
 - [ ] **Step 2: Run the tests and confirm the red state**
 
 Run:
@@ -337,14 +346,56 @@ Expected: FAIL because the domain modules do not exist.
 
 - [ ] **Step 3: Implement observation and operation value objects**
 
-Create immutable dataclasses with slots. NormalizedObservation must validate longitude in [-180, 180], latitude in [-90, 90], confidence in [0, 1], UTC-aware observed_at, and a non-empty source identity.
+Create immutable dataclasses with slots. Both observation types must require
+`observed_at.utcoffset() == timedelta(0)`; timestamps with a missing or nonzero offset
+are invalid. NormalizedObservation must also validate longitude in [-180, 180], latitude
+in [-90, 90], confidence in [0, 1], and a non-empty source identity. Observation payloads
+use the public `FrozenJsonValue` and `FrozenJsonObject` types. Construction defensively
+copies and recursively freezes mappings as read-only mappings and sequences as tuples;
+unsupported non-JSON content is rejected.
 
 Use this public shape in backend/src/wildfireops/domain/observations.py:
 
 ~~~python
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from math import isfinite
+from types import MappingProxyType
+
+
+type FrozenJsonScalar = None | bool | int | float | str
+type FrozenJsonValue = (
+    FrozenJsonScalar | Mapping[str, FrozenJsonValue] | tuple[FrozenJsonValue, ...]
+)
+type FrozenJsonObject = Mapping[str, FrozenJsonValue]
+
+
+def freeze_json_value(value: object) -> FrozenJsonValue:
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if not isfinite(value):
+            raise ValueError(
+                "raw_payload contains unsupported JSON value: non-finite float"
+            )
+        return value
+    if isinstance(value, Mapping):
+        return freeze_json_object(value)
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        return tuple(freeze_json_value(item) for item in value)
+    raise ValueError(
+        f"raw_payload contains unsupported JSON value: {type(value).__name__}"
+    )
+
+
+def freeze_json_object(payload: Mapping[str, object]) -> FrozenJsonObject:
+    frozen: dict[str, FrozenJsonValue] = {}
+    for key, value in payload.items():
+        if not isinstance(key, str):
+            raise ValueError("raw_payload mapping keys must be strings")
+        frozen[key] = freeze_json_value(value)
+    return MappingProxyType(frozen)
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,19 +407,20 @@ class NormalizedObservation:
     latitude: float
     confidence: float
     intensity: float | None
-    raw_payload: dict[str, Any]
+    raw_payload: FrozenJsonObject
 
     def __post_init__(self) -> None:
         if not self.source_name or not self.source_record_id:
             raise ValueError("source identity is required")
-        if self.observed_at.tzinfo is None:
-            raise ValueError("observed_at must be timezone-aware")
+        if self.observed_at.utcoffset() != timedelta(0):
+            raise ValueError("observed_at must be UTC")
         if not -180 <= self.longitude <= 180:
             raise ValueError("longitude is outside valid range")
         if not -90 <= self.latitude <= 90:
             raise ValueError("latitude is outside valid range")
         if not 0 <= self.confidence <= 1:
             raise ValueError("confidence is outside valid range")
+        object.__setattr__(self, "raw_payload", freeze_json_object(self.raw_payload))
 
     @property
     def identity(self) -> str:
@@ -426,13 +478,13 @@ class WeatherObservation:
     wind_speed_mps: float
     wind_direction_degrees: float
     temperature_celsius: float | None
-    raw_payload: dict[str, Any]
+    raw_payload: FrozenJsonObject
 
     def __post_init__(self) -> None:
         if not self.source_name or not self.source_record_id:
             raise ValueError("source identity is required")
-        if self.observed_at.tzinfo is None:
-            raise ValueError("observed_at must be timezone-aware")
+        if self.observed_at.utcoffset() != timedelta(0):
+            raise ValueError("observed_at must be UTC")
         if not -180 <= self.longitude <= 180:
             raise ValueError("longitude is outside valid range")
         if not -90 <= self.latitude <= 90:
@@ -441,6 +493,7 @@ class WeatherObservation:
             raise ValueError("wind speed cannot be negative")
         if not 0 <= self.wind_direction_degrees < 360:
             raise ValueError("wind direction is outside valid range")
+        object.__setattr__(self, "raw_payload", freeze_json_object(self.raw_payload))
 
     @property
     def identity(self) -> str:
@@ -601,7 +654,7 @@ class ObservationRepository:
 
 Keep transaction ownership with the caller; the repository must not commit.
 
-SourceObservationModel.from_domain must return a SQLAlchemy values mapping with source_name, source_record_id, observation_kind, observed_at, geometry as SRID=4326 point WKT, normalized fire or weather fields, and raw_payload. It must use isinstance to distinguish NormalizedObservation from WeatherObservation; no caller may infer the kind from nullable values.
+SourceObservationModel.from_domain must return a SQLAlchemy values mapping with source_name, source_record_id, observation_kind, observed_at, geometry as SRID=4326 point WKT, normalized fire or weather fields, and raw_payload. At this persistence boundary it materializes the domain `FrozenJsonObject` into ordinary JSON dict/list containers for JSONB serialization. It must use isinstance to distinguish NormalizedObservation from WeatherObservation; no caller may infer the kind from nullable values.
 
 - [ ] **Step 6: Run migrations and integration tests**
 
@@ -682,17 +735,23 @@ Define:
 
 ~~~python
 from dataclasses import dataclass
-from typing import Any
 from typing import Protocol
 
-from wildfireops.domain.observations import SourceObservation
+from wildfireops.domain.observations import (
+    FrozenJsonObject,
+    SourceObservation,
+    freeze_json_object,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class SourceValidationFailure:
     source_name: str
     reason: str
-    raw_payload: dict[str, Any]
+    raw_payload: FrozenJsonObject
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "raw_payload", freeze_json_object(self.raw_payload))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1801,6 +1860,8 @@ git commit -m "feat: add scenario and decision workspace"
 - Create: data/replay/park-fire/manifest.json
 - Create: data/replay/park-fire/fire_detections.jsonl
 - Create: data/replay/park-fire/weather_observations.jsonl
+- Create: data/replay/park-fire/static_data_versions.json
+- Create: data/replay/park-fire/source_citations.json
 - Create: data/replay/park-fire/exposed_assets.geojson
 - Create: data/replay/park-fire/resources.json
 - Create: data/replay/park-fire/roads.graphml.gz
@@ -1817,20 +1878,42 @@ git commit -m "feat: add scenario and decision workspace"
 
 - [ ] **Step 1: Build and validate the Park Fire package**
 
-Obtain a free NASA FIRMS MAP_KEY and store it only in the local environment as WILDFIREOPS_FIRMS_MAP_KEY. Run the exact builder and road-graph commands from Tasks 5 and 9. Add NOAA historical observations, versioned Census-derived community data, and a versioned OSM facility extract to the package.
+Acquire and normalize NASA FIRMS, NOAA historical observations, versioned
+Census-derived community data, and a versioned OSM facility extract outside the
+committed package. Credentials are never passed to the builder. Stage these
+inputs before building:
+
+~~~text
+fire_detections.jsonl
+weather_observations.jsonl
+metadata.json
+exposed_assets.geojson
+resources.json
+~~~
+
+The builder produces `static_data_versions.json` and `source_citations.json`
+from the source maps in staged `metadata.json`; do not stage duplicate source-map
+files.
 
 Run:
 
 ~~~bash
 cd backend
-WILDFIREOPS_FIRMS_MAP_KEY="$WILDFIREOPS_FIRMS_MAP_KEY" uv run python -m wildfireops.replay.build \
+uv run python -m wildfireops.replay.build \
+  --source-dir ../data/staging/park-fire \
   --package-id park-fire-2024-v1 \
   --bbox=-122.40,39.20,-120.30,41.00 \
   --start 2024-07-24T00:00:00Z \
   --end 2024-08-02T00:00:00Z \
   --output ../data/replay/park-fire
-uv run python -m wildfireops.replay.validate ../data/replay/park-fire
+uv run python -m wildfireops.geospatial.road_graph build \
+  --bbox=-122.40,39.20,-120.30,41.00 \
+  --output ../data/replay/park-fire/roads.graphml.gz
 ~~~
+
+The replay builder's final `ReplayLoader(temporary)` call validates the replay
+package; the road-graph builder then attaches graph metadata to the completed
+package.
 
 Expected: every manifest hash and schema check passes, every file is nonempty, and no secret appears in the package.
 
@@ -1851,7 +1934,7 @@ Review the file against the UI and source records before committing it.
 
 - [ ] **Step 3: Write the golden integration test**
 
-The test loads the package into an empty database, advances the replay clock to the manifest's golden timestamp, runs clustering, exposure, risk, routing, and allocation, and compares stable semantic outputs with golden_outputs.json. Exclude wall-clock runtime and generated database UUIDs from equality.
+The test loads the package into an empty database, advances the replay clock to `manifest.end_at`, runs clustering, exposure, risk, routing, and allocation, and compares stable semantic outputs with golden_outputs.json. Exclude wall-clock runtime and generated database UUIDs from equality.
 
 - [ ] **Step 4: Write explicit degraded-mode tests**
 
@@ -1862,7 +1945,7 @@ Test:
 - repeated replay load creates no duplicate observations
 - closed roads never appear in a route
 - unreachable demand remains visible
-- infeasible allocation returns INFEASIBLE with constraints
+- capacity shortage returns a deterministic solution with uncovered destinations
 - stale recommendation approval returns 409
 - injected audit failure rolls the decision back
 

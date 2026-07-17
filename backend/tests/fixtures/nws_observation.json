@@ -1,0 +1,22 @@
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Point",
+    "coordinates": [-121.612, 39.805]
+  },
+  "properties": {
+    "timestamp": "2024-07-24T18:20:00+00:00",
+    "windSpeed": {
+      "unitCode": "wmoUnit:km_h-1",
+      "value": 18.0
+    },
+    "windDirection": {
+      "unitCode": "wmoUnit:degree_(angle)",
+      "value": 270.0
+    },
+    "temperature": {
+      "unitCode": "wmoUnit:degC",
+      "value": 34.0
+    }
+  }
+}
