@@ -1,6 +1,6 @@
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -8,13 +8,16 @@ import pytest
 import pytest_asyncio
 from geoalchemy2.elements import WKTElement
 from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from wildfireops.config import Settings
 from wildfireops.db import create_engine
 from wildfireops.decision.risk import default_risk_config
+from wildfireops.domain.observations import SourceObservation
 from wildfireops.geospatial.clustering import ClusteringConfig
 from wildfireops.geospatial.exposure import ExposureConfig
+from wildfireops.ingestion.service import IngestionRun, IngestionService
+from wildfireops.persistence.observations import IngestStats, ObservationRepository
 from wildfireops.persistence.decision_models import (
     IdempotencyKeyModel,
     IncidentSnapshotModel,
@@ -37,6 +40,7 @@ from wildfireops.replay.seed import (
     _seed_request_hash,
     seed_replay_package,
 )
+from wildfireops.sources.base import SourceBatch
 
 
 CLUSTERING = ClusteringConfig(
@@ -636,3 +640,90 @@ async def test_concurrent_distinct_seeds_allow_only_one_owner(
     assert sum(getattr(item, "status", None) == "seeded" for item in results) == 1
     assert sum(isinstance(item, ReplaySeedConflict) for item in results) == 1
     assert await _row_counts(factory) == (1, 1, 3, 0, 1, 2, 1, 2, 1)
+
+
+@pytest.mark.asyncio
+async def test_seed_waits_for_live_ingestion_without_lock_inversion(
+    isolated_engine: AsyncEngine,
+    tmp_path: Path,
+) -> None:
+    class GatedObservationRepository(ObservationRepository):
+        def __init__(self) -> None:
+            self.inserted = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def upsert_many(
+            self,
+            session: AsyncSession,
+            observations: Sequence[SourceObservation],
+        ) -> IngestStats:
+            stats = await super().upsert_many(session, observations)
+            self.inserted.set()
+            await self.release.wait()
+            return stats
+
+    class Adapter:
+        source_name = "nasa_firms"
+
+        async def fetch(self) -> SourceBatch:
+            return _source_batch(loader)
+
+    loader = _build_synthetic_package(tmp_path, variant="seed-live-lock")
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    repository = GatedObservationRepository()
+    ingestion = IngestionService(
+        factory,
+        CLUSTERING,
+        observation_repository=repository,
+        exposure_config=EXPOSURE,
+        risk_config=RISK,
+        clock=lambda: loader.manifest.end_at,
+    )
+    live_task = asyncio.create_task(ingestion.run_source(Adapter()))
+    await asyncio.wait_for(repository.inserted.wait(), timeout=3.0)
+    seed_task = asyncio.create_task(
+        seed_replay_package(
+            loader=loader,
+            session_factory=factory,
+            clustering_config=CLUSTERING,
+            exposure_config=EXPOSURE,
+            risk_config=RISK,
+        )
+    )
+    await _wait_for_seed_lock_waiter(isolated_engine)
+    repository.release.set()
+
+    live_result, seed_result = await asyncio.gather(
+        live_task,
+        seed_task,
+        return_exceptions=True,
+    )
+
+    assert isinstance(live_result, IngestionRun)
+    assert live_result.outcome == "success"
+    assert isinstance(seed_result, ReplaySeedConflict)
+    assert await _row_counts(factory) == (0, 0, 3, 0, 1, 2, 1, 1, 0)
+
+
+def _source_batch(loader: ReplayLoader) -> SourceBatch:
+    return SourceBatch(
+        observations=tuple(loader.iter_until(loader.manifest.end_at)),
+        failures=(),
+        reference_at=loader.manifest.end_at,
+    )
+
+
+async def _wait_for_seed_lock_waiter(engine: AsyncEngine) -> None:
+    deadline = asyncio.get_running_loop().time() + 3.0
+    while asyncio.get_running_loop().time() < deadline:
+        async with engine.connect() as connection:
+            waiting = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM pg_locks "
+                    "WHERE locktype IN ('advisory', 'transactionid') AND NOT granted"
+                )
+            )
+        if waiting:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("seed never waited for the live ingestion transaction")

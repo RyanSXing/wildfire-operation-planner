@@ -97,6 +97,7 @@ class IngestionService:
 
         async with self._session_factory() as session:
             try:
+                await acquire_incident_refresh_lock(session)
                 fire_observations: list[NormalizedObservation] = []
                 weather_observations: list[WeatherObservation] = []
                 for observation in batch.observations:
@@ -114,7 +115,6 @@ class IngestionService:
                     (*fire_observations, *weather_observations),
                 )
                 quarantined = await write_quarantine(session, batch.failures)
-                await acquire_incident_refresh_lock(session)
                 reference_at = await _resolve_operational_reference(
                     session,
                     explicit_reference_at=batch.reference_at,
@@ -192,6 +192,7 @@ class IngestionService:
     ) -> None:
         async with self._session_factory() as session:
             try:
+                await acquire_incident_refresh_lock(session)
                 await _record_source_failure(
                     session,
                     source_name=source_name,
@@ -214,6 +215,7 @@ class IngestionService:
         error_message = _sanitized_error_message(error)
         async with self._session_factory() as session:
             try:
+                await acquire_incident_refresh_lock(session)
                 await _record_source_failure(
                     session,
                     source_name=source_name,
