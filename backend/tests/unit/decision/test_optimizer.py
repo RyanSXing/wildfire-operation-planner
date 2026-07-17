@@ -142,6 +142,53 @@ def test_binding_reason_names_objective_tradeoff_for_unassigned_eligible_resourc
     ]
 
 
+def test_idle_capacity_that_can_cover_makes_objective_the_only_limiting_cause() -> None:
+    result = solve_allocation(
+        OptimizationRequest(
+            resources=(_resource("bravo"), _resource("alpha")),
+            demands=(
+                _demand("zero-risk", risk=0),
+                _demand("high-risk", risk=100),
+            ),
+            routes=(
+                _candidate("alpha", "zero-risk", 1),
+                _candidate("bravo", "zero-risk", 5),
+                _candidate("alpha", "high-risk", 1),
+            ),
+            max_response_minutes=30,
+        )
+    )
+
+    assert result.binding_constraints == (
+        "objective-tradeoff: destination=zero-risk; eligible resources=bravo remain "
+        "unassigned because the travel-plus-uncovered-risk objective preferred no "
+        "coverage",
+    )
+    assert explain_result(result)["uncovered_destinations"] == [
+        {
+            "destination_id": "zero-risk",
+            "limiting_reason": result.binding_constraints[0],
+        }
+    ]
+
+
+def test_idle_capacity_that_cannot_cover_makes_contention_the_only_limiting_cause() -> (
+    None
+):
+    result = solve_allocation(_example_request())
+
+    assert result.binding_constraints == (
+        "resource-contention: destination=low-risk; eligible assignments="
+        "engine-close->high-risk consume capacity needed for coverage",
+    )
+    assert explain_result(result)["uncovered_destinations"] == [
+        {
+            "destination_id": "low-risk",
+            "limiting_reason": result.binding_constraints[0],
+        }
+    ]
+
+
 def test_unknown_status_reports_no_solution_without_claiming_objective_tradeoff(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -353,22 +353,15 @@ def _binding_constraints(
             for resource_id in eligible_resource_ids
             if resource_id in selected_by_resource
         )
-        if competing_assignments:
-            pairs = ", ".join(
-                f"{resource_id}->{competing_destination_id}"
-                for resource_id, competing_destination_id in competing_assignments
-            )
-            constraints.add(
-                f"resource-contention: destination={destination_id}; eligible "
-                f"assignments={pairs} consume capacity needed for coverage"
-            )
-
         unassigned_resource_ids = tuple(
             resource_id
             for resource_id in eligible_resource_ids
             if resource_id not in selected_by_resource
         )
-        if unassigned_resource_ids:
+        idle_capacity = sum(
+            resources[resource_id].capacity for resource_id in unassigned_resource_ids
+        )
+        if idle_capacity >= demand.required_capacity:
             resource_ids = ", ".join(unassigned_resource_ids)
             if status == "OPTIMAL":
                 constraints.add(
@@ -382,4 +375,13 @@ def _binding_constraints(
                     f"resources={resource_ids} remain unassigned in the selected "
                     "feasible travel-plus-uncovered-risk solution"
                 )
+        else:
+            pairs = ", ".join(
+                f"{resource_id}->{competing_destination_id}"
+                for resource_id, competing_destination_id in competing_assignments
+            )
+            constraints.add(
+                f"resource-contention: destination={destination_id}; eligible "
+                f"assignments={pairs} consume capacity needed for coverage"
+            )
     return tuple(sorted(constraints))

@@ -160,3 +160,58 @@ contention, objective-tradeoff, and solver-status reasons.
 - `uv run ruff format --check .`: `93 files already formatted`.
 - `uv run ruff check .`: `All checks passed!`.
 - `uv run mypy src`: `Success: no issues found in 57 source files`.
+
+## Formal review correction: mutually exclusive limiting cause
+
+### Review finding
+
+The first explanation correction independently emitted resource contention when any
+eligible resource served another destination and an objective tradeoff when any
+eligible resource was idle. In mixed cases that could name two causes even though
+only one constrained coverage.
+
+For an uncovered destination with sufficient total eligible capacity, diagnostics
+now compare idle eligible capacity with required capacity:
+
+- if idle capacity can cover the demand, only the objective-tradeoff reason is
+  emitted;
+- if idle capacity cannot cover the demand, reclaiming contended capacity is
+  necessary, so only the deterministic resource-contention reason is emitted.
+
+Structural shortage and non-solution status handling are unchanged.
+
+### Causal correction RED evidence
+
+Before changing production code:
+
+```text
+uv run pytest tests/unit/decision/test_optimizer.py -k idle_capacity -v
+2 failed, 22 deselected
+```
+
+The first counterexample incorrectly added contention even though one idle resource
+could cover the demand. The second incorrectly added an objective tradeoff even
+though idle capacity could not cover without the contested resource.
+
+### Causal correction GREEN and verification evidence
+
+- Counterexample tests: `2 passed, 22 deselected`.
+- Complete Task 10 suite:
+
+  ```text
+  uv run pytest tests/unit/decision/test_optimizer.py tests/unit/decision/test_optimizer_properties.py -q
+  25 passed in 0.42s
+  ```
+
+- Complete backend unit suite:
+
+  ```text
+  uv run pytest tests/unit -q
+  429 passed, 3 warnings in 4.71s
+  ```
+
+  The three warnings remain the existing macOS `fork()` deprecations in road-graph
+  multiprocessing tests.
+- `uv run ruff format --check .`: `93 files already formatted`.
+- `uv run ruff check .`: `All checks passed!`.
+- `uv run mypy src`: `Success: no issues found in 57 source files`.
