@@ -165,6 +165,8 @@ def solve_allocation(request: OptimizationRequest) -> OptimizationResult:
     )
     binding_constraints = _binding_constraints(
         uncovered,
+        status,
+        selected_pairs,
         demands_by_id,
         resources_by_id,
         eligible_routes,
@@ -306,6 +308,8 @@ def _ineligibility_reason(
 
 def _binding_constraints(
     uncovered: tuple[str, ...],
+    status: str,
+    selected_pairs: tuple[tuple[str, str], ...],
     demands: dict[str, DemandPoint],
     resources: dict[str, ResourceUnit],
     eligible_routes: dict[tuple[str, str], CandidateRoute],
@@ -313,6 +317,7 @@ def _binding_constraints(
     route_counts: dict[str, int],
 ) -> tuple[str, ...]:
     constraints: set[str] = set()
+    selected_by_resource = dict(selected_pairs)
     for destination_id in uncovered:
         demand = demands[destination_id]
         constraints.update(excluded_reasons[destination_id])
@@ -320,10 +325,13 @@ def _binding_constraints(
             constraints.add(
                 f"route: destination={destination_id}; no candidate route was provided"
             )
-        eligible_capacity = sum(
-            resources[resource_id].capacity
+        eligible_resource_ids = tuple(
+            resource_id
             for resource_id, candidate_destination_id in eligible_routes
             if candidate_destination_id == destination_id
+        )
+        eligible_capacity = sum(
+            resources[resource_id].capacity for resource_id in eligible_resource_ids
         )
         if eligible_capacity < demand.required_capacity:
             constraints.add(
@@ -331,9 +339,47 @@ def _binding_constraints(
                 f"{eligible_capacity} is below required capacity="
                 f"{demand.required_capacity}"
             )
-        else:
+        if status not in _SOLUTION_STATUSES:
             constraints.add(
-                f"capacity: destination={destination_id}; required capacity="
-                f"{demand.required_capacity} was not satisfied by selected assignments"
+                f"solver-status: destination={destination_id}; status={status} "
+                "produced no allocation solution"
             )
+            continue
+        if eligible_capacity < demand.required_capacity:
+            continue
+
+        competing_assignments = tuple(
+            (resource_id, selected_by_resource[resource_id])
+            for resource_id in eligible_resource_ids
+            if resource_id in selected_by_resource
+        )
+        if competing_assignments:
+            pairs = ", ".join(
+                f"{resource_id}->{competing_destination_id}"
+                for resource_id, competing_destination_id in competing_assignments
+            )
+            constraints.add(
+                f"resource-contention: destination={destination_id}; eligible "
+                f"assignments={pairs} consume capacity needed for coverage"
+            )
+
+        unassigned_resource_ids = tuple(
+            resource_id
+            for resource_id in eligible_resource_ids
+            if resource_id not in selected_by_resource
+        )
+        if unassigned_resource_ids:
+            resource_ids = ", ".join(unassigned_resource_ids)
+            if status == "OPTIMAL":
+                constraints.add(
+                    f"objective-tradeoff: destination={destination_id}; eligible "
+                    f"resources={resource_ids} remain unassigned because the "
+                    "travel-plus-uncovered-risk objective preferred no coverage"
+                )
+            else:
+                constraints.add(
+                    f"objective-tradeoff: destination={destination_id}; eligible "
+                    f"resources={resource_ids} remain unassigned in the selected "
+                    "feasible travel-plus-uncovered-risk solution"
+                )
     return tuple(sorted(constraints))

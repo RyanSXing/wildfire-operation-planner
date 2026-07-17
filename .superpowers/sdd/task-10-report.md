@@ -106,3 +106,57 @@
   verification. All DB-independent tests passed, but integration coverage remains
   an infrastructure-limited verification gap.
 - OR-Tools adds its normal solver runtime and transitive dependency footprint.
+
+## Formal review correction: truthful limiting reasons
+
+### Review finding
+
+Formal review found that sufficient total eligible capacity fell through to the
+generic message `required capacity ... was not satisfied by selected assignments`.
+That described the result, not the limiting cause. It also allowed a non-solution
+status to look like an optimized allocation tradeoff.
+
+The diagnostic builder now receives the already-computed solver status and selected
+resource/destination pairs. Without changing the model or public dataclasses, it
+distinguishes:
+
+- structural eligible-capacity shortage;
+- eligible resources consumed by deterministic `resource->competing destination`
+  assignments;
+- eligible resources left unassigned by the travel-plus-uncovered-risk objective;
+- a solver status that produced no allocation solution.
+
+### Correction RED evidence
+
+Before changing production code:
+
+```text
+uv run pytest tests/unit/decision/test_optimizer.py -k 'binding_reason or unknown_status' -v
+3 failed, 19 deselected
+```
+
+All three failures returned the old generic capacity message instead of the expected
+contention, objective-tradeoff, and solver-status reasons.
+
+### Correction GREEN and verification evidence
+
+- Focused correction tests: `3 passed, 19 deselected`.
+- Complete Task 10 suite:
+
+  ```text
+  uv run pytest tests/unit/decision/test_optimizer.py tests/unit/decision/test_optimizer_properties.py -q
+  23 passed in 0.37s
+  ```
+
+- Complete backend unit suite:
+
+  ```text
+  uv run pytest tests/unit -q
+  427 passed, 3 warnings in 4.53s
+  ```
+
+  The three warnings remain the existing macOS `fork()` deprecations in road-graph
+  multiprocessing tests.
+- `uv run ruff format --check .`: `93 files already formatted`.
+- `uv run ruff check .`: `All checks passed!`.
+- `uv run mypy src`: `Success: no issues found in 57 source files`.

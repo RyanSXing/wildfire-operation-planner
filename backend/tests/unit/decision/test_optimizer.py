@@ -4,6 +4,7 @@ from math import inf, nan
 
 import pytest
 
+from wildfireops.decision import optimizer as optimizer_module
 from wildfireops.decision.optimizer import (
     Assignment,
     CandidateRoute,
@@ -83,6 +84,108 @@ def test_solver_deterministically_covers_highest_risk_demand() -> None:
     assert result.travel_cost == 5
     assert result.uncovered_risk_penalty == 200
     assert result.objective_value == 205
+
+
+def test_binding_reason_identifies_resources_used_by_competing_destinations() -> None:
+    result = solve_allocation(
+        OptimizationRequest(
+            resources=(_resource("bravo"), _resource("alpha")),
+            demands=(
+                _demand("low-risk", capacity=2, risk=50),
+                _demand("bravo-risk", risk=100),
+                _demand("alpha-risk", risk=100),
+            ),
+            routes=(
+                _candidate("bravo", "low-risk", 1),
+                _candidate("alpha", "low-risk", 1),
+                _candidate("bravo", "bravo-risk", 1),
+                _candidate("alpha", "alpha-risk", 1),
+            ),
+            max_response_minutes=30,
+        )
+    )
+
+    assert result.binding_constraints == (
+        "resource-contention: destination=low-risk; eligible assignments="
+        "alpha->alpha-risk, bravo->bravo-risk consume capacity needed for coverage",
+    )
+    assert explain_result(result)["uncovered_destinations"] == [
+        {
+            "destination_id": "low-risk",
+            "limiting_reason": result.binding_constraints[0],
+        }
+    ]
+
+
+def test_binding_reason_names_objective_tradeoff_for_unassigned_eligible_resource() -> (
+    None
+):
+    result = solve_allocation(
+        OptimizationRequest(
+            resources=(_resource("engine"),),
+            demands=(_demand("zero-risk", risk=0),),
+            routes=(_candidate("engine", "zero-risk", 5),),
+            max_response_minutes=30,
+        )
+    )
+
+    assert result.binding_constraints == (
+        "objective-tradeoff: destination=zero-risk; eligible resources=engine remain "
+        "unassigned because the travel-plus-uncovered-risk objective preferred no "
+        "coverage",
+    )
+    assert explain_result(result)["uncovered_destinations"] == [
+        {
+            "destination_id": "zero-risk",
+            "limiting_reason": result.binding_constraints[0],
+        }
+    ]
+
+
+def test_unknown_status_reports_no_solution_without_claiming_objective_tradeoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Parameters:
+        pass
+
+    class UnknownSolver:
+        def __init__(self) -> None:
+            self.parameters = Parameters()
+            self.wall_time = 0.0
+
+        def solve(self, model: object) -> object:
+            return model
+
+        def status_name(self, status: object) -> str:
+            return "UNKNOWN"
+
+        def value(self, variable: object) -> int:
+            raise AssertionError(f"value read for non-solution variable {variable}")
+
+    monkeypatch.setattr(optimizer_module.cp_model, "CpSolver", UnknownSolver)
+    result = solve_allocation(
+        OptimizationRequest(
+            resources=(_resource("engine"),),
+            demands=(_demand("community", risk=100),),
+            routes=(_candidate("engine", "community", 5),),
+            max_response_minutes=30,
+        )
+    )
+
+    assert result.status == "UNKNOWN"
+    assert result.assignments == ()
+    assert result.binding_constraints == (
+        "solver-status: destination=community; status=UNKNOWN produced no allocation "
+        "solution",
+    )
+    explanation = explain_result(result)
+    assert explanation["uncovered_destinations"] == [
+        {
+            "destination_id": "community",
+            "limiting_reason": result.binding_constraints[0],
+        }
+    ]
+    assert "objective-tradeoff" not in json.dumps(explanation, sort_keys=True)
 
 
 def test_exact_float_time_controls_eligibility_and_ceiling_minutes_control_cost() -> (
