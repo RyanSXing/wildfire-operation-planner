@@ -92,8 +92,16 @@ async def test_decision_dependency_commits_before_response_start() -> None:
 @pytest.mark.parametrize(
     ("router", "path", "provider"),
     [
-        (scenarios_router, "/api/incidents/{incident_id}/scenarios", get_scenario_service),
-        (scenarios_router, "/api/scenarios/{scenario_id}/versions", get_scenario_service),
+        (
+            scenarios_router,
+            "/api/incidents/{incident_id}/scenarios",
+            get_scenario_service,
+        ),
+        (
+            scenarios_router,
+            "/api/scenarios/{scenario_id}/versions",
+            get_scenario_service,
+        ),
         (
             scenarios_router,
             "/api/scenario-versions/{version_id}/recommendations",
@@ -118,7 +126,9 @@ def test_write_routes_close_dependencies_before_response(
         if isinstance(candidate, APIRoute) and candidate.path == path
     )
     dependency = next(
-        candidate for candidate in route.dependant.dependencies if candidate.call is provider
+        candidate
+        for candidate in route.dependant.dependencies
+        if candidate.call is provider
     )
 
     assert dependency.scope == "function"
