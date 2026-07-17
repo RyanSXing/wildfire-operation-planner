@@ -1,13 +1,19 @@
 import json
+import sys
 from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from wildfireops.config import Settings
 from wildfireops.db import create_engine, create_session_factory
@@ -27,36 +33,76 @@ RESET = text(
 )
 
 
+def test_golden_replay_rejects_ordinary_database_before_engine_creation() -> None:
+    settings = Settings(
+        database_url=(
+            "postgresql+asyncpg://wildfireops:wildfireops@db:5432/wildfireops"
+        ),
+        replay_package=PACKAGE,
+    )
+
+    with patch.object(sys.modules[__name__], "create_engine") as engine_factory:
+        with pytest.raises(
+            RuntimeError,
+            match="requires dedicated database 'wildfireops_test'",
+        ):
+            _golden_engine(settings)
+
+    engine_factory.assert_not_called()
+
+
+def _golden_engine(settings: Settings) -> AsyncEngine:
+    try:
+        database = make_url(settings.database_url).database
+    except ArgumentError as error:
+        raise RuntimeError(
+            "golden replay integration test requires a valid dedicated database URL"
+        ) from error
+    if database != "wildfireops_test":
+        raise RuntimeError(
+            "golden replay integration test requires dedicated database "
+            f"'wildfireops_test'; got {database!r}"
+        )
+    return create_engine(settings)
+
+
+async def _reset_database(engine: AsyncEngine) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(RESET)
+
+
 @pytest_asyncio.fixture
 async def seeded_replay_app() -> AsyncIterator[FastAPI]:
     settings = Settings(replay_package=PACKAGE)
     loader = ReplayLoader(PACKAGE)
-    seed_engine = create_engine(settings)
-    async with seed_engine.begin() as connection:
-        await connection.execute(RESET)
-    await seed_replay_package(
-        loader=loader,
-        session_factory=create_session_factory(seed_engine),
-        clustering_config=ClusteringConfig(
-            spatial_radius_meters=settings.clustering_spatial_radius_meters,
-            temporal_window_seconds=settings.clustering_temporal_window_seconds,
-            minimum_points=settings.clustering_minimum_points,
-            algorithm_version=settings.clustering_algorithm_version,
-        ),
-        exposure_config=build_exposure_config(settings),
-        risk_config=build_risk_config(settings),
-    )
-    await seed_engine.dispose()
-
-    app = create_app(settings)
-    try:
-        yield app
-    finally:
-        await app.state.engine.dispose()
-        cleanup_engine = create_engine(settings)
-        async with cleanup_engine.begin() as connection:
-            await connection.execute(RESET)
-        await cleanup_engine.dispose()
+    async with AsyncExitStack() as resources:
+        seed_engine = _golden_engine(settings)
+        resources.push_async_callback(seed_engine.dispose)
+        try:
+            await _reset_database(seed_engine)
+            await seed_replay_package(
+                loader=loader,
+                session_factory=create_session_factory(seed_engine),
+                clustering_config=ClusteringConfig(
+                    spatial_radius_meters=settings.clustering_spatial_radius_meters,
+                    temporal_window_seconds=(
+                        settings.clustering_temporal_window_seconds
+                    ),
+                    minimum_points=settings.clustering_minimum_points,
+                    algorithm_version=settings.clustering_algorithm_version,
+                ),
+                exposure_config=build_exposure_config(settings),
+                risk_config=build_risk_config(settings),
+            )
+            app = create_app(settings)
+            resources.push_async_callback(app.state.engine.dispose)
+            yield app
+        finally:
+            cleanup_engine = _golden_engine(settings)
+            try:
+                await _reset_database(cleanup_engine)
+            finally:
+                await cleanup_engine.dispose()
 
 
 @pytest.mark.asyncio
