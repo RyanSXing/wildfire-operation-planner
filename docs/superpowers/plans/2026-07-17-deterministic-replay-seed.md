@@ -473,7 +473,7 @@ Run:
 
 ```bash
 cd backend
-uv run pytest tests/unit/replay/test_seed.py tests/integration/replay/test_seed.py -q
+uv run pytest --import-mode=importlib tests/unit/replay/test_seed.py tests/integration/replay/test_seed.py -q
 uv run python -m wildfireops.replay.seed --help
 uv run ruff format --check src/wildfireops/replay/seed.py tests/unit/replay/test_seed.py tests/integration/replay/test_seed.py
 uv run ruff check src/wildfireops/replay/seed.py tests/unit/replay/test_seed.py tests/integration/replay/test_seed.py

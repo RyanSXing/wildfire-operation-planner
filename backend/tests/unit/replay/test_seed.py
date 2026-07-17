@@ -289,10 +289,11 @@ def test_seed_cli_prints_safe_known_errors(
 ) -> None:
     monkeypatch.setattr(seed, "get_settings", Settings)
     monkeypatch.setattr(seed, "ReplayLoader", lambda package: object())
+    engine = type("Engine", (), {"dispose": AsyncMock()})()
     monkeypatch.setattr(
         seed,
         "create_engine",
-        lambda settings: type("Engine", (), {"dispose": AsyncMock()})(),
+        lambda settings: engine,
     )
     monkeypatch.setattr(seed, "create_session_factory", lambda engine: object())
 
@@ -303,6 +304,7 @@ def test_seed_cli_prints_safe_known_errors(
 
     assert seed.main(["recorded-package"]) == 1
     assert capsys.readouterr().err == expected
+    engine.dispose.assert_awaited_once_with()
 
 
 def test_seed_cli_hides_unexpected_error_messages(
