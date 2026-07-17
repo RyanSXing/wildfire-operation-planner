@@ -3,12 +3,50 @@
 import json
 from dataclasses import asdict, dataclass
 from hashlib import sha256
+from collections.abc import Callable
 from typing import Literal
+
+from geoalchemy2.elements import WKTElement
+from shapely.geometry import shape  # type: ignore[import-untyped]
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from wildfireops.decision.risk import RiskConfig
 from wildfireops.geospatial.clustering import ClusteringConfig
+from wildfireops.geospatial.clustering import cluster_detections
 from wildfireops.geospatial.exposure import ExposureConfig
+from wildfireops.persistence.exposures import refresh_exposure_and_risk
+from wildfireops.persistence.incidents import (
+    acquire_incident_refresh_lock,
+    load_current_fire_detections,
+    refresh_incidents,
+)
+from wildfireops.persistence.observations import ObservationRepository
+from wildfireops.persistence.observed_models import (
+    ExposedAssetModel,
+    QuarantinedObservationModel,
+    ResourceUnitModel,
+    SourceObservationModel,
+    SourceStatusModel,
+    WildfireIncidentModel,
+    materialize_json_object,
+)
+from wildfireops.persistence.scenarios import ScenarioRepository
+from wildfireops.replay.loader import ReplayLoader
 from wildfireops.replay.manifest import ReplayManifest
+
+
+type SessionFactory = Callable[[], AsyncSession]
+
+
+_PROTECTED_TABLES = (
+    ("source_observations", SourceObservationModel.id),
+    ("quarantined_observations", QuarantinedObservationModel.id),
+    ("exposed_assets", ExposedAssetModel.id),
+    ("resource_units", ResourceUnitModel.id),
+    ("wildfire_incidents", WildfireIncidentModel.id),
+    ("source_status", SourceStatusModel.id),
+)
 
 
 class ReplaySeedError(ValueError):
@@ -76,3 +114,156 @@ def _seed_request_hash(
 
 def _result_json(result: ReplaySeedResult) -> str:
     return _canonical_json(asdict(result)).decode("utf-8")
+
+
+async def seed_replay_package(
+    *,
+    loader: ReplayLoader,
+    session_factory: SessionFactory,
+    clustering_config: ClusteringConfig,
+    exposure_config: ExposureConfig,
+    risk_config: RiskConfig,
+) -> ReplaySeedResult:
+    static_data = loader.static_data
+    if static_data is None:
+        raise ReplaySeedError("replay seed requires a complete static data package")
+    observations = tuple(loader.iter_until(loader.manifest.end_at))
+    package_digest = _package_digest(loader.manifest)
+    request_hash = _seed_request_hash(
+        package_digest,
+        clustering_config,
+        exposure_config,
+        risk_config,
+    )
+
+    async with session_factory() as session:
+        async with session.begin():
+            await acquire_incident_refresh_lock(session)
+            claim = await ScenarioRepository(session).claim_idempotency(
+                scope="replay_seed",
+                key=loader.manifest.package_id,
+                request_hash=request_hash,
+            )
+            if not claim.created:
+                if claim.request_hash != request_hash:
+                    raise ReplaySeedConflict(
+                        "replay package_id already seeded with different contents "
+                        f"or settings: {loader.manifest.package_id}"
+                    )
+                return ReplaySeedResult(
+                    package_id=loader.manifest.package_id,
+                    package_digest=package_digest,
+                    status="already_seeded",
+                    assets_inserted=0,
+                    resources_inserted=0,
+                    observations_inserted=0,
+                    incidents_created=0,
+                    snapshots_created=0,
+                )
+            for table_name, column in _PROTECTED_TABLES:
+                if await session.scalar(select(column).limit(1)) is not None:
+                    raise ReplaySeedConflict(
+                        f"database contains operational data in {table_name}"
+                    )
+
+            session.add_all(
+                [
+                    ExposedAssetModel(
+                        asset_id=item.asset_id,
+                        asset_kind=item.asset_kind,
+                        name=item.name,
+                        population=item.population,
+                        capacity=item.capacity,
+                        source_name=item.source_name,
+                        source_version=item.source_version,
+                        geometry=WKTElement(
+                            shape(item.geometry_geojson).wkt, srid=4326
+                        ),
+                        raw_metadata=materialize_json_object(item.raw_metadata),
+                    )
+                    for item in sorted(
+                        static_data.assets, key=lambda item: item.asset_id
+                    )
+                ]
+            )
+            session.add_all(
+                [
+                    ResourceUnitModel(
+                        resource_id=item.resource_id,
+                        resource_type=item.resource_type,
+                        capabilities=list(item.capabilities),
+                        capacity=item.capacity,
+                        available=item.available,
+                        status=item.status,
+                        geometry=WKTElement(
+                            shape(item.geometry_geojson).wkt, srid=4326
+                        ),
+                        raw_metadata=materialize_json_object(item.raw_metadata),
+                    )
+                    for item in sorted(
+                        static_data.resources,
+                        key=lambda item: item.resource_id,
+                    )
+                ]
+            )
+            stats = await ObservationRepository().upsert_many(session, observations)
+            if stats.deduplicated:
+                raise ReplaySeedError(
+                    "replay seed observations must not be deduplicated"
+                )
+            await session.flush()
+            detections = await load_current_fire_detections(
+                session,
+                reference_at=loader.manifest.end_at,
+                temporal_window_seconds=clustering_config.temporal_window_seconds,
+            )
+            clusters = cluster_detections(detections, clustering_config)
+            if not clusters:
+                raise ReplaySeedError("replay seed produced no incident clusters")
+            await refresh_incidents(
+                session,
+                clusters,
+                clustering_config.spatial_radius_meters,
+            )
+            await session.flush()
+            incidents_created = int(
+                await session.scalar(
+                    select(func.count()).select_from(WildfireIncidentModel)
+                )
+                or 0
+            )
+            snapshot_ids = await refresh_exposure_and_risk(
+                session,
+                reference_at=loader.manifest.end_at,
+                exposure_config=exposure_config,
+                risk_config=risk_config,
+                clustering_algorithm_version=clustering_config.algorithm_version,
+            )
+            for source_name in sorted({item.source_name for item in observations}):
+                source_observations = [
+                    item for item in observations if item.source_name == source_name
+                ]
+                session.add(
+                    SourceStatusModel(
+                        source_name=source_name,
+                        outcome="success",
+                        last_attempted_at=loader.manifest.end_at,
+                        last_success_at=max(
+                            item.observed_at for item in source_observations
+                        ),
+                        accepted_count=len(source_observations),
+                        deduplicated_count=0,
+                        quarantined_count=0,
+                        error_message=None,
+                    )
+                )
+            return ReplaySeedResult(
+                package_id=loader.manifest.package_id,
+                package_digest=package_digest,
+                status="seeded",
+                assets_inserted=len(static_data.assets),
+                resources_inserted=len(static_data.resources),
+                observations_inserted=stats.inserted,
+                incidents_created=incidents_created,
+                snapshots_created=len(snapshot_ids),
+            )
