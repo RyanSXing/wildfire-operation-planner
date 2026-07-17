@@ -120,3 +120,34 @@ deprecation warnings from road-graph concurrency tests; Task 12A added no warnin
 No Task 12A correctness concern remains. Notifications are intentionally
 at-most-once cache-invalidation hints; clients reconcile through the existing
 HTTP read APIs after reconnect or overflow rather than relying on durable replay.
+
+## Review correction: recursion-safe notification decoding
+
+Review found that a valid-size, deeply nested JSON notification could make the
+JSON decoder raise `RecursionError`. That exception was outside the codec's
+malformed-payload guard, so it could escape the asyncpg callback and allow the
+event loop to log callback arguments containing the raw payload.
+
+The regression uses a valid 7,999-byte nested JSON document and deterministically
+exercises the decoder's platform-dependent recursion failure. Before the fix:
+
+```text
+pytest -q \
+  tests/unit/api/test_postgres_events.py::test_notification_codec_ignores_deep_json_parser_recursion
+FAILED test_notification_codec_ignores_deep_json_parser_recursion
+RecursionError
+1 failed in 0.19s
+```
+
+After adding `RecursionError` to the existing codec-boundary exception guard:
+
+- Isolated regression: `1 passed in 0.16s`.
+- Focused Task 12A suite: `108 passed in 9.67s`.
+- Complete backend suite: `568 passed, 3 warnings in 21.60s`.
+- Ruff format check: `113 files already formatted`.
+- Ruff check: `All checks passed!`.
+- Mypy: `Success: no issues found in 70 source files`.
+- `git diff --check`: clean.
+
+The three warnings remain the existing road-graph multiprocessing `fork()`
+deprecation warnings.

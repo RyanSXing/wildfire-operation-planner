@@ -3,6 +3,7 @@ from collections.abc import Callable
 
 import pytest
 
+from wildfireops.api import postgres_events
 from wildfireops.api.event_bus import EventBus
 from wildfireops.api.postgres_events import (
     MAX_NOTIFICATION_BYTES,
@@ -90,6 +91,25 @@ def test_notification_codec_accepts_only_the_frozen_event_shapes() -> None:
         "resync-required",
         {},
     )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ("[" * 3_999 + "0" + "]" * 3_999,),
+)
+def test_notification_codec_ignores_deep_json_parser_recursion(
+    payload: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert len(payload.encode("utf-8")) == MAX_NOTIFICATION_BYTES
+
+    def exhaust_recursion(candidate: str, **_options: object) -> object:
+        assert candidate == payload
+        raise RecursionError
+
+    monkeypatch.setattr(postgres_events.json, "loads", exhaust_recursion)
+
+    assert decode_notification(payload) is None
 
 
 @pytest.mark.asyncio

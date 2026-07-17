@@ -46,7 +46,7 @@ def decode_notification(payload: object) -> tuple[EventName, dict[str, object]] 
             object_pairs_hook=_unique_object,
             parse_constant=_reject_constant,
         )
-    except (TypeError, ValueError, UnicodeError):
+    except (RecursionError, TypeError, ValueError, UnicodeError):
         return None
     if not isinstance(envelope, dict) or set(envelope) != {"name", "data"}:
         return None
