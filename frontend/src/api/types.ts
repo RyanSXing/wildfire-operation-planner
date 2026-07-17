@@ -21,6 +21,13 @@ const lineStringCoordinatesSchema = z.array(positionSchema).min(2);
 const linearRingSchema = z.array(positionSchema).min(4);
 const polygonCoordinatesSchema = z.array(linearRingSchema).min(1);
 
+export const lineStringGeometrySchema = z
+  .object({
+    type: z.literal("LineString"),
+    coordinates: lineStringCoordinatesSchema,
+  })
+  .passthrough();
+
 const coordinateGeometrySchema = z.discriminatedUnion("type", [
   z
     .object({ type: z.literal("Point"), coordinates: positionSchema })
@@ -31,12 +38,7 @@ const coordinateGeometrySchema = z.discriminatedUnion("type", [
       coordinates: z.array(positionSchema).min(1),
     })
     .passthrough(),
-  z
-    .object({
-      type: z.literal("LineString"),
-      coordinates: lineStringCoordinatesSchema,
-    })
-    .passthrough(),
+  lineStringGeometrySchema,
   z
     .object({
       type: z.literal("MultiLineString"),
@@ -279,6 +281,144 @@ export const sourceStatusListSchema = z.object({
   items: z.array(sourceStatusSchema),
 });
 
+const nonblankStringSchema = z.string().min(1);
+const nonnegativeNumberSchema = z.number().finite().nonnegative();
+
+export const roadGraphSummarySchema = z.object({
+  graphVersion: nonblankStringSchema,
+  edgeCount: z.number().int().nonnegative(),
+});
+
+export const decisionContextSchema = z.object({
+  incidentId: nonblankStringSchema,
+  defaultGraphVersion: nonblankStringSchema.nullable(),
+  availableGraphs: z.array(roadGraphSummarySchema),
+});
+
+export const roadEdgeSchema = z.object({
+  edgeId: nonblankStringSchema,
+  label: nonblankStringSchema,
+  geometry: lineStringGeometrySchema.nullable(),
+  travelMinutes: nonnegativeNumberSchema,
+  distanceMeters: nonnegativeNumberSchema,
+});
+
+export const roadEdgeListSchema = z.object({
+  items: z.array(roadEdgeSchema),
+  total: z.number().int().nonnegative(),
+  missingEdgeIds: z.array(nonblankStringSchema),
+});
+
+export const roadClosureSchema = z.object({
+  edgeId: nonblankStringSchema,
+});
+
+export const weatherOverrideSchema = z.object({
+  windSpeedMps: nonnegativeNumberSchema,
+  windDirectionDegrees: z.number().finite().min(0).lt(360),
+});
+
+export const resourceOverrideSchema = z.object({
+  resourceId: nonblankStringSchema,
+  available: z.boolean(),
+});
+
+export const scenarioVersionSchema = z.object({
+  id: nonblankStringSchema,
+  scenarioId: nonblankStringSchema,
+  incidentId: nonblankStringSchema,
+  incidentSnapshotId: nonblankStringSchema,
+  version: z.number().int().positive(),
+  graphVersion: nonblankStringSchema,
+  roadClosures: z.array(roadClosureSchema),
+  weatherOverrides: z.array(weatherOverrideSchema),
+  resourceOverrides: z.array(resourceOverrideSchema),
+});
+
+export const routeSchema = z.object({
+  status: z.enum(["reachable", "unreachable"]),
+  edgeIds: z.array(nonblankStringSchema),
+  distanceMeters: nonnegativeNumberSchema,
+  travelMinutes: nonnegativeNumberSchema,
+  graphVersion: nonblankStringSchema,
+  closureHash: nonblankStringSchema,
+});
+
+export const recommendationAssignmentSchema = z.object({
+  resourceId: nonblankStringSchema,
+  destinationId: nonblankStringSchema,
+  route: routeSchema,
+  travelMinutes: nonnegativeNumberSchema,
+  capacity: z.number().int().positive(),
+});
+
+export const objectiveComponentsSchema = z.object({
+  travelCost: z.number().int().nonnegative(),
+  uncoveredRiskPenalty: z.number().int().nonnegative(),
+  objectiveValue: z.number().int().nonnegative(),
+});
+
+export const recommendationOutcomeSchema = z.object({
+  scenarioRisk: riskSchema,
+  weightedRiskCovered: nonnegativeNumberSchema,
+  weightedRiskUncovered: nonnegativeNumberSchema,
+  totalTravelMinutes: nonnegativeNumberSchema,
+  unreachableDestinationIds: z.array(nonblankStringSchema),
+  unavailableResourceIds: z.array(nonblankStringSchema),
+});
+
+export const recommendationSchema = z.object({
+  id: nonblankStringSchema,
+  scenarioVersionId: nonblankStringSchema,
+  incidentSnapshotId: nonblankStringSchema,
+  assignments: z.array(recommendationAssignmentSchema),
+  uncoveredDestinationIds: z.array(nonblankStringSchema),
+  objectiveComponents: objectiveComponentsSchema,
+  solverStatus: nonblankStringSchema,
+  runtimeMilliseconds: z.number().int().nonnegative(),
+  graphVersion: nonblankStringSchema,
+  riskVersion: nonblankStringSchema,
+  algorithmVersion: nonblankStringSchema,
+  inputVersion: nonblankStringSchema,
+  sourceVersions: jsonObjectSchema,
+  explanation: jsonObjectSchema,
+  outcome: recommendationOutcomeSchema,
+});
+
+export const decisionActionSchema = z.enum(["approve", "reject", "edit"]);
+
+export const decisionSchema = z.object({
+  id: nonblankStringSchema,
+  recommendationId: nonblankStringSchema,
+  action: decisionActionSchema,
+  note: z.string(),
+  actorId: nonblankStringSchema,
+  assignments: z.array(recommendationAssignmentSchema),
+  createdAt: timestampSchema,
+});
+
+export const auditEventSchema = z.object({
+  id: nonblankStringSchema,
+  decisionActionId: nonblankStringSchema,
+  actorId: nonblankStringSchema,
+  eventType: nonblankStringSchema,
+  aggregateType: nonblankStringSchema,
+  aggregateId: nonblankStringSchema,
+  scenarioVersionId: nonblankStringSchema,
+  incidentSnapshotId: nonblankStringSchema,
+  recommendationId: nonblankStringSchema,
+  algorithms: jsonObjectSchema,
+  beforeState: jsonObjectSchema,
+  afterState: jsonObjectSchema,
+  inputs: jsonObjectSchema,
+  note: z.string(),
+  occurredAt: timestampSchema,
+});
+
+export const auditEventListSchema = z.object({
+  items: z.array(auditEventSchema),
+});
+
 export const apiErrorEnvelopeSchema = z.object({
   error: z.object({
     code: z.string().min(1),
@@ -304,3 +444,53 @@ export type TimelineFrame = z.infer<typeof timelineFrameSchema>;
 export type IncidentTimeline = z.infer<typeof incidentTimelineSchema>;
 export type SourceStatus = z.infer<typeof sourceStatusSchema>;
 export type SourceStatusList = z.infer<typeof sourceStatusListSchema>;
+export type RoadGraphSummary = z.infer<typeof roadGraphSummarySchema>;
+export type DecisionContext = z.infer<typeof decisionContextSchema>;
+export type RoadEdge = z.infer<typeof roadEdgeSchema>;
+export type RoadEdgeList = z.infer<typeof roadEdgeListSchema>;
+export type RoadClosure = z.infer<typeof roadClosureSchema>;
+export type WeatherOverride = z.infer<typeof weatherOverrideSchema>;
+export type ResourceOverride = z.infer<typeof resourceOverrideSchema>;
+export type ScenarioVersion = z.infer<typeof scenarioVersionSchema>;
+export type Route = z.infer<typeof routeSchema>;
+export type RecommendationAssignment = z.infer<
+  typeof recommendationAssignmentSchema
+>;
+export type ObjectiveComponents = z.infer<typeof objectiveComponentsSchema>;
+export type RecommendationOutcome = z.infer<
+  typeof recommendationOutcomeSchema
+>;
+export type Recommendation = z.infer<typeof recommendationSchema>;
+export type DecisionAction = z.infer<typeof decisionActionSchema>;
+export type Decision = z.infer<typeof decisionSchema>;
+export type AuditEvent = z.infer<typeof auditEventSchema>;
+export type AuditEventList = z.infer<typeof auditEventListSchema>;
+
+export type ScenarioCreateRequest = {
+  graphVersion: string;
+  objective: string;
+  name?: string | null;
+  algorithmConfigVersion?: string;
+};
+
+export type ScenarioVersionCreateRequest = {
+  roadClosures?: RoadClosure[] | null;
+  weatherOverrides?: WeatherOverride[] | null;
+  resourceOverrides?: ResourceOverride[] | null;
+};
+
+export type RecommendationCreateRequest = {
+  maxResponseMinutes?: number;
+  maxSolverSeconds?: number;
+};
+
+export type EditedAssignment = {
+  resourceId: string;
+  destinationId: string;
+};
+
+export type DecisionCreateRequest = {
+  action: DecisionAction;
+  note: string;
+  editedAssignments?: EditedAssignment[];
+};
