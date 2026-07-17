@@ -1,8 +1,11 @@
+from collections.abc import Mapping
 from pathlib import Path
 
 from pyproj import Geod
 
+from wildfireops.config import Settings
 from wildfireops.domain.observations import NormalizedObservation, WeatherObservation
+from wildfireops.geospatial.clustering import ClusteringConfig, cluster_detections
 from wildfireops.geospatial.exposure import ExposureConfig
 from wildfireops.geospatial.road_graph import RoadGraph
 from wildfireops.replay.loader import ReplayLoader
@@ -45,22 +48,46 @@ def test_committed_park_fire_package_is_complete() -> None:
             temperature = item.raw_payload["TMP"].split(",")
             assert item.wind_speed_mps == int(wind[3]) / 10
             assert item.temperature_celsius == int(temperature[0]) / 10
+    detections = tuple(
+        item for item in observations if isinstance(item, NormalizedObservation)
+    )
+    settings = Settings()
+    clusters = cluster_detections(
+        detections,
+        ClusteringConfig(
+            spatial_radius_meters=settings.clustering_spatial_radius_meters,
+            temporal_window_seconds=settings.clustering_temporal_window_seconds,
+            minimum_points=settings.clustering_minimum_points,
+            algorithm_version=settings.clustering_algorithm_version,
+        ),
+    )
     geod = Geod(ellps="WGS84")
-    assert (
-        min(
-            abs(
-                geod.inv(
-                    item.longitude,
-                    item.latitude,
-                    asset.geometry_geojson["coordinates"][0],
-                    asset.geometry_geojson["coordinates"][1],
-                )[2]
-            )
-            for item in observations
-            if isinstance(item, NormalizedObservation)
-            for asset in loader.static_data.assets
+    exposed = tuple(
+        (cluster, asset)
+        for cluster in clusters
+        for asset in loader.static_data.assets
+        if abs(
+            geod.inv(
+                cluster.centroid_longitude,
+                cluster.centroid_latitude,
+                asset.geometry_geojson["coordinates"][0],
+                asset.geometry_geojson["coordinates"][1],
+            )[2]
         )
         <= ExposureConfig().buffer_meters
+    )
+    assert exposed
+    demand = exposed[0][1].raw_metadata["demand"]
+    assert isinstance(demand, Mapping)
+    required_capability = demand["required_capability"]
+    required_capacity = demand["required_capacity"]
+    assert any(
+        resource.available
+        and resource.status == "available"
+        and resource.raw_metadata["simulated"] is True
+        and required_capability in resource.capabilities
+        and resource.capacity >= required_capacity
+        for resource in loader.static_data.resources
     )
     assert loader.manifest.road_graph is not None
     graph = RoadGraph.load(package / loader.manifest.road_graph.filename)
