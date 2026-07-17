@@ -12,6 +12,8 @@ import { IdempotencyIntent } from "./idempotency";
 import type {
   Recommendation,
   RecommendationCreateRequest,
+  Decision,
+  DecisionCreateRequest,
   ScenarioCreateRequest,
   ScenarioVersion,
   ScenarioVersionCreateRequest,
@@ -63,6 +65,11 @@ export type CreateScenarioVersionVariables = {
 export type GenerateRecommendationVariables = {
   versionId: string;
   body: RecommendationCreateRequest;
+};
+
+export type CreateDecisionVariables = {
+  recommendationId: string;
+  body: DecisionCreateRequest;
 };
 
 const incidentUpdatedSchema = z.object({
@@ -162,6 +169,14 @@ export function useGenerateRecommendationMutation() {
       ]),
     ({ versionId, body }, key) =>
       apiClient.generateRecommendation(versionId, body, key),
+  );
+}
+
+export function useCreateDecisionMutation() {
+  return useIdempotentCommand<CreateDecisionVariables, Decision>(
+    (variables) => JSON.stringify(["create-decision", variables.recommendationId, canonicalDecision(variables.body)]),
+    ({ recommendationId, body }, key) =>
+      apiClient.createDecision(recommendationId, canonicalDecision(body), key),
   );
 }
 
@@ -315,4 +330,25 @@ function isRetryableCommandError(error: unknown): boolean {
       error.status === 429 ||
       error.status >= 500)
   );
+}
+
+function canonicalDecision(body: DecisionCreateRequest): DecisionCreateRequest {
+  const note = body.note.trim();
+  if (body.action !== "edit") {
+    return { action: body.action, note };
+  }
+  return {
+    action: body.action,
+    note,
+    editedAssignments: [...(body.editedAssignments ?? [])]
+      .map(({ resourceId, destinationId }) => ({
+        resourceId: resourceId.trim(),
+        destinationId: destinationId.trim(),
+      }))
+      .sort(
+        (left, right) =>
+          left.resourceId.localeCompare(right.resourceId) ||
+          left.destinationId.localeCompare(right.destinationId),
+      ),
+  };
 }

@@ -157,6 +157,9 @@ describe("ScenarioPlanningPanel", () => {
     });
     expect(recommendation).toHaveTextContent("Baseline scenario version 1");
     expect(
+      screen.getByRole("button", { name: "Approve recommendation" }),
+    ).toBeVisible();
+    expect(
       screen.getByRole("form", { name: "Scenario version editor" }),
     ).toBeVisible();
     expect(calls.map(({ path }) => path)).toEqual([

@@ -20,6 +20,7 @@ import type {
   ScenarioVersion,
   ScenarioVersionCreateRequest,
 } from "../../api/types";
+import { DecisionDialog } from "../decisions/DecisionDialog";
 import { RecommendationPanel } from "../decisions/RecommendationPanel";
 import { ScenarioComparison } from "./ScenarioComparison";
 import { ScenarioEditor } from "./ScenarioEditor";
@@ -476,15 +477,26 @@ export function ScenarioPlanningPanel({
       ) : null}
 
       {lastSuccessful && baselineVersion ? (
-        <RecommendationPanel
-          recommendation={lastSuccessful.recommendation}
-          freshness={sessionStale ? "stale" : "current"}
-          versionLabel={recommendationLabel(
-            lastSuccessful.version,
-            latestVersion,
-            baselineVersion,
-          )}
-        />
+        <>
+          <RecommendationPanel
+            recommendation={lastSuccessful.recommendation}
+            freshness={sessionStale ? "stale" : "current"}
+            versionLabel={recommendationLabel(
+              lastSuccessful.version,
+              latestVersion,
+              baselineVersion,
+            )}
+          />
+          <DecisionDialog
+            key={lastSuccessful.recommendation.id}
+            recommendation={lastSuccessful.recommendation}
+            freshness={sessionStale ? "stale" : "current"}
+            planningDisabled={planningDisabled}
+            resources={incident.simulatedResources.map(({ resourceId }) => resourceId)}
+            destinations={incident.exposedAssets.map(({ assetId }) => assetId)}
+            onStale={() => setStaleLatched(true)}
+          />
+        </>
       ) : null}
 
       {baselineRecommendation &&

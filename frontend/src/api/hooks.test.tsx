@@ -12,6 +12,7 @@ import {
   queryKeys,
   useCreateScenarioMutation,
   useCreateScenarioVersionMutation,
+  useCreateDecisionMutation,
   useDecisionContext,
   useGenerateRecommendationMutation,
   useIncident,
@@ -291,6 +292,124 @@ describe("planning read hooks", () => {
 });
 
 describe("planning command hooks", () => {
+  it("canonicalizes decision requests before signing and transport", async () => {
+    const createDecision = vi
+      .spyOn(apiClient, "createDecision")
+      .mockResolvedValue({
+        id: "decision-1",
+        recommendationId: "recommendation-1",
+        action: "edit" as const,
+        note: "Operator note",
+        actorId: "operator-1",
+        assignments: [],
+        createdAt: "2026-07-17T12:00:00Z",
+      });
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useCreateDecisionMutation(), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        recommendationId: "recommendation-1",
+        body: {
+          action: "edit",
+          note: "  Operator note  ",
+          editedAssignments: [
+            { resourceId: "resource-2", destinationId: "asset-2" },
+            { resourceId: "resource-1", destinationId: "asset-1" },
+          ],
+        },
+      });
+    });
+
+    expect(createDecision).toHaveBeenCalledWith(
+      "recommendation-1",
+      {
+        action: "edit",
+        note: "Operator note",
+        editedAssignments: [
+          { resourceId: "resource-1", destinationId: "asset-1" },
+          { resourceId: "resource-2", destinationId: "asset-2" },
+        ],
+      },
+      expect.stringMatching(/\S/),
+    );
+  });
+
+  it("reuses an unchanged decision key but discards it after reset", async () => {
+    const failure = new ApiClientError("network_error", "hidden", {}, 0);
+    const createDecision = vi
+      .spyOn(apiClient, "createDecision")
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue({
+        id: "decision-1",
+        recommendationId: "recommendation-1",
+        action: "approve" as const,
+        note: "Proceed",
+        actorId: "operator-1",
+        assignments: [],
+        createdAt: "2026-07-17T12:00:00Z",
+      });
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useCreateDecisionMutation(), {
+      wrapper,
+    });
+    const variables = {
+      recommendationId: "recommendation-1",
+      body: { action: "approve" as const, note: "Proceed" },
+    };
+
+    await act(async () => {
+      await expect(result.current.mutateAsync(variables)).rejects.toBe(failure);
+      await result.current.mutateAsync(variables);
+    });
+    expect(createDecision.mock.calls[0][2]).toBe(createDecision.mock.calls[1][2]);
+
+    act(() => result.current.reset());
+    await act(async () => {
+      await result.current.mutateAsync(variables);
+    });
+    expect(createDecision.mock.calls[1][2]).not.toBe(createDecision.mock.calls[2][2]);
+  });
+
+  it.each([
+    { action: "reject" as const, note: "Proceed" },
+    { action: "approve" as const, note: "Changed note" },
+    {
+      action: "edit" as const,
+      note: "Proceed",
+      editedAssignments: [{ resourceId: "resource-2", destinationId: "asset-2" }],
+    },
+  ])("uses a fresh key when a retry changes the decision", async (body) => {
+    const createDecision = vi
+      .spyOn(apiClient, "createDecision")
+      .mockRejectedValueOnce(new ApiClientError("network_error", "hidden", {}, 0))
+      .mockResolvedValue({
+        id: "decision-1",
+        recommendationId: "recommendation-1",
+        action: body.action,
+        note: body.note,
+        actorId: "operator-1",
+        assignments: [],
+        createdAt: "2026-07-17T12:00:00Z",
+      });
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useCreateDecisionMutation(), { wrapper });
+
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({
+          recommendationId: "recommendation-1",
+          body: { action: "approve", note: "Proceed" },
+        }),
+      ).rejects.toBeInstanceOf(ApiClientError);
+      await result.current.mutateAsync({ recommendationId: "recommendation-1", body });
+    });
+
+    expect(createDecision.mock.calls[0][2]).not.toBe(createDecision.mock.calls[1][2]);
+  });
+
   it("routes all three typed commands with nonblank caller-owned keys", async () => {
     const createScenario = vi
       .spyOn(apiClient, "createScenario")
