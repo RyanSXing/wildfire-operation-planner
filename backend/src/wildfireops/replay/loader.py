@@ -16,6 +16,12 @@ from wildfireops.domain.observations import (
     freeze_json_object,
 )
 from wildfireops.replay.manifest import ReplayManifest, ReplayManifestInvalid
+from wildfireops.replay.static_data import (
+    STATIC_DATA_FILENAMES,
+    ReplayStaticData,
+    ReplayStaticDataInvalid,
+    parse_replay_static_data,
+)
 
 
 _OBSERVATION_FILE_TYPES = {
@@ -88,6 +94,25 @@ class ReplayLoader:
                 raise ReplayPackageCorrupt(f"hash mismatch for {filename}")
             file_contents[filename] = hashed_file.content
 
+        self.static_data: ReplayStaticData | None
+        if any(
+            filename in file_contents
+            for filename in ("exposed_assets.geojson", "resources.json")
+        ):
+            try:
+                self.static_data = parse_replay_static_data(
+                    {
+                        filename: file_contents[filename]
+                        for filename in STATIC_DATA_FILENAMES
+                        if filename in file_contents
+                    },
+                    self.manifest,
+                )
+            except ReplayStaticDataInvalid as error:
+                raise ReplayPackageCorrupt(str(error)) from error
+        else:
+            self.static_data = None
+
         observation_files = [
             filename for filename in file_contents if filename.endswith(".jsonl")
         ]
@@ -99,6 +124,7 @@ class ReplayLoader:
 
         records: list[_ReplayRecord] = []
         identities: set[str] = set()
+        observation_sources: set[str] = set()
         for filename in observation_files:
             try:
                 serialized_records = _split_jsonl(
@@ -131,6 +157,7 @@ class ReplayLoader:
                         f"{observation.identity}"
                     )
                 identities.add(observation.identity)
+                observation_sources.add(observation.source_name)
                 records.append(
                     _ReplayRecord(
                         observed_at=observation.observed_at,
@@ -140,6 +167,17 @@ class ReplayLoader:
                         line_number=line_number,
                     )
                 )
+        if self.static_data is not None:
+            for source_name in sorted(observation_sources):
+                if source_name not in self.static_data.static_data_versions:
+                    raise ReplayPackageCorrupt(
+                        f"missing static data version for observation source: "
+                        f"{source_name}"
+                    )
+                if source_name not in self.static_data.source_citations:
+                    raise ReplayPackageCorrupt(
+                        f"missing source citation for observation source: {source_name}"
+                    )
         self._records = tuple(
             sorted(records, key=lambda record: (record.observed_at, record.identity))
         )

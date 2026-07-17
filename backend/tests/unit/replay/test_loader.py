@@ -47,6 +47,75 @@ def _replace_package_files(package: Path, files: dict[str, bytes]) -> None:
     _write_manifest(package, manifest)
 
 
+def _add_package_files(package: Path, files: dict[str, bytes]) -> None:
+    manifest = _manifest(package)
+    for filename, content in files.items():
+        (package / filename).write_bytes(content)
+        manifest["files"][filename] = sha256(content).hexdigest()
+    _write_manifest(package, manifest)
+
+
+def _static_files() -> dict[str, bytes]:
+    payloads = {
+        "static_data_versions.json": {
+            "census": "2023-acs5",
+            "nasa_firms": "recorded-test-v1",
+            "simulated_resources": "synthetic-v1",
+        },
+        "source_citations.json": {
+            "census": "https://www.census.gov/",
+            "nasa_firms": "https://firms.modaps.eosdis.nasa.gov/",
+            "simulated_resources": "WildfireOps portfolio simulation",
+        },
+        "exposed_assets.geojson": {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [-121.6, 39.8]},
+                    "properties": {
+                        "asset_id": "community-1",
+                        "asset_kind": "community",
+                        "name": "Community One",
+                        "population": 5000,
+                        "capacity": None,
+                        "source_name": "census",
+                        "source_version": "2023-acs5",
+                        "raw_metadata": {
+                            "demand": {
+                                "required_capability": "water",
+                                "required_capacity": 2,
+                            }
+                        },
+                    },
+                }
+            ],
+        },
+        "resources.json": [
+            {
+                "resource_id": "engine-1",
+                "resource_type": "engine",
+                "capabilities": ["water", "medical"],
+                "capacity": 4,
+                "available": True,
+                "status": "available",
+                "geometry_geojson": {
+                    "type": "Point",
+                    "coordinates": [-121.61, 39.81],
+                },
+                "raw_metadata": {"simulated": True},
+            }
+        ],
+    }
+    return {
+        filename: json.dumps(payload).encode() for filename, payload in payloads.items()
+    }
+
+
+def _add_static_group(package: Path) -> None:
+    _add_package_files(package, _static_files())
+
+
 def _jsonl(*records: dict[str, Any]) -> bytes:
     return b"".join(
         (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode(
@@ -100,6 +169,121 @@ def test_replay_returns_identical_order_for_same_clock_time() -> None:
 
     assert [item.identity for item in first] == [item.identity for item in second]
     assert len(first) == 1
+
+
+def test_loader_exposes_hash_verified_static_context(tmp_path: Path) -> None:
+    package = _copy_package(tmp_path)
+    _add_static_group(package)
+
+    loader = ReplayLoader(package)
+
+    assert loader.static_data is not None
+    assert [asset.asset_id for asset in loader.static_data.assets] == ["community-1"]
+    assert [resource.resource_id for resource in loader.static_data.resources] == [
+        "engine-1"
+    ]
+
+
+def test_loader_preserves_observation_only_schema_v1_compatibility() -> None:
+    assert ReplayLoader(FIXTURE_PACKAGE).static_data is None
+
+
+def test_loader_preserves_builder_provenance_only_schema_v1_compatibility(
+    tmp_path: Path,
+) -> None:
+    package = _copy_package(tmp_path)
+    static_files = _static_files()
+    _add_package_files(
+        package,
+        {
+            filename: static_files[filename]
+            for filename in (
+                "static_data_versions.json",
+                "source_citations.json",
+            )
+        },
+    )
+
+    assert ReplayLoader(package).static_data is None
+
+
+def test_loader_rejects_partial_static_group(tmp_path: Path) -> None:
+    package = _copy_package(tmp_path)
+    _add_package_files(package, {"resources.json": _static_files()["resources.json"]})
+
+    with pytest.raises(
+        ReplayPackageCorrupt,
+        match=r"^missing required static file: static_data_versions\.json$",
+    ):
+        ReplayLoader(package)
+
+
+def test_loader_hashes_every_file_before_parsing_static_data(tmp_path: Path) -> None:
+    package = _copy_package(tmp_path)
+    static_files = _static_files()
+    static_files["static_data_versions.json"] = b"not-json"
+    _add_package_files(package, static_files)
+    resources = package / "resources.json"
+    resources.write_bytes(b"X" + resources.read_bytes()[1:])
+
+    with pytest.raises(
+        ReplayPackageCorrupt,
+        match=r"^hash mismatch for resources\.json$",
+    ):
+        ReplayLoader(package)
+
+
+def test_loader_parses_the_same_static_bytes_that_it_hashes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package = _copy_package(tmp_path)
+    _add_static_group(package)
+    original_hash = replay_loader._sha256_file
+
+    def hash_then_replace(path: Path) -> object:
+        result = original_hash(path)
+        if path.name == "resources.json":
+            path.write_bytes(b"not-json")
+        return result
+
+    monkeypatch.setattr(replay_loader, "_sha256_file", hash_then_replace)
+
+    loader = ReplayLoader(package)
+
+    assert loader.static_data is not None
+    assert [resource.resource_id for resource in loader.static_data.resources] == [
+        "engine-1"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("filename", "message"),
+    [
+        (
+            "static_data_versions.json",
+            "missing static data version for observation source: nasa_firms",
+        ),
+        (
+            "source_citations.json",
+            "missing source citation for observation source: nasa_firms",
+        ),
+    ],
+)
+def test_loader_requires_static_provenance_for_observation_sources(
+    tmp_path: Path,
+    filename: str,
+    message: str,
+) -> None:
+    package = _copy_package(tmp_path)
+    static_files = _static_files()
+    payload = json.loads(static_files[filename])
+    del payload["nasa_firms"]
+    static_files[filename] = json.dumps(payload).encode()
+    _add_package_files(package, static_files)
+
+    with pytest.raises(ReplayPackageCorrupt, match=rf"^{message}$"):
+        ReplayLoader(package)
 
 
 def test_loader_rejects_a_file_when_one_byte_changes(tmp_path: Path) -> None:
