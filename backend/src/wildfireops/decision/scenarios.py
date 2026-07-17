@@ -122,7 +122,7 @@ class ScenarioService:
     async def create(
         self,
         *,
-        incident_id: UUID,
+        incident_id: UUID | str,
         graph_version: str,
         name: str | None,
         objective: str,
@@ -130,8 +130,7 @@ class ScenarioService:
         algorithm_config_version: str,
         idempotency_key: str,
     ) -> StoredScenarioVersion:
-        if not isinstance(incident_id, UUID):
-            raise ScenarioValidationError("incident_id must be a UUID")
+        incident_id = _identifier(incident_id)
         graph_version = _nonblank(graph_version, "graph_version")
         if graph_version not in self._graphs:
             raise ScenarioValidationError("graph_version is not available")
@@ -193,15 +192,14 @@ class ScenarioService:
     async def add_version(
         self,
         *,
-        scenario_id: UUID,
+        scenario_id: UUID | str,
         created_by: str,
         idempotency_key: str,
         road_closures: tuple[RoadClosure, ...] | None = None,
         weather_overrides: tuple[WeatherOverride, ...] | None = None,
         resource_overrides: tuple[ResourceOverride, ...] | None = None,
     ) -> StoredScenarioVersion:
-        if not isinstance(scenario_id, UUID):
-            raise ScenarioValidationError("scenario_id must be a UUID")
+        scenario_id = _identifier(scenario_id)
         normalized_author = _nonblank(created_by, "created_by")
         normalized_key = _idempotency_key(idempotency_key)
         normalized_roads = _road_replacements(road_closures)
@@ -463,3 +461,10 @@ def _request_hash(payload: object) -> str:
         sort_keys=True,
     ).encode("utf-8")
     return sha256(encoded).hexdigest()
+
+
+def _identifier(value: object) -> UUID:
+    try:
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except (AttributeError, TypeError, ValueError):
+        raise ScenarioNotFound("scenario resource was not found") from None

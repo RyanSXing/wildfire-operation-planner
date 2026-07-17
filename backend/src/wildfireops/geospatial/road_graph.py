@@ -21,7 +21,7 @@ from enum import StrEnum
 from hashlib import sha256
 from io import BytesIO
 from itertools import count
-from math import isfinite
+from math import hypot, isfinite
 from pathlib import Path
 from threading import Lock
 from typing import Hashable
@@ -150,6 +150,45 @@ class RoadGraph:
     @property
     def edge_ids(self) -> frozenset[str]:
         return self._edge_ids
+
+
+def nearest_road_node(
+    graph: RoadGraph,
+    longitude: float,
+    latitude: float,
+) -> Hashable:
+    """Return the deterministic nearest finite x/y node."""
+    x = _finite_coordinate(longitude, "longitude")
+    y = _finite_coordinate(latitude, "latitude")
+    candidates: list[tuple[float, str, Hashable]] = []
+    # ponytail: O(N) scan is the MVP ceiling; use a spatial index for large graphs.
+    for node, data in graph._graph.nodes(data=True):
+        node_x = data.get("x")
+        node_y = data.get("y")
+        if (
+            isinstance(node_x, bool)
+            or not isinstance(node_x, int | float)
+            or isinstance(node_y, bool)
+            or not isinstance(node_y, int | float)
+            or not isfinite(float(node_x))
+            or not isfinite(float(node_y))
+        ):
+            continue
+        candidates.append(
+            (hypot(float(node_x) - x, float(node_y) - y), _node_identity(node), node)
+        )
+    if not candidates:
+        raise RoadGraphInvalid("road graph has no finite coordinate nodes")
+    return min(candidates, key=lambda item: (item[0], item[1]))[2]
+
+
+def _finite_coordinate(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise RoadGraphInvalid(f"{field} must be a finite number")
+    parsed = float(value)
+    if not isfinite(parsed):
+        raise RoadGraphInvalid(f"{field} must be a finite number")
+    return parsed
 
 
 def compute_route(

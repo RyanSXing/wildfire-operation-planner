@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -384,6 +385,10 @@ class DecisionActionModel(Base):
             "idempotency_key_id",
             name="uq_decision_actions_idempotency_key",
         ),
+        UniqueConstraint(
+            "recommendation_id",
+            name="uq_decision_actions_recommendation",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -417,8 +422,66 @@ class DecisionActionModel(Base):
     )
 
 
+class DecisionAssignmentModel(Base):
+    __tablename__ = "decision_assignments"
+    __table_args__ = (
+        UniqueConstraint(
+            "decision_action_id",
+            "resource_id",
+            name="uq_decision_assignments_decision_resource",
+        ),
+        Index(
+            "uq_decision_assignments_active_resource",
+            "resource_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    decision_action_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("decision_actions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    resource_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("resource_units.resource_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    destination_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("exposed_assets.asset_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    route: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    travel_minutes: Mapped[float] = mapped_column(Float, nullable=False)
+    capacity: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        default="active",
+        server_default=text("'active'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class AuditEventModel(Base):
     __tablename__ = "audit_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "decision_action_id",
+            name="uq_audit_events_decision_action",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True),

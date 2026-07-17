@@ -8,6 +8,10 @@ from wildfireops.application.read_models import (
     ReadServiceProvider,
     SourceQueryService,
 )
+from wildfireops.application.commands import CommandServiceProvider
+from wildfireops.decision.commands import AuditQueryService, DecisionCommandService
+from wildfireops.decision.recommendations import RecommendationService
+from wildfireops.decision.scenarios import ScenarioService
 
 
 async def get_incident_query_service(
@@ -32,3 +36,31 @@ def get_event_bus(request: Request) -> EventBus:
 
 def get_event_heartbeat_seconds(request: Request) -> float:
     return request.app.state.event_heartbeat_seconds
+
+
+async def get_scenario_service(request: Request) -> AsyncIterator[ScenarioService]:
+    provider: CommandServiceProvider = request.app.state.command_service_provider
+    async with provider.scenarios() as service:
+        yield service
+
+
+async def get_recommendation_service(
+    request: Request,
+) -> AsyncIterator[RecommendationService]:
+    provider: CommandServiceProvider = request.app.state.command_service_provider
+    async with provider.recommendations() as service:
+        yield service
+
+
+async def get_decision_service(
+    request: Request,
+) -> AsyncIterator[DecisionCommandService]:
+    provider: CommandServiceProvider = request.app.state.command_service_provider
+    async with provider.decisions() as service:
+        yield service
+
+
+async def get_audit_service(request: Request) -> AsyncIterator[AuditQueryService]:
+    provider: CommandServiceProvider = request.app.state.command_service_provider
+    async with provider.audits() as service:
+        yield service
