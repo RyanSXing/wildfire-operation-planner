@@ -190,6 +190,32 @@ describe("RecommendationPanel", () => {
       '"binding_constraints": "not-an-array"',
     );
   });
+
+  it("renders only the valid known diagnostic when its sibling is malformed", () => {
+    render(
+      <RecommendationPanel
+        recommendation={{
+          ...recommendation,
+          explanation: {
+            binding_constraints: { malformed: true },
+            unassigned_resource_ids: ["engine-2"],
+          },
+        }}
+        versionLabel="Current scenario version 2"
+      />,
+    );
+
+    const diagnostics = screen.getByRole("region", {
+      name: "Constraint diagnostics",
+    });
+    expect(within(diagnostics).getByText("engine-2")).toBeVisible();
+    expect(
+      within(diagnostics).queryByText("Binding constraints"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(diagnostics).queryByText("None reported"),
+    ).not.toBeInTheDocument();
+  });
 });
 
 function expectDefinition(

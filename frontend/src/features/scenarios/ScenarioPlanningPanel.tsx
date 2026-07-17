@@ -1,4 +1,10 @@
-import { useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import { ApiClientError } from "../../api/client";
 import {
@@ -26,6 +32,12 @@ export type ScenarioPlanningPanelProps = {
 type GeneratedRecommendation = {
   version: ScenarioVersion;
   recommendation: Recommendation;
+};
+
+type PlanningPolicy = {
+  incidentId: string;
+  snapshotId: string;
+  planningDisabled: boolean;
 };
 
 const recommendationRequest = {
@@ -59,6 +71,12 @@ export function ScenarioPlanningPanel({
   const createVersion = useCreateScenarioVersionMutation();
   const generateRecommendation = useGenerateRecommendationMutation();
   const sessionGeneration = useRef(0);
+  const mounted = useRef(false);
+  const latestPolicy = useRef<PlanningPolicy>({
+    incidentId: incident.id,
+    snapshotId: incident.snapshotId,
+    planningDisabled,
+  });
 
   const [baselineRecommendation, setBaselineRecommendation] =
     useState<Recommendation | null>(null);
@@ -71,7 +89,23 @@ export function ScenarioPlanningPanel({
     string | null
   >(null);
   const [commandError, setCommandError] = useState<unknown>(null);
-  const [authoritativelyStale, setAuthoritativelyStale] = useState(false);
+  const [staleLatched, setStaleLatched] = useState(false);
+
+  useLayoutEffect(() => {
+    latestPolicy.current = {
+      incidentId: incident.id,
+      snapshotId: incident.snapshotId,
+      planningDisabled,
+    };
+  }, [incident.id, incident.snapshotId, planningDisabled]);
+
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      sessionGeneration.current += 1;
+    };
+  }, []);
 
   const snapshotMismatch = planningSnapshotIds(
     baselineVersion,
@@ -79,18 +113,51 @@ export function ScenarioPlanningPanel({
     baselineRecommendation,
     lastSuccessful,
   ).some((snapshotId) => snapshotId !== incident.snapshotId);
-  const sessionStale = snapshotMismatch || authoritativelyStale;
+  const sessionStale = snapshotMismatch || staleLatched;
+
+  useEffect(() => {
+    if (snapshotMismatch) {
+      setStaleLatched(true);
+    }
+  }, [snapshotMismatch]);
+
   const commandsDisabled = planningDisabled || sessionStale;
   const bootstrapPending =
     createScenario.isPending || generateRecommendation.isPending;
   const canBootstrap = selectedGraph.length > 0 && !commandsDisabled;
+
+  const isActiveSession = (generation: number): boolean =>
+    mounted.current && generation === sessionGeneration.current;
+
+  const canSettleForVersion = (
+    version: ScenarioVersion,
+    generation: number,
+  ): boolean =>
+    isActiveSession(generation) &&
+    latestPolicy.current.incidentId === version.incidentId;
+
+  const canStartGeneration = (
+    version: ScenarioVersion,
+    generation: number,
+  ): boolean => {
+    const policy = latestPolicy.current;
+    return (
+      canSettleForVersion(version, generation) &&
+      !policy.planningDisabled &&
+      policy.snapshotId === version.incidentSnapshotId
+    );
+  };
 
   const generateForVersion = async (
     version: ScenarioVersion,
     baseline: boolean,
     generation = sessionGeneration.current,
   ): Promise<void> => {
-    if (createVersion.isPending || generateRecommendation.isPending) {
+    if (
+      !canStartGeneration(version, generation) ||
+      createVersion.isPending ||
+      generateRecommendation.isPending
+    ) {
       return;
     }
     setCommandError(null);
@@ -99,7 +166,7 @@ export function ScenarioPlanningPanel({
         versionId: version.id,
         body: recommendationRequest,
       });
-      if (generation !== sessionGeneration.current) {
+      if (!canSettleForVersion(version, generation)) {
         return;
       }
       const successful = { version, recommendation };
@@ -108,14 +175,20 @@ export function ScenarioPlanningPanel({
       }
       setLastSuccessful(successful);
       setFailedGenerationVersionId(null);
+      if (
+        version.incidentSnapshotId !== latestPolicy.current.snapshotId ||
+        recommendation.incidentSnapshotId !== latestPolicy.current.snapshotId
+      ) {
+        setStaleLatched(true);
+      }
     } catch (error) {
-      if (generation !== sessionGeneration.current) {
+      if (!canSettleForVersion(version, generation)) {
         return;
       }
       setCommandError(error);
       setFailedGenerationVersionId(version.id);
       if (isScenarioStale(error)) {
-        setAuthoritativelyStale(true);
+        setStaleLatched(true);
       }
     }
   };
@@ -142,23 +215,31 @@ export function ScenarioPlanningPanel({
           algorithmConfigVersion: "scenario-v1",
         },
       });
-      if (generation !== sessionGeneration.current) {
+      if (!isActiveSession(generation)) {
+        return;
+      }
+      const policy = latestPolicy.current;
+      if (policy.incidentId !== version.incidentId) {
         return;
       }
       setBaselineVersion(version);
       setLatestVersion(version);
       setFailedGenerationVersionId(null);
-      if (version.incidentSnapshotId !== incident.snapshotId) {
+      if (version.incidentSnapshotId !== policy.snapshotId) {
+        setStaleLatched(true);
+        return;
+      }
+      if (policy.planningDisabled) {
         return;
       }
       await generateForVersion(version, true, generation);
     } catch (error) {
-      if (generation !== sessionGeneration.current) {
+      if (!isActiveSession(generation)) {
         return;
       }
       setCommandError(error);
       if (isScenarioStale(error)) {
-        setAuthoritativelyStale(true);
+        setStaleLatched(true);
       }
     }
   };
@@ -181,18 +262,18 @@ export function ScenarioPlanningPanel({
         scenarioId: latestVersion.scenarioId,
         body: request,
       });
-      if (generation !== sessionGeneration.current) {
+      if (!isActiveSession(generation)) {
         return;
       }
       setLatestVersion(version);
       setFailedGenerationVersionId(null);
     } catch (error) {
-      if (generation !== sessionGeneration.current) {
+      if (!isActiveSession(generation)) {
         return;
       }
       setCommandError(error);
       if (isScenarioStale(error)) {
-        setAuthoritativelyStale(true);
+        setStaleLatched(true);
       }
     }
   };
@@ -212,7 +293,7 @@ export function ScenarioPlanningPanel({
     setLastSuccessful(null);
     setFailedGenerationVersionId(null);
     setCommandError(null);
-    setAuthoritativelyStale(false);
+    setStaleLatched(false);
   };
 
   return (
@@ -247,7 +328,8 @@ export function ScenarioPlanningPanel({
           retryLabel="Retry planning context"
           onRetry={() => void contextQuery.refetch()}
         />
-      ) : !contextQuery.data || contextQuery.data.availableGraphs.length === 0 ? (
+      ) : !contextQuery.data ||
+        (!baselineVersion && contextQuery.data.availableGraphs.length === 0) ? (
         <p role="status">No road graphs are available for planning.</p>
       ) : (
         <>

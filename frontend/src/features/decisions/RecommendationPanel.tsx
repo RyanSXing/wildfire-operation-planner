@@ -133,10 +133,18 @@ export function RecommendationPanel({
           </p>
         ) : (
           <dl className="recommendation-panel__diagnostics">
-            <dt>Binding constraints</dt>
-            <dd>{listText(bindingConstraints)}</dd>
-            <dt>Unassigned resources</dt>
-            <dd>{listText(unassignedResources)}</dd>
+            {bindingConstraints !== null ? (
+              <>
+                <dt>Binding constraints</dt>
+                <dd>{listText(bindingConstraints)}</dd>
+              </>
+            ) : null}
+            {unassignedResources !== null ? (
+              <>
+                <dt>Unassigned resources</dt>
+                <dd>{listText(unassignedResources)}</dd>
+              </>
+            ) : null}
           </dl>
         )}
       </section>
@@ -157,8 +165,8 @@ function stringArray(value: JsonValue | undefined): string[] | null {
     : null;
 }
 
-function listText(values: readonly string[] | null): string {
-  return values && values.length > 0 ? values.join(", ") : "None reported";
+function listText(values: readonly string[]): string {
+  return values.length > 0 ? values.join(", ") : "None reported";
 }
 
 function formatNumber(value: number): string {

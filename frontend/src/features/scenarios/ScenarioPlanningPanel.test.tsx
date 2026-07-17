@@ -9,9 +9,11 @@ import { incidentDetailSchema } from "../../api/types";
 import { queryKeys } from "../../api/hooks";
 import { AppProviders } from "../../app/AppProviders";
 import {
+  BEAR_ID,
   REDWOOD_ID,
   baselineRecommendationResponse,
   baselineScenarioVersionResponse,
+  bearDetailResponse,
   incidentDetailResponse,
   scenarioRecommendationResponse,
   scenarioVersionTwoResponse,
@@ -20,6 +22,7 @@ import { server } from "../../test/server";
 import { ScenarioPlanningPanel } from "./ScenarioPlanningPanel";
 
 const incident = incidentDetailSchema.parse(incidentDetailResponse);
+const bearIncident = incidentDetailSchema.parse(bearDetailResponse);
 
 type RecordedCommand = {
   path: string;
@@ -214,6 +217,64 @@ describe("ScenarioPlanningPanel", () => {
       }),
     ).toBeVisible();
     expect(graphSelection()).toBeDisabled();
+  });
+
+  it("keeps an established planning workflow visible when refreshed context has no graphs", async () => {
+    const calls: RecordedCommand[] = [];
+    installSuccessfulCommands(calls);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ScenarioPlanningPanel incident={incident} planningDisabled={false} />
+      </QueryClientProvider>,
+    );
+    await bootstrapBaseline(user);
+    await user.click(screen.getByRole("checkbox", { name: /Alpha Road/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Save scenario version" }),
+    );
+    await screen.findByText(
+      "Active version 2 has no successful recommendation yet.",
+    );
+
+    act(() => {
+      queryClient.setQueryData(
+        queryKeys.incidents.decisionContext(REDWOOD_ID),
+        {
+          incidentId: REDWOOD_ID,
+          defaultGraphVersion: null,
+          availableGraphs: [],
+        },
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText("No road graphs are available for planning."),
+      ).not.toBeInTheDocument();
+    });
+    expect(graphSelection()).toHaveValue("roads-v1");
+    expect(
+      within(graphSelection()).getByRole("option", {
+        name: "roads-v1 (locked baseline)",
+      }),
+    ).toBeVisible();
+    expect(graphSelection()).toBeDisabled();
+    expect(screen.getByRole("region", { name: "Road catalog" })).toBeVisible();
+    expect(
+      screen.getByRole("form", { name: "Scenario version editor" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Recommendation result" }),
+    ).toHaveTextContent("Previous successful scenario version 1");
+    expect(
+      screen.getByRole("button", {
+        name: "Generate recommendation for version 2",
+      }),
+    ).toBeEnabled();
   });
 
   it("does not issue command POSTs from StrictMode mount effects", async () => {
@@ -695,6 +756,315 @@ describe("ScenarioPlanningPanel", () => {
       }),
     ).toBeEnabled();
     expect(graphSelection()).toBeEnabled();
+  });
+
+  it("keeps a snapshot mismatch latched after props return to the original snapshot", async () => {
+    const calls: RecordedCommand[] = [];
+    installSuccessfulCommands(calls);
+    const user = userEvent.setup();
+    const view = renderPanel();
+    await bootstrapBaseline(user);
+    await user.click(screen.getByRole("checkbox", { name: /Alpha Road/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Save scenario version" }),
+    );
+    await screen.findByText(
+      "Active version 2 has no successful recommendation yet.",
+    );
+
+    const nextIncident = {
+      ...incident,
+      snapshotId: "10000000-0000-0000-0000-000000000099",
+      snapshotVersion: incident.snapshotVersion + 1,
+    };
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          incident={nextIncident}
+          planningDisabled={false}
+        />
+      </AppProviders>,
+    );
+    await screen.findByRole("alert", { name: "Stale planning session" });
+
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel incident={incident} planningDisabled={false} />
+      </AppProviders>,
+    );
+
+    expect(
+      await screen.findByRole("alert", { name: "Stale planning session" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Generate recommendation for version 2",
+      }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("checkbox", { name: /County Road 1/ }),
+    ).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Start over" }));
+    expect(
+      screen.getByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    ).toBeEnabled();
+  });
+
+  it("retains a created baseline without generating when replay starts during creation", async () => {
+    const createGate = deferred<void>();
+    let generationAttempts = 0;
+    server.use(
+      http.post("/api/incidents/:incidentId/scenarios", async () => {
+        await createGate.promise;
+        return HttpResponse.json(baselineScenarioVersionResponse, {
+          status: 201,
+        });
+      }),
+      http.post("/api/scenario-versions/:versionId/recommendations", () => {
+        generationAttempts += 1;
+        return HttpResponse.json(baselineRecommendationResponse, {
+          status: 201,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    const view = renderPanel();
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel incident={incident} planningDisabled />
+      </AppProviders>,
+    );
+    await release(createGate);
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Retry baseline recommendation",
+      }),
+    ).toBeDisabled();
+    expect(generationAttempts).toBe(0);
+    expect(
+      screen.getByText("Return to the current snapshot to plan."),
+    ).toBeVisible();
+  });
+
+  it("marks a created baseline stale without generating when the snapshot changes during creation", async () => {
+    const createGate = deferred<void>();
+    let generationAttempts = 0;
+    server.use(
+      http.post("/api/incidents/:incidentId/scenarios", async () => {
+        await createGate.promise;
+        return HttpResponse.json(baselineScenarioVersionResponse, {
+          status: 201,
+        });
+      }),
+      http.post("/api/scenario-versions/:versionId/recommendations", () => {
+        generationAttempts += 1;
+        return HttpResponse.json(baselineRecommendationResponse, {
+          status: 201,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    const view = renderPanel();
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          incident={{
+            ...incident,
+            snapshotId: "10000000-0000-0000-0000-000000000099",
+            snapshotVersion: incident.snapshotVersion + 1,
+          }}
+          planningDisabled={false}
+        />
+      </AppProviders>,
+    );
+    await release(createGate);
+
+    expect(
+      await screen.findByRole("alert", { name: "Stale planning session" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Retry baseline recommendation" }),
+    ).toBeDisabled();
+    expect(generationAttempts).toBe(0);
+  });
+
+  it("does not continue a deferred create after a keyed incident switch unmounts the panel", async () => {
+    const createGate = deferred<void>();
+    let generationAttempts = 0;
+    server.use(
+      http.post("/api/incidents/:incidentId/scenarios", async () => {
+        await createGate.promise;
+        return HttpResponse.json(baselineScenarioVersionResponse, {
+          status: 201,
+        });
+      }),
+      http.post("/api/scenario-versions/:versionId/recommendations", () => {
+        generationAttempts += 1;
+        return HttpResponse.json(baselineRecommendationResponse, {
+          status: 201,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    const view = render(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          key={REDWOOD_ID}
+          incident={incident}
+          planningDisabled={false}
+        />
+      </AppProviders>,
+    );
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          key={BEAR_ID}
+          incident={bearIncident}
+          planningDisabled={false}
+        />
+      </AppProviders>,
+    );
+    expect(
+      await screen.findByRole("combobox", { name: "Road graph" }),
+    ).toHaveValue("roads-bear-v1");
+    await release(createGate);
+
+    expect(generationAttempts).toBe(0);
+    expect(
+      screen.queryByRole("region", { name: "Recommendation result" }),
+    ).not.toBeInTheDocument();
+    expect(graphSelection()).toHaveValue("roads-bear-v1");
+  });
+
+  it("retains an in-flight generation result for inspection when replay starts", async () => {
+    const generationGate = deferred<void>();
+    let generationAttempts = 0;
+    server.use(
+      http.post("/api/incidents/:incidentId/scenarios", () =>
+        HttpResponse.json(baselineScenarioVersionResponse, { status: 201 }),
+      ),
+      http.post(
+        "/api/scenario-versions/:versionId/recommendations",
+        async () => {
+          generationAttempts += 1;
+          await generationGate.promise;
+          return HttpResponse.json(baselineRecommendationResponse, {
+            status: 201,
+          });
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    const view = renderPanel();
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    await waitFor(() => expect(generationAttempts).toBe(1));
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel incident={incident} planningDisabled />
+      </AppProviders>,
+    );
+    await release(generationGate);
+
+    expect(generationAttempts).toBe(1);
+    expect(
+      await screen.findByRole("region", { name: "Recommendation result" }),
+    ).toHaveTextContent("Baseline scenario version 1");
+    expect(
+      screen.queryByRole("button", { name: "Retry baseline recommendation" }),
+    ).not.toBeInTheDocument();
+
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel incident={incident} planningDisabled={false} />
+      </AppProviders>,
+    );
+    expect(
+      screen.getByRole("region", { name: "Recommendation result" }),
+    ).toBeVisible();
+    expect(generationAttempts).toBe(1);
+  });
+
+  it("retains and marks an in-flight generation result stale when the snapshot changes", async () => {
+    const generationGate = deferred<void>();
+    let generationAttempts = 0;
+    server.use(
+      http.post("/api/incidents/:incidentId/scenarios", () =>
+        HttpResponse.json(baselineScenarioVersionResponse, { status: 201 }),
+      ),
+      http.post(
+        "/api/scenario-versions/:versionId/recommendations",
+        async () => {
+          generationAttempts += 1;
+          await generationGate.promise;
+          return HttpResponse.json(baselineRecommendationResponse, {
+            status: 201,
+          });
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    const view = renderPanel();
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    await waitFor(() => expect(generationAttempts).toBe(1));
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          incident={{
+            ...incident,
+            snapshotId: "10000000-0000-0000-0000-000000000099",
+            snapshotVersion: incident.snapshotVersion + 1,
+          }}
+          planningDisabled={false}
+        />
+      </AppProviders>,
+    );
+    await release(generationGate);
+
+    expect(generationAttempts).toBe(1);
+    expect(
+      await screen.findByRole("region", { name: "Recommendation result" }),
+    ).toHaveTextContent("Baseline scenario version 1");
+    expect(
+      screen.getByRole("alert", { name: "Stale planning session" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Retry baseline recommendation" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Save scenario version" }),
+    ).toBeDisabled();
   });
 
   it("does not let a late baseline-create response resurrect a reset session", async () => {
