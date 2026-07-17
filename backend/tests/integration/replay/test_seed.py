@@ -17,11 +17,12 @@ from wildfireops.domain.observations import SourceObservation
 from wildfireops.geospatial.clustering import ClusteringConfig
 from wildfireops.geospatial.exposure import ExposureConfig
 from wildfireops.ingestion.service import IngestionRun, IngestionService
-from wildfireops.persistence.observations import IngestStats, ObservationRepository
 from wildfireops.persistence.decision_models import (
     IdempotencyKeyModel,
     IncidentSnapshotModel,
 )
+from wildfireops.persistence.incidents import _INCIDENT_REFRESH_LOCK_ID
+from wildfireops.persistence.observations import IngestStats, ObservationRepository
 from wildfireops.persistence.observed_models import (
     ExposedAssetModel,
     IncidentDetectionModel,
@@ -429,6 +430,52 @@ async def test_changed_config_conflicts(
         )
 
 
+@pytest.mark.asyncio
+async def test_seed_allows_unrelated_idempotency_claim(
+    isolated_engine: AsyncEngine,
+    tmp_path: Path,
+) -> None:
+    loader = _build_synthetic_package(tmp_path, variant="unrelated-idempotency")
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    async with factory.begin() as session:
+        session.add(
+            IdempotencyKeyModel(
+                scope="recommendation",
+                key="unrelated-claim",
+                request_hash="0" * 64,
+            )
+        )
+
+    result = await seed_replay_package(
+        loader=loader,
+        session_factory=factory,
+        clustering_config=CLUSTERING,
+        exposure_config=EXPOSURE,
+        risk_config=RISK,
+    )
+
+    assert result.status == "seeded"
+    async with factory() as session:
+        claims = (
+            await session.scalars(
+                select(IdempotencyKeyModel).order_by(
+                    IdempotencyKeyModel.scope,
+                    IdempotencyKeyModel.key,
+                )
+            )
+        ).all()
+    assert [(claim.scope, claim.key, claim.request_hash) for claim in claims] == [
+        ("recommendation", "unrelated-claim", "0" * 64),
+        (
+            "replay_seed",
+            loader.manifest.package_id,
+            _seed_request_hash(
+                _package_digest(loader.manifest), CLUSTERING, EXPOSURE, RISK
+            ),
+        ),
+    ]
+
+
 def _dirty_model(model: type[object]) -> object:
     point = WKTElement("POINT(-121.5 39.8)", srid=4326)
     if model is SourceObservationModel:
@@ -720,8 +767,16 @@ async def _wait_for_seed_lock_waiter(engine: AsyncEngine) -> None:
             waiting = await connection.scalar(
                 text(
                     "SELECT count(*) FROM pg_locks "
-                    "WHERE locktype IN ('advisory', 'transactionid') AND NOT granted"
-                )
+                    "WHERE locktype = 'advisory' "
+                    "AND database = ("
+                    "SELECT oid FROM pg_database WHERE datname = current_database()"
+                    ") "
+                    "AND classid = "
+                    "((CAST(:lock_id AS bigint) >> 32) & 4294967295)::oid "
+                    "AND objid = "
+                    "(CAST(:lock_id AS bigint) & 4294967295)::oid "
+                    "AND objsubid = 1 AND NOT granted"
+                ).bindparams(lock_id=_INCIDENT_REFRESH_LOCK_ID)
             )
         if waiting:
             return
