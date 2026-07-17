@@ -25,6 +25,9 @@ from wildfireops.db import (
     create_session_factory,
 )
 from wildfireops.observability import configure_observability
+from wildfireops.geospatial.road_graph import RoadGraph, RoadGraphInvalid
+from wildfireops.replay.clock import ReplayClock
+from wildfireops.replay.loader import ReplayLoader
 
 
 type EventRelay = Callable[[str, EventBus], Coroutine[Any, Any, None]]
@@ -36,6 +39,18 @@ def create_app(
     event_relay: EventRelay = relay_postgres_events,
 ) -> FastAPI:
     resolved = settings or get_settings()
+    replay_clock: ReplayClock | None = None
+    graphs: dict[str, RoadGraph] = {}
+    if resolved.replay_package is not None:
+        loader = ReplayLoader(resolved.replay_package)
+        replay_clock = ReplayClock(loader.manifest.end_at)
+        if loader.manifest.road_graph is not None:
+            graph = RoadGraph.load(
+                resolved.replay_package / loader.manifest.road_graph.filename
+            )
+            if graph.graph_version != loader.manifest.road_graph.graph_version:
+                raise RoadGraphInvalid("road graph version does not match replay manifest")
+            graphs[graph.graph_version] = graph
     engine = create_engine(resolved)
 
     @asynccontextmanager
@@ -59,8 +74,12 @@ def create_app(
     app.state.settings = resolved
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
-    app.state.clock = lambda: datetime.now(UTC)
-    app.state.graphs = {}
+    app.state.clock = (
+        (lambda: replay_clock.current_time)
+        if replay_clock is not None
+        else lambda: datetime.now(UTC)
+    )
+    app.state.graphs = graphs
     app.state.read_service_provider = create_read_service_provider(
         session_factory=lambda: app.state.session_factory(),
         settings=resolved,
