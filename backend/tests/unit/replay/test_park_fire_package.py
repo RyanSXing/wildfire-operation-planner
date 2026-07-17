@@ -1,6 +1,9 @@
 from pathlib import Path
 
+from pyproj import Geod
+
 from wildfireops.domain.observations import NormalizedObservation, WeatherObservation
+from wildfireops.geospatial.exposure import ExposureConfig
 from wildfireops.geospatial.road_graph import RoadGraph
 from wildfireops.replay.loader import ReplayLoader
 
@@ -17,8 +20,7 @@ def test_committed_park_fire_package_is_complete() -> None:
         "noaa_ncei",
     }
     assert all(
-        item.raw_metadata["simulated"] is True
-        for item in loader.static_data.resources
+        item.raw_metadata["simulated"] is True for item in loader.static_data.resources
     )
     assert all(
         citation.startswith("https://")
@@ -33,13 +35,33 @@ def test_committed_park_fire_package_is_complete() -> None:
     )
     for item in observations:
         if isinstance(item, NormalizedObservation):
-            assert item.confidence == {"l": 0.3, "n": 0.6, "h": 0.9}[item.raw_payload["confidence"]]
+            assert (
+                item.confidence
+                == {"l": 0.3, "n": 0.6, "h": 0.9}[item.raw_payload["confidence"]]
+            )
             assert item.intensity == float(item.raw_payload["bright_ti4"])
         elif isinstance(item, WeatherObservation):
             wind = item.raw_payload["WND"].split(",")
             temperature = item.raw_payload["TMP"].split(",")
             assert item.wind_speed_mps == int(wind[3]) / 10
             assert item.temperature_celsius == int(temperature[0]) / 10
+    geod = Geod(ellps="WGS84")
+    assert (
+        min(
+            abs(
+                geod.inv(
+                    item.longitude,
+                    item.latitude,
+                    asset.geometry_geojson["coordinates"][0],
+                    asset.geometry_geojson["coordinates"][1],
+                )[2]
+            )
+            for item in observations
+            if isinstance(item, NormalizedObservation)
+            for asset in loader.static_data.assets
+        )
+        <= ExposureConfig().buffer_meters
+    )
     assert loader.manifest.road_graph is not None
     graph = RoadGraph.load(package / loader.manifest.road_graph.filename)
     assert graph.graph_version == loader.manifest.road_graph.graph_version
