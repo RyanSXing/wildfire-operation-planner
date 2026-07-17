@@ -21,6 +21,7 @@ import type {
   ScenarioVersionCreateRequest,
 } from "../../api/types";
 import { DecisionDialog } from "../decisions/DecisionDialog";
+import { AuditDrawer } from "../decisions/AuditDrawer";
 import { RecommendationPanel } from "../decisions/RecommendationPanel";
 import { ScenarioComparison } from "./ScenarioComparison";
 import { ScenarioEditor } from "./ScenarioEditor";
@@ -495,6 +496,10 @@ export function ScenarioPlanningPanel({
             resources={incident.simulatedResources.map(({ resourceId }) => resourceId)}
             destinations={incident.exposedAssets.map(({ assetId }) => assetId)}
             onStale={() => setStaleLatched(true)}
+          />
+          <AuditDrawer
+            key={lastSuccessful.recommendation.id}
+            recommendationId={lastSuccessful.recommendation.id}
           />
         </>
       ) : null}

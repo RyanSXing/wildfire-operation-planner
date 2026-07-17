@@ -427,6 +427,7 @@ describe("ScenarioPlanningPanel", () => {
     expect(
       screen.getByRole("heading", { level: 4, name: "Recommendation" }),
     ).toBeVisible();
+    expect(screen.getByText("Audit history")).toBeVisible();
     expect(
       screen.getByRole("heading", {
         level: 4,

@@ -1,10 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiClientError, apiClient } from "../../api/client";
+import { queryKeys } from "../../api/hooks";
 import type { Decision, Recommendation } from "../../api/types";
 import { AppProviders } from "../../app/AppProviders";
+import { AuditDrawer } from "./AuditDrawer";
 import { DecisionDialog } from "./DecisionDialog";
 
 const recommendation: Recommendation = {
@@ -312,6 +315,75 @@ describe("DecisionDialog", () => {
     expect(screen.getByRole("button", { name: "Approve recommendation" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject recommendation" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit recommendation" })).toBeDisabled();
+  });
+
+  it.each([
+    ["records a decision", () => Promise.resolve(decision), "Decision recorded"],
+    ["finds an already-decided decision", () => Promise.reject(new ApiClientError("recommendation_already_decided", "hidden", {}, 409)), "This recommendation has already been decided."],
+  ])("refetches an open filtered audit list when it %s", async (_, response, outcome) => {
+    vi.spyOn(apiClient, "listAuditEvents").mockResolvedValue({ items: [] });
+    vi.spyOn(apiClient, "createDecision").mockImplementation(response);
+    const user = userEvent.setup();
+    render(
+      <AppProviders>
+        <AuditDrawer recommendationId={recommendation.id} />
+        <DecisionDialog
+          recommendation={recommendation}
+          freshness="current"
+          planningDisabled={false}
+          resources={["resource-1"]}
+          destinations={["asset-1"]}
+        />
+      </AppProviders>,
+    );
+
+    await user.click(screen.getByText("Audit history"));
+    await waitFor(() => expect(apiClient.listAuditEvents).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: "Approve recommendation" }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    await user.click(screen.getByRole("button", { name: "Submit approve decision" }));
+
+    await waitFor(() => expect(apiClient.listAuditEvents).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(outcome)).toBeVisible();
+  });
+
+  it("invalidates audit history before a keyed successful dialog settles after unmount", async () => {
+    let settle!: (value: Decision) => void;
+    vi.spyOn(apiClient, "createDecision").mockReturnValue(new Promise((resolve) => { settle = resolve; }));
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const user = userEvent.setup();
+    const view = render(
+      <AppProviders>
+        <DecisionDialog
+          key={recommendation.id}
+          recommendation={recommendation}
+          freshness="current"
+          planningDisabled={false}
+          resources={["resource-1"]}
+          destinations={["asset-1"]}
+        />
+      </AppProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve recommendation" }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    await user.click(screen.getByRole("button", { name: "Submit approve decision" }));
+    view.rerender(
+      <AppProviders>
+        <DecisionDialog
+          key="recommendation-2"
+          recommendation={{ ...recommendation, id: "recommendation-2" }}
+          freshness="current"
+          planningDisabled={false}
+          resources={["resource-1"]}
+          destinations={["asset-1"]}
+        />
+      </AppProviders>,
+    );
+    settle(decision);
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.audit.root, refetchType: "active" }));
+    expect(screen.getByRole("button", { name: "Approve recommendation" })).toBeEnabled();
   });
 
   it("prevents double posts and persists a terminal response", async () => {

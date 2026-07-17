@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiClientError } from "../../api/client";
-import { useCreateDecisionMutation } from "../../api/hooks";
+import { queryKeys, useCreateDecisionMutation } from "../../api/hooks";
 import type {
   Decision,
   DecisionAction,
@@ -27,6 +28,7 @@ export function DecisionDialog({
   onStale,
 }: DecisionDialogProps) {
   const createDecision = useCreateDecisionMutation();
+  const queryClient = useQueryClient();
   const [action, setAction] = useState<DecisionAction | null>(null);
   const [note, setNote] = useState("");
   const [assignments, setAssignments] = useState<EditedAssignment[]>([]);
@@ -108,12 +110,25 @@ export function DecisionDialog({
           ...(action === "edit" ? { editedAssignments: assignments } : {}),
         },
       });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.audit.root,
+        refetchType: "active",
+      });
       if (!mounted.current) {
         return;
       }
       setDecision(result);
       setAction(null);
     } catch (error) {
+      if (
+        error instanceof ApiClientError &&
+        error.code === "recommendation_already_decided"
+      ) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.audit.root,
+          refetchType: "active",
+        });
+      }
       if (!mounted.current) {
         return;
       }

@@ -14,6 +14,8 @@ import {
   useCreateScenarioVersionMutation,
   useCreateDecisionMutation,
   useDecisionContext,
+  useAuditEvent,
+  useAuditEvents,
   useGenerateRecommendationMutation,
   useIncident,
   useIncidentEvents,
@@ -288,6 +290,37 @@ describe("planning read hooks", () => {
       { q: "forest", edgeIds: ["edge-1"], limit: 200 },
       expect.any(AbortSignal),
     );
+  });
+});
+
+describe("audit read hooks", () => {
+  it("stays closed without scope, trims IDs, and uses filtered stable keys", async () => {
+    const listAuditEvents = vi.spyOn(apiClient, "listAuditEvents").mockResolvedValue({ items: [] });
+    const getAuditEvent = vi.spyOn(apiClient, "getAuditEvent").mockResolvedValue({
+      id: "event-1", decisionActionId: "decision-1", actorId: "operator-1", eventType: "decision.recorded",
+      aggregateType: "recommendation", aggregateId: "recommendation-1", scenarioVersionId: "version-1",
+      incidentSnapshotId: "snapshot-1", recommendationId: "recommendation-1", algorithms: {}, beforeState: {}, afterState: {}, inputs: {}, note: "", occurredAt: "2026-07-17T12:00:00Z",
+    });
+    const { wrapper } = createHarness();
+    const { result, rerender } = renderHook(
+      ({ recommendationId, eventId, enabled }) => ({
+        list: useAuditEvents(recommendationId, enabled),
+        detail: useAuditEvent(eventId, enabled),
+      }),
+      { wrapper, initialProps: { recommendationId: "  ", eventId: "", enabled: false } },
+    );
+
+    expect(result.current.list.fetchStatus).toBe("idle");
+    expect(result.current.detail.fetchStatus).toBe("idle");
+    expect(listAuditEvents).not.toHaveBeenCalled();
+    expect(getAuditEvent).not.toHaveBeenCalled();
+
+    rerender({ recommendationId: " recommendation-1 ", eventId: " event-1 ", enabled: true });
+    await waitFor(() => expect(result.current.list.isSuccess && result.current.detail.isSuccess).toBe(true));
+    expect(queryKeys.audit.list("recommendation-1")).toEqual(["audit-events", "list", "recommendation-1"]);
+    expect(queryKeys.audit.detail("event-1")).toEqual(["audit-events", "detail", "event-1"]);
+    expect(listAuditEvents).toHaveBeenCalledWith("recommendation-1", expect.any(AbortSignal));
+    expect(getAuditEvent).toHaveBeenCalledWith("event-1", expect.any(AbortSignal));
   });
 });
 

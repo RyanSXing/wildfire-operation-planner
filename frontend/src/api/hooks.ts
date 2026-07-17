@@ -22,6 +22,7 @@ import type {
 const incidentRoot = ["incidents"] as const;
 const sourceRoot = ["sources"] as const;
 const roadGraphRoot = ["road-graphs"] as const;
+const auditRoot = ["audit-events"] as const;
 
 export const queryKeys = {
   incidents: {
@@ -49,6 +50,12 @@ export const queryKeys = {
         [...(query.edgeIds ?? [])],
         query.limit ?? null,
       ] as const,
+  },
+  audit: {
+    root: auditRoot,
+    list: (recommendationId: string) =>
+      [...auditRoot, "list", recommendationId] as const,
+    detail: (eventId: string) => [...auditRoot, "detail", eventId] as const,
   },
 } as const;
 
@@ -131,6 +138,24 @@ export function useRoadEdges(graphVersion: string, query: RoadEdgeQuery) {
     queryFn: ({ signal }) =>
       apiClient.listRoadEdges(graphVersion, query, signal),
     enabled: graphVersion.length > 0,
+  });
+}
+
+export function useAuditEvents(recommendationId: string, enabled: boolean) {
+  const id = recommendationId.trim();
+  return useQuery({
+    queryKey: queryKeys.audit.list(id),
+    queryFn: ({ signal }) => apiClient.listAuditEvents(id, signal),
+    enabled: enabled && id.length > 0,
+  });
+}
+
+export function useAuditEvent(eventId: string, enabled: boolean) {
+  const id = eventId.trim();
+  return useQuery({
+    queryKey: queryKeys.audit.detail(id),
+    queryFn: ({ signal }) => apiClient.getAuditEvent(id, signal),
+    enabled: enabled && id.length > 0,
   });
 }
 
