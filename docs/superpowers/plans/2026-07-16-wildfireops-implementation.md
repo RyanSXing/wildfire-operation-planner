@@ -1860,6 +1860,8 @@ git commit -m "feat: add scenario and decision workspace"
 - Create: data/replay/park-fire/manifest.json
 - Create: data/replay/park-fire/fire_detections.jsonl
 - Create: data/replay/park-fire/weather_observations.jsonl
+- Create: data/replay/park-fire/static_data_versions.json
+- Create: data/replay/park-fire/source_citations.json
 - Create: data/replay/park-fire/exposed_assets.geojson
 - Create: data/replay/park-fire/resources.json
 - Create: data/replay/park-fire/roads.graphml.gz
@@ -1876,20 +1878,42 @@ git commit -m "feat: add scenario and decision workspace"
 
 - [ ] **Step 1: Build and validate the Park Fire package**
 
-Obtain a free NASA FIRMS MAP_KEY and store it only in the local environment as WILDFIREOPS_FIRMS_MAP_KEY. Run the exact builder and road-graph commands from Tasks 5 and 9. Add NOAA historical observations, versioned Census-derived community data, and a versioned OSM facility extract to the package.
+Acquire and normalize NASA FIRMS, NOAA historical observations, versioned
+Census-derived community data, and a versioned OSM facility extract outside the
+committed package. Credentials are never passed to the builder. Stage these
+inputs before building:
+
+~~~text
+fire_detections.jsonl
+weather_observations.jsonl
+metadata.json
+exposed_assets.geojson
+resources.json
+~~~
+
+The builder produces `static_data_versions.json` and `source_citations.json`
+from the source maps in staged `metadata.json`; do not stage duplicate source-map
+files.
 
 Run:
 
 ~~~bash
 cd backend
-WILDFIREOPS_FIRMS_MAP_KEY="$WILDFIREOPS_FIRMS_MAP_KEY" uv run python -m wildfireops.replay.build \
+uv run python -m wildfireops.replay.build \
+  --source-dir ../data/staging/park-fire \
   --package-id park-fire-2024-v1 \
   --bbox=-122.40,39.20,-120.30,41.00 \
   --start 2024-07-24T00:00:00Z \
   --end 2024-08-02T00:00:00Z \
   --output ../data/replay/park-fire
-uv run python -m wildfireops.replay.validate ../data/replay/park-fire
+uv run python -m wildfireops.geospatial.road_graph build \
+  --bbox=-122.40,39.20,-120.30,41.00 \
+  --output ../data/replay/park-fire/roads.graphml.gz
 ~~~
+
+The replay builder's final `ReplayLoader(temporary)` call validates the replay
+package; the road-graph builder then attaches graph metadata to the completed
+package.
 
 Expected: every manifest hash and schema check passes, every file is nonempty, and no secret appears in the package.
 
@@ -1910,7 +1934,7 @@ Review the file against the UI and source records before committing it.
 
 - [ ] **Step 3: Write the golden integration test**
 
-The test loads the package into an empty database, advances the replay clock to the manifest's golden timestamp, runs clustering, exposure, risk, routing, and allocation, and compares stable semantic outputs with golden_outputs.json. Exclude wall-clock runtime and generated database UUIDs from equality.
+The test loads the package into an empty database, advances the replay clock to `manifest.end_at`, runs clustering, exposure, risk, routing, and allocation, and compares stable semantic outputs with golden_outputs.json. Exclude wall-clock runtime and generated database UUIDs from equality.
 
 - [ ] **Step 4: Write explicit degraded-mode tests**
 
@@ -1921,7 +1945,7 @@ Test:
 - repeated replay load creates no duplicate observations
 - closed roads never appear in a route
 - unreachable demand remains visible
-- infeasible allocation returns INFEASIBLE with constraints
+- capacity shortage returns a deterministic solution with uncovered destinations
 - stale recommendation approval returns 409
 - injected audit failure rolls the decision back
 

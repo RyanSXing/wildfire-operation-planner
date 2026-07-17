@@ -30,18 +30,21 @@ from wildfireops.replay.manifest import (
     ReplayManifest,
     ReplayManifestInvalid,
 )
+from wildfireops.replay.static_data import (
+    STATIC_DATA_FILENAMES,
+    ReplayStaticDataInvalid,
+    parse_replay_static_data,
+    static_data_payloads,
+)
 
 
 _OBSERVATION_FILENAMES = (
     "fire_detections.jsonl",
     "weather_observations.jsonl",
 )
-_STATIC_DATA_FILENAME = "static_data_versions.json"
-_CITATIONS_FILENAME = "source_citations.json"
 _OUTPUT_FILENAMES = (
     *_OBSERVATION_FILENAMES,
-    _STATIC_DATA_FILENAME,
-    _CITATIONS_FILENAME,
+    *STATIC_DATA_FILENAMES,
 )
 _METADATA_FIELDS = {
     "algorithm_config_version",
@@ -114,9 +117,25 @@ def _build_package(
         "weather_observations.jsonl": _encode_observations(
             observations["weather_observations.jsonl"]
         ),
-        _STATIC_DATA_FILENAME: _canonical_json(metadata.static_data_versions),
-        _CITATIONS_FILENAME: _canonical_json(metadata.source_citations),
     }
+    raw_static_files = {
+        "static_data_versions.json": _canonical_json(metadata.static_data_versions),
+        "source_citations.json": _canonical_json(metadata.source_citations),
+        "exposed_assets.geojson": _read_staged_file(
+            source_dir, "exposed_assets.geojson"
+        ),
+        "resources.json": _read_staged_file(source_dir, "resources.json"),
+    }
+    try:
+        static_data = parse_replay_static_data(raw_static_files, manifest_template)
+    except ReplayStaticDataInvalid as error:
+        raise ReplayBuildError(str(error)) from error
+    contents.update(
+        {
+            filename: _canonical_json(payload)
+            for filename, payload in static_data_payloads(static_data).items()
+        }
+    )
     for filename, content in contents.items():
         if not content:
             raise ReplayBuildError(f"required output would be empty: {filename}")
@@ -450,8 +469,10 @@ def _argument_parser() -> argparse.ArgumentParser:
         type=Path,
         help=(
             "read-only staging directory containing recorded normalized observations "
-            "in fire_detections.jsonl and weather_observations.jsonl, plus metadata.json "
-            "fields algorithm_config_version, static_data_versions, and source_citations"
+            "in fire_detections.jsonl and weather_observations.jsonl; exposed_assets.geojson; "
+            "resources.json; and metadata.json fields algorithm_config_version, "
+            "static_data_versions, and source_citations. Raw acquisition downloads and "
+            "credentials stay outside the builder and output package."
         ),
     )
     parser.add_argument("--package-id", required=True)

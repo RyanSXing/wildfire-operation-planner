@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from wildfireops.replay.build import ReplayBuildError, build_package, main
-from wildfireops.replay.loader import ReplayLoader
+from wildfireops.replay.loader import ReplayLoader, ReplayPackageCorrupt
 
 
 def _jsonl(*records: dict[str, Any]) -> str:
@@ -65,13 +65,99 @@ def _staging_directory(tmp_path: Path) -> Path:
             {
                 "algorithm_config_version": "test-config-v1",
                 "static_data_versions": {
-                    "administrative_boundaries": "recorded-test-v1"
+                    "census": "2023-acs5",
+                    "nasa_firms": "recorded-test-v1",
+                    "nws": "recorded-test-v1",
+                    "simulated_resources": "synthetic-v1",
                 },
                 "source_citations": {
+                    "census": "https://www.census.gov/",
                     "nasa_firms": "https://firms.modaps.eosdis.nasa.gov/",
                     "nws": "https://www.weather.gov/documentation/services-web-api",
+                    "simulated_resources": "WildfireOps portfolio simulation",
                 },
             }
+        ),
+        encoding="utf-8",
+    )
+    (source_dir / "exposed_assets.geojson").write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-121.6, 39.8]},
+                        "properties": {
+                            "asset_id": "z-community",
+                            "asset_kind": "community",
+                            "name": "Z Community",
+                            "population": 5000,
+                            "capacity": None,
+                            "source_name": "census",
+                            "source_version": "2023-acs5",
+                            "raw_metadata": {
+                                "demand": {
+                                    "required_capability": "water",
+                                    "required_capacity": 2,
+                                }
+                            },
+                        },
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [-121.5, 39.8]},
+                        "properties": {
+                            "asset_id": "a-community",
+                            "asset_kind": "community",
+                            "name": "A Community",
+                            "population": 1000,
+                            "capacity": None,
+                            "source_name": "census",
+                            "source_version": "2023-acs5",
+                            "raw_metadata": {
+                                "demand": {
+                                    "required_capability": "medical",
+                                    "required_capacity": 1,
+                                }
+                            },
+                        },
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source_dir / "resources.json").write_text(
+        json.dumps(
+            [
+                {
+                    "resource_id": "z-engine",
+                    "resource_type": "engine",
+                    "capabilities": ["water", "medical"],
+                    "capacity": 4,
+                    "available": True,
+                    "status": "available",
+                    "geometry_geojson": {
+                        "type": "Point",
+                        "coordinates": [-121.61, 39.81],
+                    },
+                    "raw_metadata": {"simulated": True},
+                },
+                {
+                    "resource_id": "a-engine",
+                    "resource_type": "engine",
+                    "capabilities": ["medical"],
+                    "capacity": 2,
+                    "available": True,
+                    "status": "available",
+                    "geometry_geojson": {
+                        "type": "Point",
+                        "coordinates": [-121.51, 39.81],
+                    },
+                    "raw_metadata": {"simulated": True},
+                },
+            ]
         ),
         encoding="utf-8",
     )
@@ -145,11 +231,13 @@ def test_builder_canonicalizes_staged_replay_deterministically(
     assert manifest["start_at"] == "2024-07-24T18:00:00Z"
     assert manifest["end_at"] == "2024-07-24T18:30:00Z"
     assert manifest["algorithm_config_version"] == "test-config-v1"
-    assert manifest["files"].keys() == {
+    assert set(manifest["files"]) == {
         "fire_detections.jsonl",
         "weather_observations.jsonl",
         "static_data_versions.json",
         "source_citations.json",
+        "exposed_assets.geojson",
+        "resources.json",
     }
     for filename, expected_hash in manifest["files"].items():
         assert (
@@ -157,13 +245,40 @@ def test_builder_canonicalizes_staged_replay_deterministically(
         )
     assert json.loads(
         (first_output / "static_data_versions.json").read_text(encoding="utf-8")
-    ) == {"administrative_boundaries": "recorded-test-v1"}
+    ) == {
+        "census": "2023-acs5",
+        "nasa_firms": "recorded-test-v1",
+        "nws": "recorded-test-v1",
+        "simulated_resources": "synthetic-v1",
+    }
     assert json.loads(
         (first_output / "source_citations.json").read_text(encoding="utf-8")
     ) == {
+        "census": "https://www.census.gov/",
         "nasa_firms": "https://firms.modaps.eosdis.nasa.gov/",
         "nws": "https://www.weather.gov/documentation/services-web-api",
+        "simulated_resources": "WildfireOps portfolio simulation",
     }
+    loader = ReplayLoader(first_output)
+    assert loader.static_data is not None
+    published_assets = json.loads(
+        (first_output / "exposed_assets.geojson").read_text(encoding="utf-8")
+    )
+    assert [
+        feature["properties"]["asset_id"] for feature in published_assets["features"]
+    ] == [
+        "a-community",
+        "z-community",
+    ]
+    published_resources = json.loads(
+        (first_output / "resources.json").read_text(encoding="utf-8")
+    )
+    assert [resource["resource_id"] for resource in published_resources] == [
+        "a-engine",
+        "z-engine",
+    ]
+    assert published_resources[1]["capabilities"] == ["medical", "water"]
+    assert not (first_output / "metadata.json").exists()
     canonical_fire_records = [
         json.loads(line)
         for line in (first_output / "fire_detections.jsonl")
@@ -178,9 +293,53 @@ def test_builder_canonicalizes_staged_replay_deterministically(
         "2024-07-24T18:12:00Z",
         "2024-07-24T18:18:00Z",
     ]
-    assert [
-        item.identity for item in ReplayLoader(first_output).iter_until(end_at)
-    ] == ["nws:weather", "nasa_firms:a-fire", "nasa_firms:z-fire"]
+    assert [item.identity for item in loader.iter_until(end_at)] == [
+        "nws:weather",
+        "nasa_firms:a-fire",
+        "nasa_firms:z-fire",
+    ]
+
+
+@pytest.mark.parametrize("filename", ["exposed_assets.geojson", "resources.json"])
+def test_builder_requires_staged_static_entity_files(
+    tmp_path: Path,
+    filename: str,
+) -> None:
+    source_dir = _staging_directory(tmp_path)
+    (source_dir / filename).unlink()
+
+    with pytest.raises(ReplayBuildError, match=filename):
+        _build(source_dir, tmp_path / "replay")
+
+
+def test_builder_translates_staged_static_data_errors(tmp_path: Path) -> None:
+    source_dir = _staging_directory(tmp_path)
+    (source_dir / "exposed_assets.geojson").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(
+        ReplayBuildError,
+        match=r"exposed_assets\.geojson: missing required field: features",
+    ):
+        _build(source_dir, tmp_path / "replay")
+
+
+def test_builder_cleans_temporary_package_after_final_loader_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_dir = _staging_directory(tmp_path)
+    output = tmp_path / "replay"
+
+    def fail_validation(_: Path) -> None:
+        raise ReplayPackageCorrupt("injected final validation failure")
+
+    monkeypatch.setattr("wildfireops.replay.build.ReplayLoader", fail_validation)
+
+    with pytest.raises(ReplayBuildError, match="injected final validation failure"):
+        _build(source_dir, output)
+
+    assert not output.exists()
+    assert list(output.parent.glob(f".{output.name}.tmp-*")) == []
 
 
 def test_builder_wraps_an_oversized_programmatic_bbox(
@@ -233,9 +392,12 @@ def test_builder_cli_help_documents_required_offline_source_dir(
     assert "recorded normalized observations" in help_text
     assert "fire_detections.jsonl" in help_text
     assert "weather_observations.jsonl" in help_text
+    assert "exposed_assets.geojson" in help_text
+    assert "resources.json" in help_text
     assert "algorithm_config_version" in help_text
     assert "static_data_versions" in help_text
     assert "source_citations" in help_text
+    assert "credentials" in help_text
 
 
 @pytest.mark.parametrize("field", ["static_data_versions", "source_citations"])
