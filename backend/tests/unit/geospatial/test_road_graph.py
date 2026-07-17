@@ -21,6 +21,7 @@ from wildfireops.geospatial.road_graph import (
     build_road_graph,
     compute_route,
     main,
+    nearest_road_node,
 )
 from wildfireops.replay.manifest import ReplayManifest
 from wildfireops.replay.loader import ReplayLoader
@@ -112,6 +113,37 @@ def test_literal_toy_edges_without_distance_default_to_zero_meters() -> None:
 
     assert result.status is RouteStatus.REACHABLE
     assert result.distance_meters == 0.0
+
+
+def test_graphml_coordinate_strings_are_normalized_for_routing() -> None:
+    graph = _coordinate_graph(x="-121.7", y="39.7")
+
+    roads = RoadGraph.from_graph(graph)
+
+    assert roads._graph.nodes["A"] == {"x": -121.7, "y": 39.7}
+    assert nearest_road_node(roads, -121.7, 39.7) == "A"
+
+
+@pytest.mark.parametrize(
+    ("coordinate", "value"),
+    [
+        ("x", "nan"),
+        ("y", "inf"),
+        ("x", True),
+        ("y", False),
+        ("x", ""),
+        ("y", "not-a-coordinate"),
+    ],
+)
+def test_present_graph_node_coordinates_must_be_finite_numbers(
+    coordinate: str,
+    value: object,
+) -> None:
+    coordinates: dict[str, object] = {"x": -121.7, "y": 39.7}
+    coordinates[coordinate] = value
+
+    with pytest.raises(RoadGraphInvalid, match=f"node {coordinate} must be a finite number"):
+        RoadGraph.from_graph(_coordinate_graph(**coordinates))
 
 
 def test_road_edge_catalog_is_stable_geographic_and_read_only() -> None:
@@ -391,6 +423,20 @@ def test_road_graph_version_identity_is_immutable() -> None:
 
     with pytest.raises(FrozenInstanceError):
         roads.graph_version = "changed"
+
+
+def _coordinate_graph(**coordinates: object) -> nx.MultiDiGraph:
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", **coordinates)
+    graph.add_node("B", x=-121.6, y=39.8)
+    graph.add_edge(
+        "A",
+        "B",
+        edge_id="AB",
+        travel_minutes=5.0,
+        distance_meters=500.0,
+    )
+    return graph
 
 
 def _raw_osm_graph() -> nx.MultiDiGraph:

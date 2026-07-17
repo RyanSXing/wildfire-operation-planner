@@ -6,8 +6,12 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
   const queue = page.getByRole("complementary", { name: "Incident queue" });
   const incidents = queue.getByRole("button");
   await expect(incidents).not.toHaveCount(0);
-  await incidents.first().click();
-  await expect(incidents.first()).toHaveAttribute("aria-pressed", "true");
+  const scores = (await queue.locator(".incident-row__risk").allTextContents()).map(Number);
+  expect(scores).toHaveLength(await incidents.count());
+  const highestRiskIndex = scores.indexOf(Math.max(...scores));
+  const highestRiskIncident = incidents.nth(highestRiskIndex);
+  await highestRiskIncident.click();
+  await expect(highestRiskIncident).toHaveAttribute("aria-pressed", "true");
 
   await expect(page.getByRole("region", { name: "Incident overview" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Risk explanation" })).toContainText(/Score[1-9]/);
@@ -26,13 +30,16 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
   await expect(planning.getByRole("form", { name: "Scenario version editor" })).toBeVisible();
 
   const editor = planning.getByRole("form", { name: "Scenario version editor" });
-  const closures = editor.getByRole("checkbox");
+  const closures = editor.getByRole("group", { name: "Road closures" }).getByRole("checkbox");
   expect(await closures.count()).toBeGreaterThan(0);
   await closures.first().check();
   await editor.getByRole("button", { name: "Save scenario version" }).click();
   await expect(planning).toContainText("Active scenario version 2");
   await planning.getByRole("button", { name: "Generate recommendation for version 2" }).click();
-  await expect(page.getByRole("region", { name: "Scenario outcome comparison" })).toBeVisible();
+  const comparison = page.getByRole("region", { name: "Scenario outcome comparison" });
+  const outcomes = comparison.getByRole("table", { name: "Outcome metrics comparison" });
+  await expect(outcomes).toContainText("Baseline");
+  await expect(outcomes).toContainText("Scenario");
 
   const decisions = page.getByRole("region", { name: "Recommendation decision controls" });
   await decisions.getByRole("button", { name: "Approve recommendation" }).click();
@@ -41,8 +48,11 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
 
   await page.getByText("Audit history", { exact: true }).click();
   const events = page.getByRole("list", { name: "Audit events" });
-  await expect(events).toContainText("Stage resources for replay exercise");
-  await events.getByRole("button", { name: /^View details for / }).first().click();
+  const approval = events
+    .getByRole("listitem")
+    .filter({ hasText: "Stage resources for replay exercise" });
+  await expect(approval).toHaveCount(1);
+  await approval.getByRole("button", { name: /^View details for / }).click();
   const provenance = page.getByRole("region", { name: "Audit provenance" });
   await expect(provenance).toContainText("Stage resources for replay exercise");
   await expect(provenance).toContainText(/Source versions/);

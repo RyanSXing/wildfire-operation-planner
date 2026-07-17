@@ -401,15 +401,7 @@ def _validated_multidigraph(graph: nx.Graph) -> nx.MultiDiGraph:
         raise RoadGraphInvalid("road graph must be directed")
     validated: nx.MultiDiGraph = nx.MultiDiGraph()
     for node, raw_data in graph.nodes(data=True):
-        data = dict(raw_data)
-        for coordinate in ("x", "y"):
-            value = data.get(coordinate)
-            if isinstance(value, str):
-                try:
-                    data[coordinate] = float(value)
-                except ValueError:
-                    pass
-        validated.add_node(node, **data)
+        validated.add_node(node, **_normalized_node_coordinates(raw_data))
     edge_ids: set[str] = set()
     edges = (
         graph.edges(keys=True, data=True)  # type: ignore[call-overload]
@@ -439,6 +431,28 @@ def _validated_multidigraph(graph: nx.Graph) -> nx.MultiDiGraph:
         )
         validated.add_edge(origin, destination, key=key, **data)
     return validated
+
+
+def _normalized_node_coordinates(raw_data: dict[str, object]) -> dict[str, object]:
+    data = dict(raw_data)
+    for coordinate in ("x", "y"):
+        if coordinate not in data:
+            continue
+        value = data[coordinate]
+        if isinstance(value, bool) or not isinstance(value, int | float | str):
+            raise RoadGraphInvalid(f"node {coordinate} must be a finite number")
+        if isinstance(value, str) and not value.strip():
+            raise RoadGraphInvalid(f"node {coordinate} must be a finite number")
+        try:
+            parsed = float(value)
+        except (OverflowError, ValueError):
+            raise RoadGraphInvalid(
+                f"node {coordinate} must be a finite number"
+            ) from None
+        if not isfinite(parsed):
+            raise RoadGraphInvalid(f"node {coordinate} must be a finite number")
+        data[coordinate] = parsed
+    return data
 
 
 def _finite_nonnegative(value: object, field: str) -> float:
