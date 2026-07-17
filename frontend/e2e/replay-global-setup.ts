@@ -11,7 +11,7 @@ export default async function replayGlobalSetup(): Promise<void> {
   await waitFor("database", async () => {
     await dockerCompose("exec", "-T", "db", "pg_isready", "-U", "wildfireops", "-d", "template1");
   });
-  await dockerCompose("stop", "api", "frontend");
+  await dockerCompose("stop", "api", "frontend", "worker");
   await dockerCompose(
     "exec",
     "-T",
