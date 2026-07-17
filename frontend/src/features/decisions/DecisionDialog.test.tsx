@@ -115,13 +115,32 @@ describe("DecisionDialog", () => {
     await user.clear(screen.getByRole("textbox", { name: "Decision note" }));
     await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Move resources");
     await user.click(screen.getByRole("button", { name: "Add assignment" }));
-    const resourceSelects = screen.getAllByRole("combobox", { name: "Resource" });
-    const destinationSelects = screen.getAllByRole("combobox", { name: "Destination" });
-    await user.selectOptions(resourceSelects[1], "resource-1");
-    await user.selectOptions(destinationSelects[1], "asset-2");
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Resource 2" }),
+      "resource-1",
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Destination 2" }),
+      "asset-2",
+    );
     await user.click(screen.getByRole("button", { name: "Submit edit decision" }));
     expect(screen.getByText("Each resource can have only one destination.")).toBeVisible();
     expect(createDecision).not.toHaveBeenCalled();
+  });
+
+  it("gives each edit row distinct accessible control names", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    await user.click(screen.getByRole("button", { name: "Edit recommendation" }));
+    await user.click(screen.getByRole("button", { name: "Add assignment" }));
+
+    expect(screen.getByRole("combobox", { name: "Resource 1" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Destination 1" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Remove assignment 1" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Resource 2" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Destination 2" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Remove assignment 2" })).toBeVisible();
   });
 
   it("requires at least one edit assignment", async () => {
@@ -131,7 +150,7 @@ describe("DecisionDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Edit recommendation" }));
     await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Move resources");
-    await user.click(screen.getByRole("button", { name: "Remove assignment" }));
+    await user.click(screen.getByRole("button", { name: "Remove assignment 1" }));
     await user.click(screen.getByRole("button", { name: "Submit edit decision" }));
 
     expect(screen.getByText("Add at least one assignment.")).toBeVisible();
@@ -147,6 +166,94 @@ describe("DecisionDialog", () => {
     expect(screen.getByRole("button", { name: "Approve recommendation" })).toHaveProperty("disabled", disabled[0]);
     expect(screen.getByRole("button", { name: "Reject recommendation" })).toHaveProperty("disabled", disabled[1]);
     expect(screen.getByRole("button", { name: "Edit recommendation" })).toHaveProperty("disabled", disabled[2]);
+  });
+
+  it.each([
+    ["approve", { freshness: "stale" as const }],
+    ["edit", { freshness: "stale" as const }],
+    ["approve", { recommendation: { ...recommendation, solverStatus: "INFEASIBLE" } }],
+    ["edit", { recommendation: { ...recommendation, solverStatus: "INFEASIBLE" } }],
+    ["approve", { planningDisabled: true }],
+    ["edit", { planningDisabled: true }],
+  ] as const)("blocks an open %s form when policy changes", async (action, props) => {
+    const createDecision = vi.spyOn(apiClient, "createDecision").mockResolvedValue(decision);
+    const user = userEvent.setup();
+    const view = renderDialog();
+
+    await user.click(screen.getByRole("button", { name: `${action[0].toUpperCase()}${action.slice(1)} recommendation` }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    view.rerender(
+      <AppProviders>
+        <DecisionDialog
+          recommendation={recommendation}
+          freshness="current"
+          planningDisabled={false}
+          resources={["resource-1", "resource-2"]}
+          destinations={["asset-1", "asset-2"]}
+          {...props}
+        />
+      </AppProviders>,
+    );
+
+    const submit = screen.getByRole("button", { name: `Submit ${action} decision` });
+    expect(submit).toBeDisabled();
+    fireEvent.submit(submit.closest("form")!);
+    expect(createDecision).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { freshness: "stale" as const },
+    { recommendation: { ...recommendation, solverStatus: "INFEASIBLE" } },
+  ])("keeps an open reject form submittable when approval policy changes", async (props) => {
+    const createDecision = vi.spyOn(apiClient, "createDecision").mockResolvedValue({
+      ...decision,
+      action: "reject",
+    });
+    const user = userEvent.setup();
+    const view = renderDialog();
+
+    await user.click(screen.getByRole("button", { name: "Reject recommendation" }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    view.rerender(
+      <AppProviders>
+        <DecisionDialog
+          recommendation={recommendation}
+          freshness="current"
+          planningDisabled={false}
+          resources={["resource-1", "resource-2"]}
+          destinations={["asset-1", "asset-2"]}
+          {...props}
+        />
+      </AppProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Submit reject decision" }));
+    await waitFor(() => expect(createDecision).toHaveBeenCalledOnce());
+  });
+
+  it("blocks an open reject form when planning is disabled", async () => {
+    const createDecision = vi.spyOn(apiClient, "createDecision").mockResolvedValue(decision);
+    const user = userEvent.setup();
+    const view = renderDialog();
+
+    await user.click(screen.getByRole("button", { name: "Reject recommendation" }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    view.rerender(
+      <AppProviders>
+        <DecisionDialog
+          recommendation={recommendation}
+          freshness="current"
+          planningDisabled
+          resources={["resource-1", "resource-2"]}
+          destinations={["asset-1", "asset-2"]}
+        />
+      </AppProviders>,
+    );
+
+    const submit = screen.getByRole("button", { name: "Submit reject decision" });
+    expect(submit).toBeDisabled();
+    fireEvent.submit(submit.closest("form")!);
+    expect(createDecision).not.toHaveBeenCalled();
   });
 
   it("renders safe errors and latches stale decisions", async () => {
@@ -226,6 +333,50 @@ describe("DecisionDialog", () => {
     expect(screen.getByText("operator-1")).toBeVisible();
     expect(screen.getByText("Proceed")).toBeVisible();
     expect(screen.getByRole("button", { name: "Approve recommendation" })).toBeDisabled();
+  });
+
+  it("ignores a stale response after a keyed recommendation unmounts", async () => {
+    let reject!: (reason: unknown) => void;
+    const request = new Promise<Decision>((_, rejectRequest) => { reject = rejectRequest; });
+    vi.spyOn(apiClient, "createDecision").mockReturnValue(request);
+    const onStale = vi.fn();
+    const user = userEvent.setup();
+    const view = render(
+      <AppProviders>
+        <DecisionDialog
+          key={recommendation.id}
+          recommendation={recommendation}
+          freshness="current"
+          planningDisabled={false}
+          resources={["resource-1"]}
+          destinations={["asset-1"]}
+          onStale={onStale}
+        />
+      </AppProviders>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve recommendation" }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    await user.click(screen.getByRole("button", { name: "Submit approve decision" }));
+    view.rerender(
+      <AppProviders>
+        <DecisionDialog
+          key="recommendation-2"
+          recommendation={{ ...recommendation, id: "recommendation-2" }}
+          freshness="current"
+          planningDisabled={false}
+          resources={["resource-1"]}
+          destinations={["asset-1"]}
+          onStale={onStale}
+        />
+      </AppProviders>,
+    );
+    reject(new ApiClientError("recommendation_stale", "hidden", {}, 409));
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+
+    expect(onStale).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve recommendation" })).toBeEnabled();
   });
 
   it("starts clean for a new recommendation ID", async () => {

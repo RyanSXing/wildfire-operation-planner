@@ -1,10 +1,13 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 
 import { ApiClientError } from "../../api/client";
 import { useCreateDecisionMutation } from "../../api/hooks";
-import type { Decision, DecisionAction, Recommendation } from "../../api/types";
-
-type Assignment = { resourceId: string; destinationId: string };
+import type {
+  Decision,
+  DecisionAction,
+  EditedAssignment,
+  Recommendation,
+} from "../../api/types";
 
 export type DecisionDialogProps = {
   recommendation: Recommendation;
@@ -26,12 +29,20 @@ export function DecisionDialog({
   const createDecision = useCreateDecisionMutation();
   const [action, setAction] = useState<DecisionAction | null>(null);
   const [note, setNote] = useState("");
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [assignments, setAssignments] = useState<EditedAssignment[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [decision, setDecision] = useState<Decision | null>(null);
   const [alreadyDecided, setAlreadyDecided] = useState(false);
   const submitting = useRef(false);
+  const mounted = useRef(false);
+
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const actionable =
     recommendation.solverStatus === "FEASIBLE" ||
@@ -40,6 +51,9 @@ export function DecisionDialog({
   const allDisabled = planningDisabled || createDecision.isPending || terminal;
   const approveEditDisabled = allDisabled || freshness === "stale" || !actionable;
   const rejectDisabled = allDisabled;
+  const activeFormDisabled =
+    action !== null &&
+    (action === "reject" ? rejectDisabled : approveEditDisabled);
   const resourceOptions = optionsFor(resources, assignments.map(({ resourceId }) => resourceId));
   const destinationOptions = optionsFor(destinations, assignments.map(({ destinationId }) => destinationId));
 
@@ -73,7 +87,7 @@ export function DecisionDialog({
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    if (!action || createDecision.isPending || submitting.current) {
+    if (!action || activeFormDisabled || submitting.current) {
       return;
     }
     const trimmedNote = note.trim();
@@ -94,9 +108,15 @@ export function DecisionDialog({
           ...(action === "edit" ? { editedAssignments: assignments } : {}),
         },
       });
+      if (!mounted.current) {
+        return;
+      }
       setDecision(result);
       setAction(null);
     } catch (error) {
+      if (!mounted.current) {
+        return;
+      }
       const message = safeDecisionError(error);
       setRequestError(message);
       if (error instanceof ApiClientError && error.code === "recommendation_stale") {
@@ -153,9 +173,10 @@ export function DecisionDialog({
               <fieldset>
                 <legend>Edited assignments</legend>
                 {assignments.map((assignment, index) => (
-                  <div key={index}>
+                  <fieldset key={index}>
+                    <legend>Assignment {index + 1}</legend>
                     <label>
-                      Resource
+                      Resource {index + 1}
                       <select
                         value={assignment.resourceId}
                         onChange={(event) => {
@@ -172,7 +193,7 @@ export function DecisionDialog({
                       </select>
                     </label>
                     <label>
-                      Destination
+                      Destination {index + 1}
                       <select
                         value={assignment.destinationId}
                         onChange={(event) => {
@@ -189,9 +210,9 @@ export function DecisionDialog({
                       </select>
                     </label>
                     <button type="button" onClick={() => setAssignments((current) => current.filter((_, row) => row !== index))}>
-                      Remove assignment
+                      Remove assignment {index + 1}
                     </button>
-                  </div>
+                  </fieldset>
                 ))}
                 <button type="button" onClick={() => setAssignments((current) => [...current, { resourceId: "", destinationId: "" }])}>
                   Add assignment
@@ -199,7 +220,7 @@ export function DecisionDialog({
               </fieldset>
             ) : null}
             {validationError ? <p id="decision-validation" role="alert">{validationError}</p> : null}
-            <button type="submit" disabled={createDecision.isPending}>
+            <button type="submit" disabled={activeFormDisabled}>
               {createDecision.isPending ? "Submitting decision" : `Submit ${action} decision`}
             </button>{" "}
             <button type="button" disabled={createDecision.isPending} onClick={cancel}>Cancel</button>
@@ -210,7 +231,11 @@ export function DecisionDialog({
   );
 }
 
-function replace(rows: Assignment[], index: number, value: Assignment): Assignment[] {
+function replace(
+  rows: EditedAssignment[],
+  index: number,
+  value: EditedAssignment,
+): EditedAssignment[] {
   return rows.map((row, current) => (current === index ? value : row));
 }
 
@@ -218,7 +243,11 @@ function optionsFor(options: readonly string[], historical: readonly string[]): 
   return [...new Set([...options, ...historical])].sort();
 }
 
-function validate(action: DecisionAction, note: string, assignments: readonly Assignment[]): string | null {
+function validate(
+  action: DecisionAction,
+  note: string,
+  assignments: readonly EditedAssignment[],
+): string | null {
   if (!note) {
     return "A note is required.";
   }
@@ -236,9 +265,6 @@ function validate(action: DecisionAction, note: string, assignments: readonly As
   }
   if (new Set(assignments.map(({ resourceId }) => resourceId)).size !== assignments.length) {
     return "Each resource can have only one destination.";
-  }
-  if (new Set(assignments.map(({ resourceId, destinationId }) => `${resourceId}\u0000${destinationId}`)).size !== assignments.length) {
-    return "Duplicate assignments are not allowed.";
   }
   return null;
 }
