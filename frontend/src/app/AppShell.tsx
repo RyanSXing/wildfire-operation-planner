@@ -42,7 +42,7 @@ const EMPTY_FRAMES: readonly TimelineFrame[] = [];
 type MapProperties = Record<string, unknown>;
 
 export function AppShell() {
-  useIncidentEvents();
+  const eventRevisions = useIncidentEvents();
 
   const incidentsQuery = useIncidents();
   const sourcesQuery = useSourceStatus();
@@ -54,6 +54,11 @@ export function AppShell() {
     incidents.find((incident) => incident.id === selectedIncidentId)?.id ??
     incidents[0]?.id ??
     null;
+  const planningFreshnessToken = `${eventRevisions.globalRevision}:${
+    activeIncidentId
+      ? (eventRevisions.incidentRevisions[activeIncidentId] ?? 0)
+      : 0
+  }`;
 
   useEffect(() => {
     if (selectedIncidentId !== activeIncidentId) {
@@ -220,6 +225,7 @@ export function AppShell() {
                     key={incidentQuery.data.id}
                     incident={incidentQuery.data}
                     planningDisabled={replaying}
+                    freshnessToken={planningFreshnessToken}
                   />
                 </IncidentDetails>
               )}

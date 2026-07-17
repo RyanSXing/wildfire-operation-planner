@@ -33,21 +33,47 @@ import { AppShell } from "./AppShell";
 
 vi.mock("maplibre-gl", () => ({ default: mapLibreMock }));
 
+type EventListenerValue = EventListenerOrEventListenerObject;
+
 class TestEventSource {
   static readonly instances: TestEventSource[] = [];
 
   readonly url: string;
+  readonly listeners = new Map<string, Set<EventListenerValue>>();
 
   constructor(url: string | URL) {
     this.url = String(url);
     TestEventSource.instances.push(this);
   }
 
-  addEventListener(): void {}
+  addEventListener(type: string, listener: EventListenerValue): void {
+    const listeners = this.listeners.get(type) ?? new Set<EventListenerValue>();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
 
-  removeEventListener(): void {}
+  removeEventListener(type: string, listener: EventListenerValue): void {
+    this.listeners.get(type)?.delete(listener);
+  }
 
   close(): void {}
+
+  emit(type: string, payload?: unknown): void {
+    const event =
+      type === "open" || type === "error"
+        ? new Event(type)
+        : new MessageEvent(type, {
+            data: typeof payload === "string" ? payload : JSON.stringify(payload),
+          });
+
+    for (const listener of this.listeners.get(type) ?? []) {
+      if (typeof listener === "function") {
+        listener.call(this, event);
+      } else {
+        listener.handleEvent(event);
+      }
+    }
+  }
 }
 
 function renderShell() {
@@ -399,6 +425,117 @@ describe("AppShell", () => {
       screen.getByRole("region", { name: "Incident replay timeline" }),
     ).toBeVisible();
     expect(screen.getByRole("note")).toBeVisible();
+  });
+
+  it("scopes planning freshness to the active incident and ignores source or malformed events", async () => {
+    const calls: Array<{
+      path: string;
+      body: unknown;
+      key: string | null;
+    }> = [];
+    installSuccessfulPlanningCommands(calls);
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByRole("combobox", { name: "Road graph" });
+    const events = TestEventSource.instances[0];
+
+    act(() => {
+      events.emit("incident-updated", { incidentId: BEAR_ID });
+      events.emit("source-status-updated", { sourceName: "nasa_firms" });
+      events.emit("incident-updated", { incidentId: 42 });
+    });
+    await user.click(
+      screen.getByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    expect(
+      await screen.findByText("Recommendation freshness: Current"),
+    ).toBeVisible();
+
+    act(() => {
+      events.emit("incident-updated", { incidentId: BEAR_ID });
+      events.emit("source-status-updated", { sourceName: "nasa_firms" });
+    });
+    expect(
+      screen.queryByRole("alert", { name: "Stale planning session" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Recommendation freshness: Current"),
+    ).toBeVisible();
+
+    act(() => {
+      events.emit("incident-updated", { incidentId: REDWOOD_ID });
+    });
+    expect(
+      await screen.findByRole("alert", { name: "Stale planning session" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Recommendation freshness: Stale"),
+    ).toBeVisible();
+  });
+
+  it("treats the first open as baseline reconciliation and a later open as reconnect invalidation", async () => {
+    const calls: Array<{
+      path: string;
+      body: unknown;
+      key: string | null;
+    }> = [];
+    installSuccessfulPlanningCommands(calls);
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByRole("combobox", { name: "Road graph" });
+    const events = TestEventSource.instances[0];
+
+    act(() => {
+      events.emit("open");
+    });
+    await user.click(
+      screen.getByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    expect(
+      await screen.findByText("Recommendation freshness: Current"),
+    ).toBeVisible();
+
+    act(() => {
+      events.emit("open");
+    });
+    expect(
+      await screen.findByRole("alert", { name: "Stale planning session" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Recommendation freshness: Stale"),
+    ).toBeVisible();
+  });
+
+  it("marks an established planning session stale after a valid resync event", async () => {
+    const calls: Array<{
+      path: string;
+      body: unknown;
+      key: string | null;
+    }> = [];
+    installSuccessfulPlanningCommands(calls);
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByRole("combobox", { name: "Road graph" });
+    await user.click(
+      screen.getByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    await screen.findByText("Recommendation freshness: Current");
+
+    act(() => {
+      TestEventSource.instances[0].emit("resync-required", {});
+    });
+    expect(
+      await screen.findByRole("alert", { name: "Stale planning session" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Recommendation freshness: Stale"),
+    ).toBeVisible();
   });
 
   it("destroys ephemeral planning state when the selected incident changes", async () => {

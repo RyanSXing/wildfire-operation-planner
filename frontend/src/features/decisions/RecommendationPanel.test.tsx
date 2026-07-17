@@ -57,11 +57,29 @@ const recommendation: Recommendation = {
 };
 
 describe("RecommendationPanel", () => {
+  it.each([
+    ["current", "Current"],
+    ["stale", "Stale"],
+  ] as const)("renders an explicit %s freshness label", (freshness, label) => {
+    render(
+      <RecommendationPanel
+        recommendation={recommendation}
+        versionLabel="Current scenario version 2"
+        freshness={freshness}
+      />,
+    );
+
+    expect(
+      screen.getByText(`Recommendation freshness: ${label}`),
+    ).toBeVisible();
+  });
+
   it("renders an actionable result with complete assignment evidence", () => {
     render(
       <RecommendationPanel
         recommendation={recommendation}
         versionLabel="Current scenario version 2"
+        freshness="current"
       />,
     );
 
@@ -111,6 +129,7 @@ describe("RecommendationPanel", () => {
         <RecommendationPanel
           recommendation={{ ...recommendation, solverStatus }}
           versionLabel="Current scenario version 2"
+          freshness="current"
         />,
       );
 
@@ -132,6 +151,7 @@ describe("RecommendationPanel", () => {
             uncoveredDestinationIds: [],
           }}
           versionLabel="Previous successful version 1"
+          freshness="current"
         />,
       );
 
@@ -150,6 +170,7 @@ describe("RecommendationPanel", () => {
       <RecommendationPanel
         recommendation={recommendation}
         versionLabel="Current scenario version 2"
+        freshness="current"
       />,
     );
 
@@ -179,6 +200,7 @@ describe("RecommendationPanel", () => {
           },
         }}
         versionLabel="Current scenario version 2"
+        freshness="current"
       />,
     );
 
@@ -202,6 +224,7 @@ describe("RecommendationPanel", () => {
           },
         }}
         versionLabel="Current scenario version 2"
+        freshness="current"
       />,
     );
 

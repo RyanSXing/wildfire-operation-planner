@@ -33,12 +33,14 @@ type RecordedCommand = {
 function renderPanel(
   planningDisabled = false,
   currentIncident = incident,
+  freshnessToken = "0:0",
 ) {
   return render(
     <AppProviders>
       <ScenarioPlanningPanel
         incident={currentIncident}
         planningDisabled={planningDisabled}
+        freshnessToken={freshnessToken}
       />
     </AppProviders>,
   );
@@ -187,7 +189,11 @@ describe("ScenarioPlanningPanel", () => {
     const user = userEvent.setup();
     render(
       <QueryClientProvider client={queryClient}>
-        <ScenarioPlanningPanel incident={incident} planningDisabled={false} />
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled={false}
+          freshnessToken="0:0"
+        />
       </QueryClientProvider>,
     );
     await bootstrapBaseline(user);
@@ -228,7 +234,11 @@ describe("ScenarioPlanningPanel", () => {
     const user = userEvent.setup();
     render(
       <QueryClientProvider client={queryClient}>
-        <ScenarioPlanningPanel incident={incident} planningDisabled={false} />
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled={false}
+          freshnessToken="0:0"
+        />
       </QueryClientProvider>,
     );
     await bootstrapBaseline(user);
@@ -298,6 +308,7 @@ describe("ScenarioPlanningPanel", () => {
           <ScenarioPlanningPanel
             incident={incident}
             planningDisabled={false}
+            freshnessToken="0:0"
           />
         </AppProviders>
       </StrictMode>,
@@ -712,6 +723,143 @@ describe("ScenarioPlanningPanel", () => {
     expect(await screen.findByText("Showing 3 of 205 road edges.")).toBeVisible();
   });
 
+  it("uses the latest freshness token as the baseline when an event arrives before planning", async () => {
+    const calls: RecordedCommand[] = [];
+    installSuccessfulCommands(calls);
+    const user = userEvent.setup();
+    const view = renderPanel(false, incident, "0:0");
+    await screen.findByRole("combobox", { name: "Road graph" });
+
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled={false}
+          freshnessToken="0:1"
+        />
+      </AppProviders>,
+    );
+    await bootstrapBaseline(user);
+
+    expect(
+      screen.getByText("Recommendation freshness: Current"),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("alert", { name: "Stale planning session" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("latches an established planning session stale until local start-over", async () => {
+    const calls: RecordedCommand[] = [];
+    installSuccessfulCommands(calls);
+    const user = userEvent.setup();
+    const view = renderPanel(false, incident, "0:0");
+    await bootstrapBaseline(user);
+    expect(
+      screen.getByText("Recommendation freshness: Current"),
+    ).toBeVisible();
+
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled={false}
+          freshnessToken="0:1"
+        />
+      </AppProviders>,
+    );
+
+    expect(
+      await screen.findByRole("alert", { name: "Stale planning session" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Recommendation freshness: Stale"),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Save scenario version" }),
+    ).toBeDisabled();
+
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled={false}
+          freshnessToken="0:0"
+        />
+      </AppProviders>,
+    );
+    expect(
+      await screen.findByRole("alert", { name: "Stale planning session" }),
+    ).toBeVisible();
+
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled={false}
+          freshnessToken="0:1"
+        />
+      </AppProviders>,
+    );
+    await user.click(screen.getByRole("button", { name: "Start over" }));
+    expect(
+      screen.queryByRole("region", { name: "Recommendation result" }),
+    ).not.toBeInTheDocument();
+    await bootstrapBaseline(user);
+    expect(
+      screen.getByText("Recommendation freshness: Current"),
+    ).toBeVisible();
+  });
+
+  it("retains an in-flight recommendation but marks it stale when freshness changes", async () => {
+    const generationGate = deferred<void>();
+    let generationAttempts = 0;
+    server.use(
+      http.post("/api/incidents/:incidentId/scenarios", () =>
+        HttpResponse.json(baselineScenarioVersionResponse, { status: 201 }),
+      ),
+      http.post(
+        "/api/scenario-versions/:versionId/recommendations",
+        async () => {
+          generationAttempts += 1;
+          await generationGate.promise;
+          return HttpResponse.json(baselineRecommendationResponse, {
+            status: 201,
+          });
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    const view = renderPanel(false, incident, "0:0");
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Create baseline and generate recommendation",
+      }),
+    );
+    await waitFor(() => expect(generationAttempts).toBe(1));
+    view.rerender(
+      <AppProviders>
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled={false}
+          freshnessToken="0:1"
+        />
+      </AppProviders>,
+    );
+    await release(generationGate);
+
+    expect(
+      await screen.findByRole("region", { name: "Recommendation result" }),
+    ).toHaveTextContent("Baseline scenario version 1");
+    expect(
+      screen.getByText("Recommendation freshness: Stale"),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("alert", { name: "Stale planning session" }),
+    ).toBeVisible();
+  });
+
   it("marks retained results stale after the incident snapshot changes and only start-over unlocks planning", async () => {
     const calls: RecordedCommand[] = [];
     installSuccessfulCommands(calls);
@@ -729,6 +877,7 @@ describe("ScenarioPlanningPanel", () => {
         <ScenarioPlanningPanel
           incident={nextIncident}
           planningDisabled={false}
+          freshnessToken="0:0"
         />
       </AppProviders>,
     );
@@ -782,6 +931,7 @@ describe("ScenarioPlanningPanel", () => {
         <ScenarioPlanningPanel
           incident={nextIncident}
           planningDisabled={false}
+          freshnessToken="0:0"
         />
       </AppProviders>,
     );
@@ -789,7 +939,11 @@ describe("ScenarioPlanningPanel", () => {
 
     view.rerender(
       <AppProviders>
-        <ScenarioPlanningPanel incident={incident} planningDisabled={false} />
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled={false}
+          freshnessToken="0:0"
+        />
       </AppProviders>,
     );
 
@@ -840,7 +994,11 @@ describe("ScenarioPlanningPanel", () => {
     );
     view.rerender(
       <AppProviders>
-        <ScenarioPlanningPanel incident={incident} planningDisabled />
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled
+          freshnessToken="0:0"
+        />
       </AppProviders>,
     );
     await release(createGate);
@@ -890,6 +1048,7 @@ describe("ScenarioPlanningPanel", () => {
             snapshotVersion: incident.snapshotVersion + 1,
           }}
           planningDisabled={false}
+          freshnessToken="0:0"
         />
       </AppProviders>,
     );
@@ -928,6 +1087,7 @@ describe("ScenarioPlanningPanel", () => {
           key={REDWOOD_ID}
           incident={incident}
           planningDisabled={false}
+          freshnessToken="0:0"
         />
       </AppProviders>,
     );
@@ -943,6 +1103,7 @@ describe("ScenarioPlanningPanel", () => {
           key={BEAR_ID}
           incident={bearIncident}
           planningDisabled={false}
+          freshnessToken="0:0"
         />
       </AppProviders>,
     );
@@ -987,7 +1148,11 @@ describe("ScenarioPlanningPanel", () => {
     await waitFor(() => expect(generationAttempts).toBe(1));
     view.rerender(
       <AppProviders>
-        <ScenarioPlanningPanel incident={incident} planningDisabled />
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled
+          freshnessToken="0:0"
+        />
       </AppProviders>,
     );
     await release(generationGate);
@@ -1002,7 +1167,11 @@ describe("ScenarioPlanningPanel", () => {
 
     view.rerender(
       <AppProviders>
-        <ScenarioPlanningPanel incident={incident} planningDisabled={false} />
+        <ScenarioPlanningPanel
+          incident={incident}
+          planningDisabled={false}
+          freshnessToken="0:0"
+        />
       </AppProviders>,
     );
     expect(
@@ -1047,6 +1216,7 @@ describe("ScenarioPlanningPanel", () => {
             snapshotVersion: incident.snapshotVersion + 1,
           }}
           planningDisabled={false}
+          freshnessToken="0:0"
         />
       </AppProviders>,
     );

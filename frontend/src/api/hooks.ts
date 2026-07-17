@@ -73,6 +73,13 @@ const sourceStatusUpdatedSchema = z.object({
   sourceName: z.string().min(1),
 });
 
+const resyncRequiredSchema = z.object({}).strict();
+
+export type IncidentEventRevisions = Readonly<{
+  globalRevision: number;
+  incidentRevisions: Readonly<Record<string, number>>;
+}>;
+
 export function useIncidents() {
   return useQuery({
     queryKey: queryKeys.incidents.list(),
@@ -158,11 +165,16 @@ export function useGenerateRecommendationMutation() {
   );
 }
 
-export function useIncidentEvents(): void {
+export function useIncidentEvents(): IncidentEventRevisions {
   const queryClient = useQueryClient();
+  const [revisions, setRevisions] = useState<IncidentEventRevisions>(() => ({
+    globalRevision: 0,
+    incidentRevisions: {},
+  }));
 
   useEffect(() => {
     const eventSource = new EventSource("/api/events");
+    let opened = false;
 
     const invalidate = (queryKey: QueryKey): void => {
       void queryClient.invalidateQueries({ queryKey, refetchType: "active" });
@@ -171,6 +183,30 @@ export function useIncidentEvents(): void {
     const reconcile = (): void => {
       invalidate(queryKeys.incidents.root);
       invalidate(queryKeys.sources.root);
+    };
+
+    const reviseGlobal = (): void => {
+      setRevisions((current) => ({
+        ...current,
+        globalRevision: current.globalRevision + 1,
+      }));
+    };
+
+    const handleOpen = (): void => {
+      reconcile();
+      if (opened) {
+        reviseGlobal();
+      } else {
+        opened = true;
+      }
+    };
+
+    const handleResyncRequired = (event: Event): void => {
+      if (!parseEvent(event, resyncRequiredSchema)) {
+        return;
+      }
+      reconcile();
+      reviseGlobal();
     };
 
     const handleIncidentUpdated = (event: Event): void => {
@@ -182,6 +218,14 @@ export function useIncidentEvents(): void {
       invalidate(queryKeys.incidents.list());
       invalidate(queryKeys.incidents.detail(payload.incidentId));
       invalidate(queryKeys.incidents.timeline(payload.incidentId));
+      setRevisions((current) => ({
+        ...current,
+        incidentRevisions: {
+          ...current.incidentRevisions,
+          [payload.incidentId]:
+            (current.incidentRevisions[payload.incidentId] ?? 0) + 1,
+        },
+      }));
     };
 
     const handleSourceStatusUpdated = (event: Event): void => {
@@ -193,8 +237,8 @@ export function useIncidentEvents(): void {
       invalidate(queryKeys.sources.status());
     };
 
-    eventSource.addEventListener("open", reconcile);
-    eventSource.addEventListener("resync-required", reconcile);
+    eventSource.addEventListener("open", handleOpen);
+    eventSource.addEventListener("resync-required", handleResyncRequired);
     eventSource.addEventListener("incident-updated", handleIncidentUpdated);
     eventSource.addEventListener(
       "source-status-updated",
@@ -202,8 +246,11 @@ export function useIncidentEvents(): void {
     );
 
     return () => {
-      eventSource.removeEventListener("open", reconcile);
-      eventSource.removeEventListener("resync-required", reconcile);
+      eventSource.removeEventListener("open", handleOpen);
+      eventSource.removeEventListener(
+        "resync-required",
+        handleResyncRequired,
+      );
       eventSource.removeEventListener("incident-updated", handleIncidentUpdated);
       eventSource.removeEventListener(
         "source-status-updated",
@@ -212,6 +259,8 @@ export function useIncidentEvents(): void {
       eventSource.close();
     };
   }, [queryClient]);
+
+  return revisions;
 }
 
 function parseEvent<T>(event: Event, schema: z.ZodType<T>): T | undefined {

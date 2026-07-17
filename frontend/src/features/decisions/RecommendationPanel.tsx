@@ -3,6 +3,7 @@ import type { JsonValue, Recommendation } from "../../api/types";
 export type RecommendationPanelProps = {
   recommendation: Recommendation;
   versionLabel: string;
+  freshness: "current" | "stale";
 };
 
 const numberFormat = new Intl.NumberFormat("en-US", {
@@ -12,6 +13,7 @@ const numberFormat = new Intl.NumberFormat("en-US", {
 export function RecommendationPanel({
   recommendation,
   versionLabel,
+  freshness,
 }: RecommendationPanelProps) {
   const actionable =
     recommendation.solverStatus === "OPTIMAL" ||
@@ -28,6 +30,9 @@ export function RecommendationPanel({
       <header>
         <h4>Recommendation</h4>
         <p className="snapshot-context">{versionLabel}</p>
+        <p className="snapshot-context">
+          Recommendation freshness: {freshness === "current" ? "Current" : "Stale"}
+        </p>
       </header>
       <p
         className={

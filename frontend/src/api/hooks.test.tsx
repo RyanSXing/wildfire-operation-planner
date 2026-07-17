@@ -459,6 +459,75 @@ describe("planning command hooks", () => {
 });
 
 describe("useIncidentEvents", () => {
+  it("returns scoped immutable revisions while preserving first-open reconciliation", () => {
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useIncidentEvents(), { wrapper });
+
+    expect(result.current).toEqual({
+      globalRevision: 0,
+      incidentRevisions: {},
+    });
+
+    const initial = result.current;
+    act(() => {
+      activeEventSource().emit("open");
+    });
+    expect(result.current).toBe(initial);
+
+    act(() => {
+      activeEventSource().emit("incident-updated", { incidentId: REDWOOD_ID });
+    });
+    expect(result.current).toEqual({
+      globalRevision: 0,
+      incidentRevisions: { [REDWOOD_ID]: 1 },
+    });
+    expect(result.current).not.toBe(initial);
+
+    const afterRedwood = result.current;
+    act(() => {
+      activeEventSource().emit("incident-updated", { incidentId: BEAR_ID });
+    });
+    expect(result.current).toEqual({
+      globalRevision: 0,
+      incidentRevisions: { [REDWOOD_ID]: 1, [BEAR_ID]: 1 },
+    });
+    expect(result.current.incidentRevisions).not.toBe(
+      afterRedwood.incidentRevisions,
+    );
+
+    act(() => {
+      activeEventSource().emit("open");
+    });
+    expect(result.current).toEqual({
+      globalRevision: 1,
+      incidentRevisions: { [REDWOOD_ID]: 1, [BEAR_ID]: 1 },
+    });
+
+    act(() => {
+      activeEventSource().emit("resync-required", {});
+    });
+    expect(result.current).toEqual({
+      globalRevision: 2,
+      incidentRevisions: { [REDWOOD_ID]: 1, [BEAR_ID]: 1 },
+    });
+  });
+
+  it("does not revise freshness for source events or malformed update payloads", () => {
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useIncidentEvents(), { wrapper });
+    const initial = result.current;
+
+    act(() => {
+      const eventSource = activeEventSource();
+      eventSource.emit("source-status-updated", { sourceName: "nasa_firms" });
+      eventSource.emit("incident-updated", "not-json");
+      eventSource.emit("incident-updated", { incidentId: 42 });
+      eventSource.emit("resync-required", { unexpected: true });
+    });
+
+    expect(result.current).toBe(initial);
+  });
+
   it("owns exactly one relative EventSource connection and cleans up every listener", () => {
     const { wrapper } = createHarness();
     const { rerender, unmount } = renderHook(() => useIncidentEvents(), {
@@ -549,7 +618,10 @@ describe("useIncidentEvents", () => {
       renderHook(() => useIncidentEvents(), { wrapper });
 
       act(() => {
-        activeEventSource().emit(eventType);
+        activeEventSource().emit(
+          eventType,
+          eventType === "resync-required" ? {} : undefined,
+        );
       });
 
       expect(invalidate).toHaveBeenCalledTimes(2);

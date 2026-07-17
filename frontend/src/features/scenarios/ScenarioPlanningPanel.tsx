@@ -27,6 +27,7 @@ import { ScenarioEditor } from "./ScenarioEditor";
 export type ScenarioPlanningPanelProps = {
   incident: IncidentDetail;
   planningDisabled: boolean;
+  freshnessToken: string;
 };
 
 type GeneratedRecommendation = {
@@ -38,6 +39,7 @@ type PlanningPolicy = {
   incidentId: string;
   snapshotId: string;
   planningDisabled: boolean;
+  freshnessToken: string;
 };
 
 const recommendationRequest = {
@@ -52,6 +54,7 @@ const roadNumberFormatter = new Intl.NumberFormat("en-US", {
 export function ScenarioPlanningPanel({
   incident,
   planningDisabled,
+  freshnessToken,
 }: ScenarioPlanningPanelProps) {
   const contextQuery = useDecisionContext(incident.id);
   const [graphChoice, setGraphChoice] = useState<string | null>(null);
@@ -76,6 +79,7 @@ export function ScenarioPlanningPanel({
     incidentId: incident.id,
     snapshotId: incident.snapshotId,
     planningDisabled,
+    freshnessToken,
   });
 
   const [baselineRecommendation, setBaselineRecommendation] =
@@ -90,14 +94,18 @@ export function ScenarioPlanningPanel({
   >(null);
   const [commandError, setCommandError] = useState<unknown>(null);
   const [staleLatched, setStaleLatched] = useState(false);
+  const [sessionFreshnessToken, setSessionFreshnessToken] = useState<
+    string | null
+  >(null);
 
   useLayoutEffect(() => {
     latestPolicy.current = {
       incidentId: incident.id,
       snapshotId: incident.snapshotId,
       planningDisabled,
+      freshnessToken,
     };
-  }, [incident.id, incident.snapshotId, planningDisabled]);
+  }, [freshnessToken, incident.id, incident.snapshotId, planningDisabled]);
 
   useLayoutEffect(() => {
     mounted.current = true;
@@ -113,13 +121,16 @@ export function ScenarioPlanningPanel({
     baselineRecommendation,
     lastSuccessful,
   ).some((snapshotId) => snapshotId !== incident.snapshotId);
-  const sessionStale = snapshotMismatch || staleLatched;
+  const freshnessMismatch =
+    sessionFreshnessToken !== null &&
+    sessionFreshnessToken !== freshnessToken;
+  const sessionStale = snapshotMismatch || freshnessMismatch || staleLatched;
 
   useEffect(() => {
-    if (snapshotMismatch) {
+    if (snapshotMismatch || freshnessMismatch) {
       setStaleLatched(true);
     }
-  }, [snapshotMismatch]);
+  }, [freshnessMismatch, snapshotMismatch]);
 
   const commandsDisabled = planningDisabled || sessionStale;
   const bootstrapPending =
@@ -160,6 +171,7 @@ export function ScenarioPlanningPanel({
     ) {
       return;
     }
+    const generationFreshnessToken = latestPolicy.current.freshnessToken;
     setCommandError(null);
     try {
       const recommendation = await generateRecommendation.mutateAsync({
@@ -177,7 +189,8 @@ export function ScenarioPlanningPanel({
       setFailedGenerationVersionId(null);
       if (
         version.incidentSnapshotId !== latestPolicy.current.snapshotId ||
-        recommendation.incidentSnapshotId !== latestPolicy.current.snapshotId
+        recommendation.incidentSnapshotId !== latestPolicy.current.snapshotId ||
+        generationFreshnessToken !== latestPolicy.current.freshnessToken
       ) {
         setStaleLatched(true);
       }
@@ -187,7 +200,10 @@ export function ScenarioPlanningPanel({
       }
       setCommandError(error);
       setFailedGenerationVersionId(version.id);
-      if (isScenarioStale(error)) {
+      if (
+        isScenarioStale(error) ||
+        generationFreshnessToken !== latestPolicy.current.freshnessToken
+      ) {
         setStaleLatched(true);
       }
     }
@@ -222,6 +238,7 @@ export function ScenarioPlanningPanel({
       if (policy.incidentId !== version.incidentId) {
         return;
       }
+      setSessionFreshnessToken(policy.freshnessToken);
       setBaselineVersion(version);
       setLatestVersion(version);
       setFailedGenerationVersionId(null);
@@ -294,6 +311,7 @@ export function ScenarioPlanningPanel({
     setFailedGenerationVersionId(null);
     setCommandError(null);
     setStaleLatched(false);
+    setSessionFreshnessToken(null);
   };
 
   return (
@@ -460,6 +478,7 @@ export function ScenarioPlanningPanel({
       {lastSuccessful && baselineVersion ? (
         <RecommendationPanel
           recommendation={lastSuccessful.recommendation}
+          freshness={sessionStale ? "stale" : "current"}
           versionLabel={recommendationLabel(
             lastSuccessful.version,
             latestVersion,
