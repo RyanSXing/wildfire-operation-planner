@@ -77,6 +77,9 @@ const currentProps = {
   detectionsData: currentDetections,
   exposedAssetsData: exposedAssets,
   simulatedResourcesData: simulatedResources,
+  routesData: EMPTY_FEATURE_COLLECTION,
+  roadClosuresData: EMPTY_FEATURE_COLLECTION,
+  unavailableResourcesData: EMPTY_FEATURE_COLLECTION,
   view: "current" as const,
 };
 
@@ -158,8 +161,8 @@ describe("OperationsMap", () => {
     expect(within(legend).getByText("Detections")).toBeVisible();
     expect(within(legend).getByText("Exposed assets")).toBeVisible();
     expect(within(legend).getByText("Simulated resources")).toBeVisible();
-    expect(within(legend).getByText("Routes — none loaded")).toBeVisible();
-    expect(within(legend).getByText("Road closures — none loaded")).toBeVisible();
+    expect(within(legend).getByText("Routes — 0 segments")).toBeVisible();
+    expect(within(legend).getByText("Road closures — 0 segments")).toBeVisible();
   });
 
   it("updates existing dynamic sources on replay without reconstructing or duplicating setup", () => {
@@ -202,6 +205,26 @@ describe("OperationsMap", () => {
         /replay frame: 1 incident feature, 1 detection\. current snapshot: 1 exposed asset, 1 simulated resource/i,
       ),
     ).toBeVisible();
+  });
+
+  it("loads and independently updates planning overlays without rebuilding observed sources", () => {
+    const routes = collection([pointFeature("route-1", [-121.6, 39.8])]);
+    const closures = collection([pointFeature("closure-1", [-121.61, 39.81])]);
+    const unavailable = collection([pointFeature("unavailable-1", [-121.7, 39.7])]);
+    const { rerender } = render(<OperationsMap {...currentProps} routesData={routes} roadClosuresData={closures} unavailableResourcesData={unavailable} />);
+    const map = onlyMap();
+    act(() => map.emit("load"));
+
+    expect(map.sources.get(MAP_SOURCE_IDS.routes)?.data).toEqual(routes);
+    expect(map.sources.get(MAP_SOURCE_IDS.roadClosures)?.data).toEqual(closures);
+    expect(map.sources.get(MAP_SOURCE_IDS.unavailableResources)?.data).toEqual(unavailable);
+    expect(map.layers.get(MAP_LAYER_IDS.unavailableResources)).toMatchObject({ type: "symbol" });
+
+    rerender(<OperationsMap {...currentProps} routesData={EMPTY_FEATURE_COLLECTION} roadClosuresData={closures} unavailableResourcesData={unavailable} />);
+    expect(mapLibreTestState.instances).toHaveLength(1);
+    expect(map.sources.get(MAP_SOURCE_IDS.routes)?.setDataCalls).toEqual([EMPTY_FEATURE_COLLECTION]);
+    expect(map.sources.get(MAP_SOURCE_IDS.roadClosures)?.setDataCalls).toEqual([]);
+    expect(map.sources.get(MAP_SOURCE_IDS.unavailableResources)?.setDataCalls).toEqual([]);
   });
 
   it("removes the map exactly once on unmount", () => {

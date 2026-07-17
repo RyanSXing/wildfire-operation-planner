@@ -19,7 +19,7 @@ import {
   scenarioVersionTwoResponse,
 } from "../../test/fixtures";
 import { server } from "../../test/server";
-import { ScenarioPlanningPanel } from "./ScenarioPlanningPanel";
+import { ScenarioPlanningPanel, type ScenarioPlanningPanelProps } from "./ScenarioPlanningPanel";
 
 const incident = incidentDetailSchema.parse(incidentDetailResponse);
 const bearIncident = incidentDetailSchema.parse(bearDetailResponse);
@@ -34,6 +34,7 @@ function renderPanel(
   planningDisabled = false,
   currentIncident = incident,
   freshnessToken = "0:0",
+  onPlanningMapSelection?: ScenarioPlanningPanelProps["onPlanningMapSelection"],
 ) {
   return render(
     <AppProviders>
@@ -41,6 +42,7 @@ function renderPanel(
         incident={currentIncident}
         planningDisabled={planningDisabled}
         freshnessToken={freshnessToken}
+        onPlanningMapSelection={onPlanningMapSelection}
       />
     </AppProviders>,
   );
@@ -76,6 +78,27 @@ function installSuccessfulCommands(calls: RecordedCommand[]) {
 
 describe("ScenarioPlanningPanel", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("emits baseline, matching selection, newer-version clear, and reset selections", async () => {
+    const calls: RecordedCommand[] = [];
+    installSuccessfulCommands(calls);
+    const user = userEvent.setup();
+    const selections: Array<unknown> = [];
+    renderPanel(false, incident, "0:0", (selection) => selections.push(selection));
+    await bootstrapBaseline(user);
+
+    expect(screen.getByRole("radio", { name: "Observed baseline (no scenario overlays)" })).toBeChecked();
+    expect(selections.at(-1)).toBeNull();
+    expect(screen.getByRole("radio", { name: "Scenario version 1" })).toBeVisible();
+    await user.click(screen.getByRole("radio", { name: "Scenario version 1" }));
+    expect(selections.at(-1)).toMatchObject({ scenarioVersion: { id: baselineScenarioVersionResponse.id }, recommendation: { id: baselineRecommendationResponse.id } });
+    await user.click(screen.getByRole("checkbox", { name: /Alpha Road/ }));
+    await user.click(screen.getByRole("button", { name: "Save scenario version" }));
+    expect(await screen.findByRole("radio", { name: "Scenario version 2" })).toBeChecked();
+    expect(selections.at(-1)).toMatchObject({ scenarioVersion: { id: scenarioVersionTwoResponse.id }, recommendation: null });
+    await user.click(screen.getByRole("button", { name: "Start over" }));
+    expect(selections.at(-1)).toBeNull();
+  });
 
   it("discovers the default graph and bounded road catalog without posting on mount", async () => {
     renderPanel();

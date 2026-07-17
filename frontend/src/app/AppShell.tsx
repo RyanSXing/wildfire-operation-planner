@@ -3,13 +3,14 @@ import type {
   FeatureCollection,
   Geometry as GeoJsonGeometry,
 } from "geojson";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   useIncident,
   useIncidentEvents,
   useIncidentTimeline,
   useIncidents,
+  useExactRoadEdges,
   useSourceStatus,
 } from "../api/hooks";
 import type {
@@ -26,6 +27,11 @@ import { IncidentDetails } from "../features/incidents/IncidentDetails";
 import { IncidentQueue } from "../features/incidents/IncidentQueue";
 import { ReplayTimeline } from "../features/incidents/ReplayTimeline";
 import type { OperationsFeatureCollection } from "../features/map/OperationsMap";
+import {
+  buildPlanningOverlays,
+  type PlanningMapSelection,
+  type PlanningOverlayResult,
+} from "../features/map/planningOverlays";
 import { ScenarioPlanningPanel } from "../features/scenarios/ScenarioPlanningPanel";
 
 const OperationsMap = lazy(() =>
@@ -73,6 +79,10 @@ export function AppShell() {
   const endTime = frames.at(-1)?.referenceAt ?? null;
   const [replayTime, setReplayTime] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [planningSelection, setPlanningSelection] = useState<PlanningMapSelection | null>(null);
+  const currentPanelKey = incidentQuery.data?.id ?? "";
+  const currentPanelKeyRef = useRef(currentPanelKey);
+  currentPanelKeyRef.current = currentPanelKey;
 
   useEffect(() => {
     setReplayTime(endTime);
@@ -100,6 +110,61 @@ export function AppShell() {
   const mapData = useMemo(
     () => shapeMapData(incidentQuery.data, replaying ? activeFrame : undefined),
     [activeFrame, incidentQuery.data, replaying],
+  );
+  const ownedPlanningSelection =
+    planningSelection?.incidentId === activeIncidentId &&
+    planningSelection.incidentId === incidentQuery.data?.id
+      ? planningSelection
+      : null;
+  const requestedPlanningEdgeIds = useMemo(
+    () => {
+      if (!ownedPlanningSelection) return [];
+      const { scenarioVersion, recommendation } = ownedPlanningSelection;
+      const matchingRecommendation =
+        recommendation?.scenarioVersionId === scenarioVersion.id &&
+        recommendation.graphVersion === scenarioVersion.graphVersion
+          ? recommendation
+          : null;
+      return [
+        ...scenarioVersion.roadClosures.map(({ edgeId }) => edgeId),
+        ...(matchingRecommendation?.assignments.flatMap((assignment) => assignment.route.edgeIds) ?? []),
+      ];
+    },
+    [ownedPlanningSelection],
+  );
+  const exactRoads = useExactRoadEdges(
+    ownedPlanningSelection?.scenarioVersion.graphVersion ?? "",
+    requestedPlanningEdgeIds,
+  );
+  const roadState = exactRoads.queriedEdgeIds.length === 0
+    ? "idle"
+    : exactRoads.query.isSuccess
+    ? "success"
+    : exactRoads.query.isError
+      ? "error"
+      : exactRoads.query.isPending
+        ? "loading"
+        : "idle";
+  const planningOverlays = useMemo(
+    () =>
+      buildPlanningOverlays({
+        incident: incidentQuery.data,
+        selection: ownedPlanningSelection,
+        roads: exactRoads.query.data,
+        requestedEdgeIds: exactRoads.requestedEdgeIds,
+        queriedEdgeIds: exactRoads.queriedEdgeIds,
+        omittedEdgeIds: exactRoads.omittedEdgeIds,
+        roadState,
+      }),
+    [exactRoads.omittedEdgeIds, exactRoads.queriedEdgeIds, exactRoads.query.data, exactRoads.requestedEdgeIds, incidentQuery.data, ownedPlanningSelection, roadState],
+  );
+  const handlePlanningSelection = useCallback(
+    (selection: PlanningMapSelection | null, ownerIncidentId: string) => {
+      if (ownerIncidentId === currentPanelKeyRef.current) {
+        setPlanningSelection(selection);
+      }
+    },
+    [],
   );
 
   return (
@@ -160,9 +225,20 @@ export function AppShell() {
                     detectionsData={mapData.detections}
                     exposedAssetsData={mapData.exposedAssets}
                     simulatedResourcesData={mapData.simulatedResources}
+                    routesData={replaying ? EMPTY_COLLECTION : planningOverlays.routes}
+                    roadClosuresData={replaying ? EMPTY_COLLECTION : planningOverlays.closures}
+                    unavailableResourcesData={replaying ? EMPTY_COLLECTION : planningOverlays.unavailableResources}
                     view={replaying ? "replay" : "current"}
                   />
                 </Suspense>
+                <PlanningMapStatus
+                  selection={ownedPlanningSelection}
+                  overlays={planningOverlays}
+                  roadState={roadState}
+                  activeSnapshotId={incidentQuery.data?.snapshotId ?? ""}
+                  onRetry={() => void exactRoads.query.refetch()}
+                  replaying={replaying}
+                />
 
                 {timelineQuery.isPending ? (
                   <p className="replay-timeline replay-timeline__loading" role="status">
@@ -222,10 +298,11 @@ export function AppShell() {
                   riskContext={replaying ? "Replay frame" : "Current snapshot"}
                 >
                   <ScenarioPlanningPanel
-                    key={incidentQuery.data.id}
+                    key={currentPanelKey}
                     incident={incidentQuery.data}
                     planningDisabled={replaying}
                     freshnessToken={planningFreshnessToken}
+                    onPlanningMapSelection={handlePlanningSelection}
                   />
                 </IncidentDetails>
               )}
@@ -235,6 +312,46 @@ export function AppShell() {
       )}
     </main>
   );
+}
+
+function PlanningMapStatus({
+  selection,
+  overlays,
+  roadState,
+  activeSnapshotId,
+  onRetry,
+  replaying,
+}: {
+  selection: PlanningMapSelection | null;
+  overlays: PlanningOverlayResult;
+  roadState: "idle" | "loading" | "error" | "success";
+  activeSnapshotId: string;
+  onRetry: () => void;
+  replaying: boolean;
+}) {
+  return (
+    <section aria-label="Scenario map status">
+      {selection ? <>
+        <p>Scenario version {selection.scenarioVersion.version}; scenario snapshot {selection.scenarioVersion.incidentSnapshotId}; active snapshot {activeSnapshotId}; {selection.freshness === "stale" ? "Stale" : "Current"}.</p>
+        <OverlayMetadata label="Routes" metadata={overlays.metadata.routes} />
+        <OverlayMetadata label="Road closures" metadata={overlays.metadata.closures} />
+        <p>Unavailable resources: {listOrNone(overlays.metadata.unavailableResources.mapped)}. Missing resource geometry: {listOrNone(overlays.metadata.unavailableResources.missing)}.</p>
+        {overlays.weather.overrides.map((weather) => <p key={weather.index}>Weather override {weather.index}: {weather.windSpeedMps} m/s, {weather.windDirectionDegrees}°.</p>)}
+        {overlays.weather.overrides.length > 0 ? <p>{overlays.weather.explanation}</p> : null}
+      </> : <p>Observed baseline selected; no scenario overlays.</p>}
+      {roadState === "loading" ? <p role="status">Loading road geometry…</p> : null}
+      {roadState === "error" ? <div role="alert"><p>Road geometry could not be loaded.</p><button type="button" onClick={onRetry}>Retry road geometry</button></div> : null}
+      {replaying && selection ? <p>Current scenario overlays are hidden during replay and will restore on return to the current snapshot.</p> : null}
+    </section>
+  );
+}
+
+function OverlayMetadata({ label, metadata }: { label: string; metadata: PlanningOverlayResult["metadata"]["routes"] }) {
+  return <p>{label}: mapped {listOrNone(metadata.mapped)}; null geometry {listOrNone(metadata.nullGeometry)}; missing {listOrNone(metadata.missing)}; omitted {listOrNone(metadata.omitted)}; unresolved {listOrNone(metadata.unresolved)}.</p>;
+}
+
+function listOrNone(ids: readonly string[]): string {
+  return ids.length > 0 ? `${ids.length} (${ids.join(", ")})` : "0 (none)";
 }
 
 function SourceFreshness({

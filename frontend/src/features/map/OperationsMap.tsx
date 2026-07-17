@@ -3,7 +3,6 @@ import maplibregl, { type GeoJSONSource } from "maplibre-gl";
 import { useEffect, useRef } from "react";
 
 import {
-  EMPTY_FEATURE_COLLECTION,
   INLINE_MAP_STYLE,
   MAP_IMAGES,
   MAP_LAYERS,
@@ -20,6 +19,9 @@ export type OperationsMapProps = {
   detectionsData: OperationsFeatureCollection;
   exposedAssetsData: OperationsFeatureCollection;
   simulatedResourcesData: OperationsFeatureCollection;
+  routesData: OperationsFeatureCollection;
+  roadClosuresData: OperationsFeatureCollection;
+  unavailableResourcesData: OperationsFeatureCollection;
   view: "current" | "replay";
 };
 
@@ -29,6 +31,9 @@ type DynamicMapData = Pick<
   | "detectionsData"
   | "exposedAssetsData"
   | "simulatedResourcesData"
+  | "routesData"
+  | "roadClosuresData"
+  | "unavailableResourcesData"
 >;
 
 export function OperationsMap({
@@ -36,6 +41,9 @@ export function OperationsMap({
   detectionsData,
   exposedAssetsData,
   simulatedResourcesData,
+  routesData,
+  roadClosuresData,
+  unavailableResourcesData,
   view,
 }: OperationsMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -46,6 +54,9 @@ export function OperationsMap({
     detectionsData,
     exposedAssetsData,
     simulatedResourcesData,
+    routesData,
+    roadClosuresData,
+    unavailableResourcesData,
   });
 
   latestDataRef.current = {
@@ -53,6 +64,9 @@ export function OperationsMap({
     detectionsData,
     exposedAssetsData,
     simulatedResourcesData,
+    routesData,
+    roadClosuresData,
+    unavailableResourcesData,
   };
 
   useEffect(() => {
@@ -94,11 +108,15 @@ export function OperationsMap({
       });
       map.addSource(MAP_SOURCE_IDS.routes, {
         type: "geojson",
-        data: EMPTY_FEATURE_COLLECTION,
+        data: data.routesData,
       });
       map.addSource(MAP_SOURCE_IDS.roadClosures, {
         type: "geojson",
-        data: EMPTY_FEATURE_COLLECTION,
+        data: data.roadClosuresData,
+      });
+      map.addSource(MAP_SOURCE_IDS.unavailableResources, {
+        type: "geojson",
+        data: data.unavailableResourcesData,
       });
 
       for (const { id, image } of MAP_IMAGES) {
@@ -141,6 +159,25 @@ export function OperationsMap({
     simulatedResourcesData,
   ]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) {
+      return;
+    }
+
+    setSourceData(map, MAP_SOURCE_IDS.routes, routesData);
+  }, [routesData]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && loadedRef.current) setSourceData(map, MAP_SOURCE_IDS.roadClosures, roadClosuresData);
+  }, [roadClosuresData]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && loadedRef.current) setSourceData(map, MAP_SOURCE_IDS.unavailableResources, unavailableResourcesData);
+  }, [unavailableResourcesData]);
+
   const observedSummary = [
     countLabel(incidentData.features.length, "incident feature"),
     countLabel(detectionsData.features.length, "detection"),
@@ -172,12 +209,13 @@ export function OperationsMap({
           label="Simulated resources"
           modifier="resource"
         />
-        <LegendItem marker="━" label="Routes — none loaded" modifier="route" />
+        <LegendItem marker="━" label={`Routes — ${countLabel(routesData.features.length, "segment")}`} modifier="route" />
         <LegendItem
           marker="┄"
-          label="Road closures — none loaded"
+          label={`Road closures — ${countLabel(roadClosuresData.features.length, "segment")}`}
           modifier="closure"
         />
+        <LegendItem marker="⊠" label={`Unavailable resources — ${countLabel(unavailableResourcesData.features.length, "resource")}`} modifier="unavailable" />
       </ul>
     </div>
   );

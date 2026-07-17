@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -50,6 +50,8 @@ export const queryKeys = {
         [...(query.edgeIds ?? [])],
         query.limit ?? null,
       ] as const,
+    exactEdges: (graphVersion: string, edgeIds: readonly string[]) =>
+      [...roadGraphRoot, "exact-edges", graphVersion, [...edgeIds]] as const,
   },
   audit: {
     root: auditRoot,
@@ -139,6 +141,24 @@ export function useRoadEdges(graphVersion: string, query: RoadEdgeQuery) {
       apiClient.listRoadEdges(graphVersion, query, signal),
     enabled: graphVersion.length > 0,
   });
+}
+
+export function useExactRoadEdges(graphVersion: string, edgeIds: readonly string[]) {
+  const { requestedEdgeIds, queriedEdgeIds, omittedEdgeIds } = useMemo(() => {
+    const requestedEdgeIds = [...new Set(edgeIds.map((id) => id.trim()).filter(Boolean))].sort();
+    return {
+      requestedEdgeIds,
+      queriedEdgeIds: requestedEdgeIds.slice(0, 200),
+      omittedEdgeIds: requestedEdgeIds.slice(200),
+    };
+  }, [edgeIds]);
+  const enabled = graphVersion.trim().length > 0 && queriedEdgeIds.length > 0;
+  const query = useQuery({
+    queryKey: queryKeys.roadGraphs.exactEdges(graphVersion, queriedEdgeIds),
+    queryFn: ({ signal }) => apiClient.listRoadEdges(graphVersion, { edgeIds: queriedEdgeIds }, signal),
+    enabled,
+  });
+  return { query, requestedEdgeIds, queriedEdgeIds, omittedEdgeIds };
 }
 
 export function useAuditEvents(recommendationId: string, enabled: boolean) {

@@ -18,6 +18,8 @@ import {
   baselineRecommendationResponse,
   baselineScenarioVersionResponse,
   incidentListResponse,
+  incidentDetailResponse,
+  redwoodRoadEdgesResponse,
   scenarioRecommendationResponse,
   scenarioVersionTwoResponse,
 } from "../test/fixtures";
@@ -95,6 +97,10 @@ function visualizedIncidentId(map: RecordedMap): unknown {
   return collection?.features[0]?.properties?.incidentId;
 }
 
+function sourceFeatures(map: RecordedMap, sourceId: string) {
+  return (map.sources.get(sourceId)?.data as FeatureCollection<Geometry> | undefined)?.features ?? [];
+}
+
 beforeEach(() => {
   resetMapLibreTestState();
   TestEventSource.instances.length = 0;
@@ -109,6 +115,87 @@ afterEach(() => {
 });
 
 describe("AppShell", () => {
+  it("keeps a selected same-incident overlay inspectable after a newer snapshot makes it stale", async () => {
+    const calls: Array<{ path: string; body: unknown; key: string | null }> = [];
+    let newerSnapshot = false;
+    installSuccessfulPlanningCommands(calls);
+    server.use(
+      http.get("/api/incidents/:incidentId", ({ params }) =>
+        String(params.incidentId) === REDWOOD_ID
+          ? HttpResponse.json(newerSnapshot ? { ...incidentDetailResponse, snapshotId: "newer-snapshot", snapshotVersion: 3 } : incidentDetailResponse)
+          : undefined,
+      ),
+    );
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByRole("region", { name: "Wildfire operations map" });
+    const map = onlyMap();
+    act(() => map.emit("load"));
+    await user.click(await screen.findByRole("button", { name: "Create baseline and generate recommendation" }));
+    await user.click(await screen.findByRole("radio", { name: "Scenario version 1" }));
+    await waitFor(() => expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(2));
+
+    newerSnapshot = true;
+    act(() => TestEventSource.instances[0].emit("incident-updated", { incidentId: REDWOOD_ID }));
+    await waitFor(() => {
+      expect(screen.getByRole("region", { name: "Scenario map status" })).toHaveTextContent("Stale");
+      expect(screen.getByRole("button", { name: "Approve recommendation" })).toBeDisabled();
+      const route = sourceFeatures(map, MAP_SOURCE_IDS.routes)[0];
+      expect(route?.properties?.activeIncidentSnapshotId).toBe("newer-snapshot");
+      expect(route?.properties?.freshness).toBe("stale");
+    });
+  });
+
+  it("maps only the selected current scenario and hides its overlays during replay", async () => {
+    const calls: Array<{ path: string; body: unknown; key: string | null }> = [];
+    installSuccessfulPlanningCommands(calls);
+    let exactRoadAttempts = 0;
+    server.use(
+      http.get("/api/road-graphs/:graphVersion/edges", ({ request }) => {
+        if (new URL(request.url).searchParams.getAll("edgeId").length === 0) {
+          return HttpResponse.json(redwoodRoadEdgesResponse);
+        }
+        exactRoadAttempts += 1;
+        return exactRoadAttempts === 1
+          ? HttpResponse.json({ error: { code: "road_unavailable", message: "hidden", details: {} } }, { status: 503 })
+          : HttpResponse.json(redwoodRoadEdgesResponse);
+      }),
+    );
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByRole("region", { name: "Wildfire operations map" });
+    const map = onlyMap();
+    act(() => map.emit("load"));
+
+    await user.click(await screen.findByRole("button", { name: "Create baseline and generate recommendation" }));
+    await user.click(await screen.findByRole("radio", { name: "Scenario version 1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Road geometry could not be loaded.");
+    expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "Retry road geometry" }));
+    await waitFor(() => {
+      const routes = map.sources.get(MAP_SOURCE_IDS.routes)?.data as FeatureCollection<Geometry> | undefined;
+      expect(routes?.features).toHaveLength(2);
+    });
+    expect(exactRoadAttempts).toBe(2);
+    expect(screen.getByRole("region", { name: "Scenario map status" })).toHaveTextContent("Scenario version 1");
+
+    fireEvent.change(screen.getByRole("slider", { name: "Replay position" }), {
+      target: { value: String(Date.parse("2024-07-24T18:05:00Z")) },
+    });
+    await waitFor(() => {
+      const routes = map.sources.get(MAP_SOURCE_IDS.routes)?.data as FeatureCollection<Geometry> | undefined;
+      expect(routes?.features).toHaveLength(0);
+    });
+    expect(screen.getByText(/Current scenario overlays are hidden during replay/i)).toBeVisible();
+    fireEvent.change(screen.getByRole("slider", { name: "Replay position" }), {
+      target: { value: String(Date.parse("2024-07-24T18:30:00Z")) },
+    });
+    await waitFor(() => {
+      const routes = map.sources.get(MAP_SOURCE_IDS.routes)?.data as FeatureCollection<Geometry> | undefined;
+      expect(routes?.features).toHaveLength(2);
+    });
+  });
+
   it("renders the required observe surface in server order and updates the workspace when Bear Ridge is selected", async () => {
     const user = userEvent.setup();
     renderShell();
@@ -549,6 +636,8 @@ describe("AppShell", () => {
     renderShell();
 
     await screen.findByRole("combobox", { name: "Road graph" });
+    const map = onlyMap();
+    act(() => map.emit("load"));
     await user.click(
       screen.getByRole("button", {
         name: "Create baseline and generate recommendation",
@@ -557,8 +646,16 @@ describe("AppShell", () => {
     expect(
       await screen.findByText("Baseline scenario version 1"),
     ).toBeVisible();
+    await user.click(screen.getByRole("radio", { name: "Scenario version 1" }));
+    await waitFor(() => {
+      expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(2);
+    });
 
     await user.click(screen.getByRole("button", { name: /Bear Ridge/i }));
+    await waitFor(() => {
+      expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(0);
+      expect(screen.getByRole("region", { name: "Scenario map status" })).toHaveTextContent("Observed baseline");
+    });
     expect(
       await screen.findByRole("combobox", { name: "Road graph" }),
     ).toHaveValue("roads-bear-v1");

@@ -22,6 +22,7 @@ import {
   useIncidentTimeline,
   useIncidents,
   useRoadEdges,
+  useExactRoadEdges,
   useSourceStatus,
 } from "./hooks";
 
@@ -228,6 +229,58 @@ describe("incident read hooks", () => {
 });
 
 describe("planning read hooks", () => {
+  it("queries only a stable sorted capped exact-ID set", async () => {
+    const request = vi.spyOn(apiClient, "listRoadEdges").mockResolvedValue({
+      items: [], total: 0, missingEdgeIds: [],
+    });
+    const { wrapper } = createHarness();
+    const edgeIds = [" edge-2 ", "edge-1", "edge-2", "", ...Array.from({ length: 201 }, (_, index) => `z-${index}`)];
+    const { result } = renderHook(
+      () => useExactRoadEdges("roads-v1", edgeIds),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true));
+    expect(result.current.requestedEdgeIds).toHaveLength(203);
+    expect(result.current.queriedEdgeIds).toHaveLength(200);
+    expect(result.current.queriedEdgeIds).toEqual([...result.current.queriedEdgeIds].sort());
+    expect(result.current.omittedEdgeIds).toHaveLength(3);
+    expect(result.current.omittedEdgeIds.every((id) => id.startsWith("z-"))).toBe(true);
+    expect(request).toHaveBeenCalledWith(
+      "roads-v1",
+      { edgeIds: result.current.queriedEdgeIds },
+      expect.any(AbortSignal),
+    );
+    expect(queryKeys.roadGraphs.exactEdges("roads-v1", result.current.queriedEdgeIds)).toEqual([
+      "road-graphs", "exact-edges", "roads-v1", result.current.queriedEdgeIds,
+    ]);
+  });
+
+  it("does not fetch an unfiltered road catalog without exact IDs", () => {
+    const request = vi.spyOn(apiClient, "listRoadEdges");
+    const { wrapper } = createHarness();
+    const { result } = renderHook(() => useExactRoadEdges("roads-v1", [" "]), { wrapper });
+
+    expect(result.current.query.fetchStatus).toBe("idle");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("keeps canonical exact-ID values stable across unrelated rerenders", async () => {
+    const request = vi.spyOn(apiClient, "listRoadEdges").mockResolvedValue({ items: [], total: 0, missingEdgeIds: [] });
+    const edgeIds = ["edge-2", "edge-1", "edge-2"];
+    const { wrapper } = createHarness();
+    const { result, rerender } = renderHook(
+      ({ tick }) => ({ tick, roads: useExactRoadEdges("roads-v1", edgeIds) }),
+      { wrapper, initialProps: { tick: 0 } },
+    );
+    await waitFor(() => expect(result.current.roads.query.isSuccess).toBe(true));
+    const queried = result.current.roads.queriedEdgeIds;
+    rerender({ tick: 1 });
+
+    expect(result.current.roads.queriedEdgeIds).toBe(queried);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("uses deterministic keys and stays disabled without required scope", async () => {
     const contextRequest = vi.spyOn(apiClient, "getDecisionContext").mockResolvedValue({
       incidentId: REDWOOD_ID,

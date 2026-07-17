@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -25,11 +26,16 @@ import { AuditDrawer } from "../decisions/AuditDrawer";
 import { RecommendationPanel } from "../decisions/RecommendationPanel";
 import { ScenarioComparison } from "./ScenarioComparison";
 import { ScenarioEditor } from "./ScenarioEditor";
+import type { PlanningMapSelection } from "../map/planningOverlays";
 
 export type ScenarioPlanningPanelProps = {
   incident: IncidentDetail;
   planningDisabled: boolean;
   freshnessToken: string;
+  onPlanningMapSelection?: (
+    selection: PlanningMapSelection | null,
+    ownerIncidentId: string,
+  ) => void;
 };
 
 type GeneratedRecommendation = {
@@ -57,6 +63,7 @@ export function ScenarioPlanningPanel({
   incident,
   planningDisabled,
   freshnessToken,
+  onPlanningMapSelection,
 }: ScenarioPlanningPanelProps) {
   const contextQuery = useDecisionContext(incident.id);
   const [graphChoice, setGraphChoice] = useState<string | null>(null);
@@ -99,6 +106,7 @@ export function ScenarioPlanningPanel({
   const [sessionFreshnessToken, setSessionFreshnessToken] = useState<
     string | null
   >(null);
+  const [mapMode, setMapMode] = useState<"baseline" | "scenario">("baseline");
 
   useLayoutEffect(() => {
     latestPolicy.current = {
@@ -138,6 +146,27 @@ export function ScenarioPlanningPanel({
   const bootstrapPending =
     createScenario.isPending || generateRecommendation.isPending;
   const canBootstrap = selectedGraph.length > 0 && !commandsDisabled;
+  const planningMapSelection = useMemo<PlanningMapSelection | null>(
+    () =>
+      mapMode === "scenario" && latestVersion
+      ? {
+          incidentId: incident.id,
+          scenarioVersion: latestVersion,
+          recommendation:
+            lastSuccessful?.version.id === latestVersion.id &&
+            lastSuccessful.recommendation.scenarioVersionId === latestVersion.id &&
+            lastSuccessful.recommendation.graphVersion === latestVersion.graphVersion
+              ? lastSuccessful.recommendation
+              : null,
+          freshness: sessionStale ? "stale" : "current",
+        }
+        : null,
+    [incident.id, lastSuccessful, latestVersion, mapMode, sessionStale],
+  );
+
+  useLayoutEffect(() => {
+    onPlanningMapSelection?.(planningMapSelection, incident.id);
+  }, [incident.id, onPlanningMapSelection, planningMapSelection]);
 
   const isActiveSession = (generation: number): boolean =>
     mounted.current && generation === sessionGeneration.current;
@@ -314,6 +343,7 @@ export function ScenarioPlanningPanel({
     setCommandError(null);
     setStaleLatched(false);
     setSessionFreshnessToken(null);
+    setMapMode("baseline");
   };
 
   return (
@@ -397,6 +427,30 @@ export function ScenarioPlanningPanel({
               setRoadSearch(roadSearchDraft.trim());
             }}
           />
+
+          {latestVersion ? (
+            <fieldset aria-label="Scenario map selection">
+              <legend>Map overlays</legend>
+              <label>
+                <input
+                  type="radio"
+                  name={`scenario-map-${incident.id}`}
+                  checked={mapMode === "baseline"}
+                  onChange={() => setMapMode("baseline")}
+                />
+                Observed baseline (no scenario overlays)
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name={`scenario-map-${incident.id}`}
+                  checked={mapMode === "scenario"}
+                  onChange={() => setMapMode("scenario")}
+                />
+                Scenario version {latestVersion.version}
+              </label>
+            </fieldset>
+          ) : null}
 
           {!baselineRecommendation ? (
             <button

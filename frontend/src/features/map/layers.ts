@@ -1,4 +1,4 @@
-import type { FeatureCollection } from "geojson";
+import type { FeatureCollection, Geometry } from "geojson";
 import type { LayerSpecification, StyleSpecification } from "maplibre-gl";
 
 export const MAP_SOURCE_IDS = {
@@ -8,6 +8,7 @@ export const MAP_SOURCE_IDS = {
   simulatedResources: "wildfireops-simulated-resources",
   routes: "wildfireops-routes",
   roadClosures: "wildfireops-road-closures",
+  unavailableResources: "wildfireops-unavailable-resources",
 } as const;
 
 export const MAP_LAYER_IDS = {
@@ -19,11 +20,13 @@ export const MAP_LAYER_IDS = {
   simulatedResources: "wildfireops-simulated-resources",
   routes: "wildfireops-routes",
   roadClosures: "wildfireops-road-closures",
+  unavailableResources: "wildfireops-unavailable-resources",
 } as const;
 
 export const MAP_IMAGE_IDS = {
   exposedAsset: "wildfireops-exposed-asset-diamond",
   simulatedResource: "wildfireops-simulated-resource-square",
+  unavailableResource: "wildfireops-unavailable-resource-blocked",
 } as const;
 
 type MapImage = {
@@ -40,9 +43,13 @@ export const MAP_IMAGES: readonly MapImage[] = [
     id: MAP_IMAGE_IDS.simulatedResource,
     image: createMarkerImage("square", [37, 99, 235], [23, 37, 84]),
   },
+  {
+    id: MAP_IMAGE_IDS.unavailableResource,
+    image: createMarkerImage("blocked", [220, 38, 38], [69, 10, 10]),
+  },
 ];
 
-export const EMPTY_FEATURE_COLLECTION: FeatureCollection = {
+export const EMPTY_FEATURE_COLLECTION: FeatureCollection<Geometry, Record<string, unknown>> = {
   type: "FeatureCollection",
   features: [],
 };
@@ -139,10 +146,19 @@ export const MAP_LAYERS: LayerSpecification[] = [
       "line-width": 4,
     },
   },
+  {
+    id: MAP_LAYER_IDS.unavailableResources,
+    type: "symbol",
+    source: MAP_SOURCE_IDS.unavailableResources,
+    layout: {
+      "icon-image": MAP_IMAGE_IDS.unavailableResource,
+      "icon-allow-overlap": true,
+    },
+  },
 ];
 
 function createMarkerImage(
-  shape: "diamond" | "square",
+  shape: "diamond" | "square" | "blocked",
   fill: readonly [number, number, number],
   stroke: readonly [number, number, number],
 ): { width: number; height: number; data: Uint8Array } {
@@ -156,7 +172,9 @@ function createMarkerImage(
       const inside =
         shape === "diamond"
           ? distance <= center - 1
-          : x >= 2 && x < size - 2 && y >= 2 && y < size - 2;
+          : shape === "blocked"
+            ? (x >= 2 && x < size - 2 && y >= 2 && y < size - 2) && Math.abs(x - y) > 1 && Math.abs(x + y - (size - 1)) > 1
+            : x >= 2 && x < size - 2 && y >= 2 && y < size - 2;
       if (!inside) {
         continue;
       }
