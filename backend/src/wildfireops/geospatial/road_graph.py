@@ -29,6 +29,7 @@ from uuid import uuid4
 from xml.etree.ElementTree import ParseError
 
 import networkx as nx
+import shapely  # type: ignore[import-untyped]
 
 from wildfireops.replay.manifest import (
     ReplayManifest,
@@ -84,10 +85,20 @@ class RouteResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RoadEdge:
+    edge_id: str
+    label: str
+    geometry: tuple[tuple[float, float], ...] | None
+    travel_minutes: float
+    distance_meters: float
+
+
+@dataclass(frozen=True, slots=True)
 class RoadGraph:
     _graph: nx.MultiDiGraph
     graph_version: str
     _edge_ids: frozenset[str]
+    _road_edges: tuple[RoadEdge, ...]
     _route_cache: dict[tuple[str, str, Hashable, Hashable], RouteResult] = field(
         default_factory=dict,
         repr=False,
@@ -145,11 +156,101 @@ class RoadGraph:
             _graph=nx.freeze(graph),
             graph_version=graph_version,
             _edge_ids=edge_ids,
+            _road_edges=_road_edge_catalog(graph),
         )
 
     @property
     def edge_ids(self) -> frozenset[str]:
         return self._edge_ids
+
+    @property
+    def road_edges(self) -> tuple[RoadEdge, ...]:
+        return self._road_edges
+
+
+def _road_edge_catalog(graph: nx.MultiDiGraph) -> tuple[RoadEdge, ...]:
+    return tuple(
+        sorted(
+            (
+                RoadEdge(
+                    edge_id=data["edge_id"],
+                    label=_road_edge_label(data),
+                    geometry=_road_edge_geometry(graph, origin, destination, data),
+                    travel_minutes=data["travel_minutes"],
+                    distance_meters=data["distance_meters"],
+                )
+                for origin, destination, _, data in graph.edges(
+                    keys=True,
+                    data=True,
+                )
+            ),
+            key=lambda edge: edge.edge_id,
+        )
+    )
+
+
+def _road_edge_label(data: dict[str, object]) -> str:
+    name = data.get("name")
+    if isinstance(name, str):
+        normalized = " ".join(name.split())
+        if normalized:
+            return normalized
+    return str(data["edge_id"])
+
+
+def _road_edge_geometry(
+    graph: nx.MultiDiGraph,
+    origin: Hashable,
+    destination: Hashable,
+    data: dict[str, object],
+) -> tuple[tuple[float, float], ...] | None:
+    geometry = data.get("geometry")
+    line: shapely.LineString | None = (
+        geometry if isinstance(geometry, shapely.LineString) else None
+    )
+    if isinstance(geometry, str):
+        try:
+            parsed = shapely.from_wkt(geometry)
+        except (shapely.errors.GEOSException, TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, shapely.LineString):
+            line = parsed
+    if line is not None and line.is_valid and not line.is_empty:
+        coordinates = _line_coordinates(line)
+        if coordinates is not None:
+            return coordinates
+
+    start = _node_coordinates(graph.nodes[origin])
+    end = _node_coordinates(graph.nodes[destination])
+    if start is None or end is None:
+        return None
+    return (start, end)
+
+
+def _line_coordinates(
+    line: shapely.LineString,
+) -> tuple[tuple[float, float], ...] | None:
+    coordinates = tuple((float(item[0]), float(item[1])) for item in line.coords)
+    if len(coordinates) < 2 or any(
+        not isfinite(value) for coordinate in coordinates for value in coordinate
+    ):
+        return None
+    return coordinates
+
+
+def _node_coordinates(data: dict[str, object]) -> tuple[float, float] | None:
+    x = data.get("x")
+    y = data.get("y")
+    if (
+        isinstance(x, bool)
+        or not isinstance(x, int | float)
+        or isinstance(y, bool)
+        or not isinstance(y, int | float)
+        or not isfinite(float(x))
+        or not isfinite(float(y))
+    ):
+        return None
+    return float(x), float(y)
 
 
 def nearest_road_node(

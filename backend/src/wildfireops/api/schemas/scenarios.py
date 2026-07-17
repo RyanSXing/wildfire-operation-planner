@@ -1,6 +1,6 @@
 from pydantic import Field, JsonValue
 
-from wildfireops.api.schemas.incidents import ApiModel
+from wildfireops.api.schemas.incidents import ApiModel, RiskResponse
 
 
 class RoadClosureInput(ApiModel):
@@ -70,6 +70,15 @@ class ObjectiveComponentsResponse(ApiModel):
     objective_value: int
 
 
+class RecommendationOutcomeResponse(ApiModel):
+    scenario_risk: RiskResponse
+    weighted_risk_covered: float
+    weighted_risk_uncovered: float
+    total_travel_minutes: float
+    unreachable_destination_ids: tuple[str, ...]
+    unavailable_resource_ids: tuple[str, ...]
+
+
 class RecommendationResponse(ApiModel):
     id: str
     scenario_version_id: str
@@ -85,3 +94,4 @@ class RecommendationResponse(ApiModel):
     input_version: str
     source_versions: dict[str, JsonValue]
     explanation: dict[str, JsonValue]
+    outcome: RecommendationOutcomeResponse

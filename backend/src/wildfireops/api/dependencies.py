@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 
 from fastapi import Request
 
@@ -12,6 +12,7 @@ from wildfireops.application.commands import CommandServiceProvider
 from wildfireops.decision.commands import AuditQueryService, DecisionCommandService
 from wildfireops.decision.recommendations import RecommendationService
 from wildfireops.decision.scenarios import ScenarioService
+from wildfireops.geospatial.road_graph import RoadGraph
 
 
 async def get_incident_query_service(
@@ -36,6 +37,10 @@ def get_event_bus(request: Request) -> EventBus:
 
 def get_event_heartbeat_seconds(request: Request) -> float:
     return request.app.state.event_heartbeat_seconds
+
+
+def get_road_graphs(request: Request) -> Mapping[str, RoadGraph]:
+    return request.app.state.graphs
 
 
 async def get_scenario_service(request: Request) -> AsyncIterator[ScenarioService]:

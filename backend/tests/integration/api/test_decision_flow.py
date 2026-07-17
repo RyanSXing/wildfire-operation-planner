@@ -17,6 +17,8 @@ from wildfireops.persistence.decision_models import (
     IncidentSnapshotModel,
     RecommendationModel,
     ScenarioModel,
+    ScenarioResourceOverrideModel,
+    ScenarioRoadClosureModel,
     ScenarioVersionModel,
 )
 from wildfireops.persistence.observed_models import (
@@ -42,16 +44,17 @@ def _road_graph() -> RoadGraph:
             ("town-2-node", {"x": -121.65, "y": 39.83}),
         ]
     )
-    for origin, destination, edge_id, minutes in (
-        ("engine-1-node", "town-1-node", "e1-t1", 5.0),
-        ("engine-1-node", "town-2-node", "e1-t2", 12.0),
-        ("engine-2-node", "town-1-node", "e2-t1", 6.0),
-        ("engine-2-node", "town-2-node", "e2-t2", 7.0),
+    for origin, destination, edge_id, minutes, name in (
+        ("engine-1-node", "town-1-node", "e1-t1", 5.0, "Engine One Access"),
+        ("engine-1-node", "town-2-node", "e1-t2", 12.0, "Town Two Access"),
+        ("engine-2-node", "town-1-node", "e2-t1", 6.0, "North Connector"),
+        ("engine-2-node", "town-2-node", "e2-t2", 7.0, "   "),
     ):
         graph.add_edge(
             origin,
             destination,
             edge_id=edge_id,
+            name=name,
             travel_minutes=minutes,
             distance_meters=minutes * 1_000,
         )
@@ -173,7 +176,12 @@ async def _seed_decision_flow(session: AsyncSession, graph: RoadGraph) -> UUID:
             "detection_identities": ["firms:fire-1"],
             "clustering_algorithm_version": "spatiotemporal-dbscan-v1",
             "exposure": {"buffer_meters": 10_000.0},
-            "risk": {"config_version": "risk-v1", "score": 50.0, "factors": []},
+            "risk": {
+                "config_version": "risk-v1",
+                "score": 50.0,
+                "factors": [],
+                "config": {},
+            },
         },
         asset_state=[
             {
@@ -274,11 +282,186 @@ async def _generate(
 
 
 @pytest.mark.asyncio
+async def test_incident_decision_context_uses_sorted_live_graph_registry(
+    db_session: AsyncSession,
+) -> None:
+    graph = _road_graph()
+    await _seed_decision_flow(db_session, graph)
+    alternate_nx = nx.MultiDiGraph()
+    alternate_nx.add_edge(
+        "A",
+        "B",
+        edge_id="alternate-edge",
+        travel_minutes=1.0,
+        distance_meters=100.0,
+    )
+    alternate = RoadGraph.from_graph(alternate_nx)
+    app = _test_app(db_session, graph)
+    app.state.graphs = {
+        graph.graph_version: graph,
+        alternate.graph_version: alternate,
+    }
+    expected_graphs = sorted(
+        (
+            {"graphVersion": graph.graph_version, "edgeCount": 4},
+            {"graphVersion": alternate.graph_version, "edgeCount": 1},
+        ),
+        key=lambda item: item["graphVersion"],
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        populated = await client.get(f"/api/incidents/{_INCIDENT_ID}/decision-context")
+        malformed = await client.get("/api/incidents/not-a-uuid/decision-context")
+        unknown = await client.get(
+            "/api/incidents/00000000-0000-0000-0000-000000001102/decision-context"
+        )
+        app.state.graphs = {}
+        empty = await client.get(f"/api/incidents/{_INCIDENT_ID}/decision-context")
+
+    assert populated.status_code == 200
+    assert populated.json() == {
+        "incidentId": str(_INCIDENT_ID),
+        "defaultGraphVersion": expected_graphs[0]["graphVersion"],
+        "availableGraphs": expected_graphs,
+    }
+    assert malformed.status_code == 404
+    assert malformed.json()["error"]["code"] == "incident_not_found"
+    assert unknown.status_code == 404
+    assert unknown.json()["error"] == {
+        "code": "incident_not_found",
+        "message": "Incident was not found",
+        "details": {"incidentId": "00000000-0000-0000-0000-000000001102"},
+    }
+    assert empty.status_code == 200
+    assert empty.json() == {
+        "incidentId": str(_INCIDENT_ID),
+        "defaultGraphVersion": None,
+        "availableGraphs": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_road_edge_reads_support_browse_search_exact_and_stable_errors(
+    db_session: AsyncSession,
+) -> None:
+    graph = _road_graph()
+    await _seed_decision_flow(db_session, graph)
+    app = _test_app(db_session, graph)
+    base_path = f"/api/road-graphs/{graph.graph_version}/edges"
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        browsed = await client.get(base_path, params={"limit": 2})
+        searched = await client.get(base_path, params={"q": "  CONNECTOR  "})
+        searched_by_id = await client.get(base_path, params={"q": "E2-T"})
+        exact = await client.get(
+            base_path,
+            params=[
+                ("q", "does not match"),
+                ("edgeId", "e2-t2"),
+                ("edgeId", "missing-b"),
+                ("edgeId", "e1-t1"),
+                ("edgeId", "e1-t1"),
+                ("edgeId", "missing-a"),
+            ],
+        )
+        unknown = await client.get("/api/road-graphs/unknown/edges")
+        too_short = await client.get(base_path, params={"limit": 0})
+        too_large = await client.get(base_path, params={"limit": 201})
+        query_too_long = await client.get(base_path, params={"q": "x" * 201})
+        too_many_exact = await client.get(
+            base_path,
+            params=[("edgeId", f"edge-{index}") for index in range(201)],
+        )
+
+    assert browsed.status_code == 200
+    assert browsed.json() == {
+        "items": [
+            {
+                "edgeId": "e1-t1",
+                "label": "Engine One Access",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[-121.6, 39.8], [-121.64, 39.82]],
+                },
+                "travelMinutes": 5.0,
+                "distanceMeters": 5_000.0,
+            },
+            {
+                "edgeId": "e1-t2",
+                "label": "Town Two Access",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[-121.6, 39.8], [-121.65, 39.83]],
+                },
+                "travelMinutes": 12.0,
+                "distanceMeters": 12_000.0,
+            },
+        ],
+        "total": 4,
+        "missingEdgeIds": [],
+    }
+    assert searched.status_code == 200
+    assert searched.json()["total"] == 1
+    assert [item["edgeId"] for item in searched.json()["items"]] == ["e2-t1"]
+    assert searched_by_id.status_code == 200
+    assert searched_by_id.json()["total"] == 2
+    assert [item["edgeId"] for item in searched_by_id.json()["items"]] == [
+        "e2-t1",
+        "e2-t2",
+    ]
+    assert exact.status_code == 200
+    assert exact.json()["total"] == 2
+    assert [item["edgeId"] for item in exact.json()["items"]] == ["e1-t1", "e2-t2"]
+    assert exact.json()["missingEdgeIds"] == ["missing-a", "missing-b"]
+    assert unknown.status_code == 404
+    assert unknown.json() == {
+        "error": {
+            "code": "road_graph_not_found",
+            "message": "Road graph was not found",
+            "details": {"graphVersion": "unknown"},
+        }
+    }
+    for invalid in (too_short, too_large, query_too_long):
+        assert invalid.status_code == 422
+        assert invalid.json()["error"]["code"] == "validation_error"
+    assert too_many_exact.status_code == 422
+    assert too_many_exact.json()["error"] == {
+        "code": "too_many_edge_ids",
+        "message": "At most 200 edge IDs are allowed",
+        "details": {},
+    }
+
+
+@pytest.mark.asyncio
 async def test_generate_approve_and_audit_complete_decision_flow(
     db_session: AsyncSession,
 ) -> None:
     graph = _road_graph()
     version_id = await _seed_decision_flow(db_session, graph)
+    db_session.add_all(
+        [
+            ScenarioRoadClosureModel(
+                scenario_version_id=version_id,
+                edge_id="e1-t2",
+            ),
+            ScenarioRoadClosureModel(
+                scenario_version_id=version_id,
+                edge_id="e2-t2",
+            ),
+            ScenarioResourceOverrideModel(
+                scenario_version_id=version_id,
+                resource_id="engine-2",
+                available=False,
+            ),
+        ]
+    )
+    await db_session.flush()
     app = _test_app(db_session, graph)
 
     async with AsyncClient(
@@ -326,6 +509,39 @@ async def test_generate_approve_and_audit_complete_decision_flow(
         assert len(recommendation["inputVersion"]) == 64
         assert recommendation["sourceVersions"]["observation_inputs"]
         assert recommendation["explanation"]["status"] == recommendation["solverStatus"]
+        stored_recommendation = await db_session.get(
+            RecommendationModel,
+            UUID(recommendation_id),
+        )
+        assert stored_recommendation is not None
+        risk_breakdown = stored_recommendation.request_inputs["risk_breakdown"]
+        assert isinstance(risk_breakdown, dict)
+        factors = risk_breakdown["factors"]
+        assert isinstance(factors, list)
+        assert factors
+        risk_score = round(float(risk_breakdown["score"]), 6)
+        assert recommendation["outcome"] == {
+            "scenarioRisk": {
+                "score": risk_score,
+                "algorithmVersion": risk_breakdown["config_version"],
+                "contributions": [
+                    {
+                        "name": factor["name"],
+                        "rawValue": factor["raw"],
+                        "normalizedValue": factor["normalized_value"],
+                        "weight": factor["weight"],
+                        "contribution": factor["contribution"],
+                    }
+                    for factor in factors
+                ],
+            },
+            "weightedRiskCovered": risk_score,
+            "weightedRiskUncovered": risk_score,
+            "totalTravelMinutes": 5.0,
+            "unreachableDestinationIds": ["town-2"],
+            "unavailableResourceIds": ["engine-2"],
+        }
+        assert "requestInputs" not in recommendation
 
         approved = await client.post(
             f"/api/recommendations/{recommendation_id}/decisions",
@@ -374,6 +590,50 @@ async def test_generate_approve_and_audit_complete_decision_flow(
         )
         == 1
     )
+
+
+@pytest.mark.asyncio
+async def test_malformed_persisted_recommendation_outcome_is_sanitized(
+    db_session: AsyncSession,
+) -> None:
+    graph = _road_graph()
+    version_id = await _seed_decision_flow(db_session, graph)
+    app = _test_app(db_session, graph)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        recommendation = await _generate(client, version_id, key="malformed-outcome")
+        model = await db_session.get(
+            RecommendationModel,
+            UUID(str(recommendation["id"])),
+        )
+        assert model is not None
+        model.request_inputs = {
+            **model.request_inputs,
+            "risk_breakdown": {
+                "config_version": "risk-v1",
+                "score": "sensitive malformed value",
+                "factors": [],
+            },
+        }
+        await db_session.flush()
+        replayed = await client.post(
+            f"/api/scenario-versions/{version_id}/recommendations",
+            headers={"Idempotency-Key": "malformed-outcome"},
+            json={},
+        )
+
+    assert replayed.status_code == 500
+    assert replayed.json() == {
+        "error": {
+            "code": "internal_error",
+            "message": "Internal server error",
+            "details": {},
+        }
+    }
+    assert "sensitive malformed value" not in replayed.text
 
 
 @pytest.mark.asyncio

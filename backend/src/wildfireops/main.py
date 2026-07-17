@@ -14,6 +14,7 @@ from wildfireops.api.postgres_events import relay_postgres_events
 from wildfireops.api.request_metrics import RequestMetricsMiddleware
 from wildfireops.api.routes.events import router as events_router
 from wildfireops.api.routes.incidents import router as incidents_router
+from wildfireops.api.routes.road_graphs import router as road_graphs_router
 from wildfireops.api.routes.scenarios import router as scenarios_router
 from wildfireops.api.routes.sources import router as sources_router
 from wildfireops.config import Settings, get_settings
@@ -76,6 +77,7 @@ def create_app(
     app.add_middleware(RequestMetricsMiddleware)
     register_error_handlers(app)
     app.include_router(incidents_router)
+    app.include_router(road_graphs_router)
     app.include_router(sources_router)
     app.include_router(events_router)
     app.include_router(scenarios_router)

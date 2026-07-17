@@ -1,3 +1,5 @@
+from collections.abc import Mapping, Sequence
+from math import isfinite
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, Header
@@ -9,10 +11,11 @@ from wildfireops.api.dependencies import (
     get_scenario_service,
 )
 from wildfireops.api.schemas.scenarios import (
+    ObjectiveComponentsResponse,
     RecommendationAssignmentResponse,
     RecommendationCreateRequest,
+    RecommendationOutcomeResponse,
     RecommendationResponse,
-    ObjectiveComponentsResponse,
     ResourceOverrideInput,
     RoadClosureInput,
     RouteResponse,
@@ -20,6 +23,10 @@ from wildfireops.api.schemas.scenarios import (
     ScenarioVersionCreateRequest,
     ScenarioVersionResponse,
     WeatherOverrideInput,
+)
+from wildfireops.api.schemas.incidents import (
+    RiskContributionResponse,
+    RiskResponse,
 )
 from wildfireops.decision.recommendations import (
     RecommendationError,
@@ -197,7 +204,237 @@ def recommendation_response(stored: StoredRecommendation) -> RecommendationRespo
         input_version=stored.input_version,
         source_versions=cast(dict[str, JsonValue], dict(stored.source_versions)),
         explanation=cast(dict[str, JsonValue], dict(stored.explanation)),
+        outcome=recommendation_outcome(stored),
     )
+
+
+def recommendation_outcome(
+    stored: StoredRecommendation,
+) -> RecommendationOutcomeResponse:
+    inputs = _stored_object(stored.request_inputs, "request inputs")
+    scenario_risk = _scenario_risk(
+        _stored_required(inputs, "risk_breakdown", "request inputs")
+    )
+    if scenario_risk.algorithm_version != stored.risk_version:
+        raise ValueError("stored risk versions do not match")
+
+    resources = _stored_resources(
+        _stored_required(inputs, "resources", "request inputs")
+    )
+    demands = _stored_demands(_stored_required(inputs, "demands", "request inputs"))
+    assigned_destinations: set[str] = set()
+    total_travel_minutes = 0.0
+    for assignment in stored.assignments:
+        resource_id = _stored_text(assignment.resource_id, "assignment resource ID")
+        destination_id = _stored_text(
+            assignment.destination_id,
+            "assignment destination ID",
+        )
+        if resource_id not in resources or destination_id not in demands:
+            raise ValueError("stored assignment references unknown input")
+        if not resources[resource_id]:
+            raise ValueError("stored assignment uses an unavailable resource")
+        assigned_destinations.add(destination_id)
+        total_travel_minutes += _stored_nonnegative_number(
+            assignment.travel_minutes,
+            "assignment travel minutes",
+        )
+
+    uncovered_destinations = {
+        _stored_text(destination_id, "uncovered destination ID")
+        for destination_id in stored.uncovered_destination_ids
+    }
+    if (
+        assigned_destinations & uncovered_destinations
+        or assigned_destinations | uncovered_destinations != set(demands)
+    ):
+        raise ValueError("stored recommendation coverage is inconsistent")
+
+    routes_by_destination: dict[str, list[str]] = {
+        destination_id: [] for destination_id in demands
+    }
+    route_pairs: set[tuple[str, str]] = set()
+    for raw_route in _stored_sequence(
+        _stored_required(inputs, "candidate_routes", "request inputs"),
+        "candidate routes",
+    ):
+        candidate = _stored_object(raw_route, "candidate route")
+        resource_id = _stored_text(
+            _stored_required(candidate, "resource_id", "candidate route"),
+            "candidate route resource ID",
+        )
+        destination_id = _stored_text(
+            _stored_required(candidate, "destination_id", "candidate route"),
+            "candidate route destination ID",
+        )
+        if resource_id not in resources or destination_id not in demands:
+            raise ValueError("stored candidate route references unknown input")
+        pair = (resource_id, destination_id)
+        if pair in route_pairs:
+            raise ValueError("stored candidate routes are duplicated")
+        route_pairs.add(pair)
+        route = _stored_object(
+            _stored_required(candidate, "route", "candidate route"),
+            "candidate route payload",
+        )
+        status = _stored_text(
+            _stored_required(route, "status", "candidate route payload"),
+            "candidate route status",
+        )
+        if status not in {"reachable", "unreachable"}:
+            raise ValueError("stored candidate route status is invalid")
+        routes_by_destination[destination_id].append(status)
+
+    return RecommendationOutcomeResponse(
+        scenario_risk=scenario_risk,
+        weighted_risk_covered=round(
+            sum(demands[item] for item in assigned_destinations),
+            6,
+        ),
+        weighted_risk_uncovered=round(
+            sum(demands[item] for item in uncovered_destinations),
+            6,
+        ),
+        total_travel_minutes=round(total_travel_minutes, 6),
+        unreachable_destination_ids=tuple(
+            sorted(
+                destination_id
+                for destination_id, statuses in routes_by_destination.items()
+                if not statuses or all(status == "unreachable" for status in statuses)
+            )
+        ),
+        unavailable_resource_ids=tuple(
+            sorted(
+                resource_id
+                for resource_id, available in resources.items()
+                if not available
+            )
+        ),
+    )
+
+
+def _scenario_risk(value: object) -> RiskResponse:
+    risk = _stored_object(value, "risk breakdown")
+    factors = tuple(
+        _risk_contribution(item)
+        for item in _stored_sequence(
+            _stored_required(risk, "factors", "risk breakdown"),
+            "risk factors",
+        )
+    )
+    return RiskResponse(
+        score=_stored_nonnegative_number(
+            _stored_required(risk, "score", "risk breakdown"),
+            "risk score",
+        ),
+        algorithm_version=_stored_text(
+            _stored_required(risk, "config_version", "risk breakdown"),
+            "risk config version",
+        ),
+        contributions=factors,
+    )
+
+
+def _risk_contribution(value: object) -> RiskContributionResponse:
+    factor = _stored_object(value, "risk factor")
+    return RiskContributionResponse(
+        name=_stored_text(
+            _stored_required(factor, "name", "risk factor"),
+            "risk factor name",
+        ),
+        raw_value=cast(
+            JsonValue,
+            _stored_required(factor, "raw", "risk factor"),
+        ),
+        normalized_value=_stored_number(
+            _stored_required(factor, "normalized_value", "risk factor"),
+            "normalized risk value",
+        ),
+        weight=_stored_number(
+            _stored_required(factor, "weight", "risk factor"),
+            "risk weight",
+        ),
+        contribution=_stored_number(
+            _stored_required(factor, "contribution", "risk factor"),
+            "risk contribution",
+        ),
+    )
+
+
+def _stored_resources(value: object) -> dict[str, bool]:
+    resources: dict[str, bool] = {}
+    for raw_resource in _stored_sequence(value, "resources"):
+        resource = _stored_object(raw_resource, "resource")
+        resource_id = _stored_text(
+            _stored_required(resource, "resource_id", "resource"),
+            "resource ID",
+        )
+        available = _stored_required(resource, "available", "resource")
+        if resource_id in resources or not isinstance(available, bool):
+            raise ValueError("stored resources are invalid")
+        resources[resource_id] = available
+    return resources
+
+
+def _stored_demands(value: object) -> dict[str, float]:
+    demands: dict[str, float] = {}
+    for raw_demand in _stored_sequence(value, "demands"):
+        demand = _stored_object(raw_demand, "demand")
+        destination_id = _stored_text(
+            _stored_required(demand, "destination_id", "demand"),
+            "destination ID",
+        )
+        if destination_id in demands:
+            raise ValueError("stored demands are duplicated")
+        demands[destination_id] = _stored_nonnegative_number(
+            _stored_required(demand, "weighted_risk", "demand"),
+            "weighted risk",
+        )
+    return demands
+
+
+def _stored_object(value: object, field: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
+        raise ValueError(f"stored {field} must be an object")
+    return value
+
+
+def _stored_sequence(value: object, field: str) -> Sequence[object]:
+    if not isinstance(value, list | tuple):
+        raise ValueError(f"stored {field} must be an array")
+    return value
+
+
+def _stored_required(
+    value: Mapping[str, object],
+    key: str,
+    field: str,
+) -> object:
+    if key not in value:
+        raise ValueError(f"stored {field} is missing {key}")
+    return value[key]
+
+
+def _stored_text(value: object, field: str) -> str:
+    if not isinstance(value, str) or not value.strip() or value != value.strip():
+        raise ValueError(f"stored {field} must be normalized text")
+    return value
+
+
+def _stored_number(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"stored {field} must be a finite number")
+    parsed = float(value)
+    if not isfinite(parsed):
+        raise ValueError(f"stored {field} must be a finite number")
+    return parsed
+
+
+def _stored_nonnegative_number(value: object, field: str) -> float:
+    parsed = _stored_number(value, field)
+    if parsed < 0:
+        raise ValueError(f"stored {field} must be nonnegative")
+    return parsed
 
 
 def recommendation_assignment(

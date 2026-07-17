@@ -11,6 +11,7 @@ from shutil import copyfile
 import networkx as nx
 import pytest
 
+from wildfireops.geospatial import road_graph as road_graph_module
 from wildfireops.geospatial.road_graph import (
     RoadGraph,
     RoadGraphBuildError,
@@ -111,6 +112,72 @@ def test_literal_toy_edges_without_distance_default_to_zero_meters() -> None:
 
     assert result.status is RouteStatus.REACHABLE
     assert result.distance_meters == 0.0
+
+
+def test_road_edge_catalog_is_stable_geographic_and_read_only() -> None:
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", x=-121.7, y=39.7)
+    graph.add_node("B", x=-121.6, y=39.8)
+    graph.add_nodes_from(("missing-origin", "missing-destination"))
+    graph.add_edge(
+        "A",
+        "B",
+        edge_id="z-shaped",
+        name="  Ridge Road  ",
+        geometry="LINESTRING (-121.7 39.7, -121.65 39.76, -121.6 39.8)",
+        travel_minutes=4.5,
+        distance_meters=450.0,
+    )
+    graph.add_edge(
+        "B",
+        "A",
+        edge_id="a-fallback",
+        name="   ",
+        travel_minutes=5.0,
+        distance_meters=500.0,
+    )
+    graph.add_edge(
+        "missing-origin",
+        "missing-destination",
+        edge_id="m-unavailable",
+        travel_minutes=7.0,
+        distance_meters=700.0,
+    )
+    roads = RoadGraph.from_graph(graph)
+    version = roads.graph_version
+    route = compute_route(roads, "A", "B", ())
+
+    assert roads.road_edges == (
+        road_graph_module.RoadEdge(
+            edge_id="a-fallback",
+            label="a-fallback",
+            geometry=((-121.6, 39.8), (-121.7, 39.7)),
+            travel_minutes=5.0,
+            distance_meters=500.0,
+        ),
+        road_graph_module.RoadEdge(
+            edge_id="m-unavailable",
+            label="m-unavailable",
+            geometry=None,
+            travel_minutes=7.0,
+            distance_meters=700.0,
+        ),
+        road_graph_module.RoadEdge(
+            edge_id="z-shaped",
+            label="Ridge Road",
+            geometry=(
+                (-121.7, 39.7),
+                (-121.65, 39.76),
+                (-121.6, 39.8),
+            ),
+            travel_minutes=4.5,
+            distance_meters=450.0,
+        ),
+    )
+    with pytest.raises(FrozenInstanceError):
+        setattr(roads.road_edges[0], "label", "Changed")
+    assert roads.graph_version == version
+    assert compute_route(roads, "A", "B", ()) == route
 
 
 def test_parallel_ties_and_zero_cost_cycles_use_deterministic_hop_edge_order() -> None:
