@@ -489,7 +489,7 @@ export function ScenarioPlanningPanel({
             )}
           />
           <DecisionDialog
-            key={lastSuccessful.recommendation.id}
+            key={`decision:${lastSuccessful.recommendation.id}`}
             recommendation={lastSuccessful.recommendation}
             freshness={sessionStale ? "stale" : "current"}
             planningDisabled={planningDisabled}
@@ -498,7 +498,7 @@ export function ScenarioPlanningPanel({
             onStale={() => setStaleLatched(true)}
           />
           <AuditDrawer
-            key={lastSuccessful.recommendation.id}
+            key={`audit:${lastSuccessful.recommendation.id}`}
             recommendationId={lastSuccessful.recommendation.id}
           />
         </>

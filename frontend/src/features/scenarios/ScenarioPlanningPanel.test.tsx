@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { incidentDetailSchema } from "../../api/types";
 import { queryKeys } from "../../api/hooks";
@@ -75,6 +75,8 @@ function installSuccessfulCommands(calls: RecordedCommand[]) {
 }
 
 describe("ScenarioPlanningPanel", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it("discovers the default graph and bounded road catalog without posting on mount", async () => {
     renderPanel();
 
@@ -441,6 +443,43 @@ describe("ScenarioPlanningPanel", () => {
       maxResponseMinutes: 30,
       maxSolverSeconds: 2,
     });
+  });
+
+  it("isolates a pending old decision when a new recommendation replaces its sibling workspace", async () => {
+    const calls: RecordedCommand[] = [];
+    installSuccessfulCommands(calls);
+    const decisionGate = deferred<void>();
+    let decisionAttempts = 0;
+    server.use(
+      http.post("/api/recommendations/:recommendationId/decisions", async () => {
+        decisionAttempts += 1;
+        await decisionGate.promise;
+        return HttpResponse.json(
+          { error: { code: "recommendation_stale", message: "hidden", details: {} } },
+          { status: 409 },
+        );
+      }),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    renderPanel();
+    await bootstrapBaseline(user);
+
+    await user.click(screen.getByRole("button", { name: "Approve recommendation" }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    await user.click(screen.getByRole("button", { name: "Submit approve decision" }));
+    await waitFor(() => expect(decisionAttempts).toBe(1));
+    await user.click(screen.getByRole("checkbox", { name: /Alpha Road/ }));
+    await user.click(screen.getByRole("button", { name: "Save scenario version" }));
+    await user.click(await screen.findByRole("button", { name: "Generate recommendation for version 2" }));
+    await screen.findByText("Current scenario version 2");
+
+    await release(decisionGate);
+
+    expect(screen.queryByRole("alert", { name: "Stale planning session" })).not.toBeInTheDocument();
+    expect(screen.getByText("Recommendation freshness: Current")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve recommendation" })).toBeEnabled();
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key");
   });
 
   it("disables the editor without a saving label while recommendation generation is pending", async () => {

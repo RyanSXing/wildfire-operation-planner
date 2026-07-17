@@ -89,7 +89,7 @@ function AuditDetail({ eventId, query }: { eventId: string; query: ReturnType<ty
       <Provenance value={[
         ["Algorithms", nonemptyObject(event.algorithms)],
         ["Staleness token", stringField(inputs, "stalenessToken")],
-        ["Proposed data", nonemptyObject(event.beforeState)],
+        ["Proposed assignments", pairArrayField(event.beforeState, "proposedPairs")],
       ]} />
       <h6>Operator-entered decision</h6>
       <Provenance value={[
@@ -97,7 +97,7 @@ function AuditDetail({ eventId, query }: { eventId: string; query: ReturnType<ty
         ["Action", stringField(after, "action")],
         ["Note", stringField(after, "note")],
         ["Decision ID", stringField(after, "decisionId")],
-        ["Final assignments", arrayField(after, "finalPairs")],
+        ["Final assignments", pairArrayField(after, "finalPairs")],
       ]} />
       <details>
         <summary>Complete audit JSON</summary>
@@ -136,9 +136,15 @@ function stringField(object: JsonObject, key: string): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-function arrayField(object: JsonObject, key: string): JsonValue[] | undefined {
+function pairArrayField(object: JsonObject, key: string): JsonValue[] | undefined {
   const value = object[key];
-  return Array.isArray(value) ? value : undefined;
+  return Array.isArray(value) && value.every((pair) =>
+    pair !== null &&
+    typeof pair === "object" &&
+    !Array.isArray(pair) &&
+    stringField(pair, "resourceId") !== undefined &&
+    stringField(pair, "destinationId") !== undefined
+  ) ? value : undefined;
 }
 
 function nonemptyObject(value: JsonObject): JsonObject | undefined {
