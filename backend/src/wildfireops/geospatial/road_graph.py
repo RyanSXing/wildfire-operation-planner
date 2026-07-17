@@ -400,7 +400,16 @@ def _validated_multidigraph(graph: nx.Graph) -> nx.MultiDiGraph:
     if not graph.is_directed():
         raise RoadGraphInvalid("road graph must be directed")
     validated: nx.MultiDiGraph = nx.MultiDiGraph()
-    validated.add_nodes_from(graph.nodes(data=True))
+    for node, raw_data in graph.nodes(data=True):
+        data = dict(raw_data)
+        for coordinate in ("x", "y"):
+            value = data.get(coordinate)
+            if isinstance(value, str):
+                try:
+                    data[coordinate] = float(value)
+                except ValueError:
+                    pass
+        validated.add_node(node, **data)
     edge_ids: set[str] = set()
     edges = (
         graph.edges(keys=True, data=True)  # type: ignore[call-overload]

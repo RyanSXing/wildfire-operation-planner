@@ -7,7 +7,7 @@ from wildfireops.config import Settings
 from wildfireops.domain.observations import NormalizedObservation, WeatherObservation
 from wildfireops.geospatial.clustering import ClusteringConfig, cluster_detections
 from wildfireops.geospatial.exposure import ExposureConfig
-from wildfireops.geospatial.road_graph import RoadGraph
+from wildfireops.geospatial.road_graph import RoadGraph, nearest_road_node
 from wildfireops.replay.loader import ReplayLoader
 
 
@@ -92,3 +92,5 @@ def test_committed_park_fire_package_is_complete() -> None:
     assert loader.manifest.road_graph is not None
     graph = RoadGraph.load(package / loader.manifest.road_graph.filename)
     assert graph.graph_version == loader.manifest.road_graph.graph_version
+    longitude, latitude = loader.static_data.assets[0].geometry_geojson["coordinates"]
+    assert nearest_road_node(graph, longitude, latitude) in graph._graph

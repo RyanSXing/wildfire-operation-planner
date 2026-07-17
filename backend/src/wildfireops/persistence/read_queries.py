@@ -561,7 +561,7 @@ def _source_policy(source_name: str, settings: Settings) -> _SourcePolicy | None
             poll_interval_seconds=settings.firms_poll_interval_seconds,
             stale_after_seconds=settings.risk_fire_freshness_seconds,
         )
-    if normalized in {"nws", "noaa", "noaa_nws"}:
+    if normalized in {"nws", "noaa", "noaa_nws", "noaa_ncei"}:
         return _SourcePolicy(
             poll_interval_seconds=settings.nws_poll_interval_seconds,
             stale_after_seconds=settings.risk_weather_freshness_seconds,
