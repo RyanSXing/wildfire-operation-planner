@@ -61,7 +61,10 @@ async def create_scenario(
     incident_id: str,
     body: ScenarioCreateRequest,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
-    service: Annotated[ScenarioService, Depends(get_scenario_service)],
+    service: Annotated[
+        ScenarioService,
+        Depends(get_scenario_service, scope="function"),
+    ],
 ) -> ScenarioVersionResponse:
     try:
         stored = await service.create(
@@ -87,7 +90,10 @@ async def create_scenario_version(
     scenario_id: str,
     body: ScenarioVersionCreateRequest,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
-    service: Annotated[ScenarioService, Depends(get_scenario_service)],
+    service: Annotated[
+        ScenarioService,
+        Depends(get_scenario_service, scope="function"),
+    ],
 ) -> ScenarioVersionResponse:
     try:
         stored = await service.add_version(
@@ -137,7 +143,7 @@ async def generate_recommendation(
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
     service: Annotated[
         RecommendationService,
-        Depends(get_recommendation_service),
+        Depends(get_recommendation_service, scope="function"),
     ],
 ) -> RecommendationResponse:
     try:

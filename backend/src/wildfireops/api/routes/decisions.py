@@ -26,7 +26,10 @@ async def decide_recommendation(
     recommendation_id: str,
     body: DecisionCreateRequest,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
-    service: Annotated[DecisionCommandService, Depends(get_decision_service)],
+    service: Annotated[
+        DecisionCommandService,
+        Depends(get_decision_service, scope="function"),
+    ],
 ) -> DecisionResponse:
     try:
         stored = await service.decide(
