@@ -43,6 +43,19 @@ This redesign does not include:
 
 If temporal replay remains unavailable, the interface continues to explain that a usable range requires at least two time-ordered snapshots. Replay repair is a separate project.
 
+### 3.1 Relationship to unfinished original work
+
+Excluding work from this redesign does not mark it complete or remove it from the WildfireOps roadmap. The original specification still has these open items:
+
+- the Park Fire package does not produce a usable multi-snapshot temporal replay;
+- the existing Playwright demonstration predates the collapsed evidence workflow and currently fails;
+- dedicated degraded-mode tests and repeatable performance benchmarks are absent;
+- CI, the production image, deployment configuration, public deployment, screenshots, architecture documentation, benchmark report, and demo video are absent;
+- the top-level README remains a minimal local-startup document; and
+- the completed basemap and first-time-workflow changes are still uncommitted and unmerged.
+
+These items are tracked by the sequencing and completion gates in Section 17. The map-first redesign cannot be described as portfolio-ready merely because its own interface acceptance tests pass.
+
 ## 4. Experience principles
 
 ### 4.1 Map first
@@ -400,7 +413,22 @@ The redesign is complete when:
 - the approved browser workflow passes at 1280×720 and 1024×768; and
 - existing incident, scenario, recommendation, decision, audit, basemap-fallback, and replay-unavailable behavior remains covered.
 
-## 17. Approved visual references
+## 17. Delivery sequencing and project completion gates
+
+The implementation roadmap must preserve these boundaries:
+
+1. **Land the current baseline:** commit, review, and merge the already verified basemap and first-time-workflow changes before starting the command-workspace redesign. The new design must be based on that merged behavior rather than silently absorbing unrelated uncommitted work.
+2. **Restore missing product proof:** repair temporal replay so the Park Fire package exposes at least two ordered snapshots; add the dedicated degraded-mode and performance suites; and record measured results.
+3. **Implement the map-first redesign:** build the command workspace and scenario extensions in this specification. Replace the stale Playwright journey with the browser acceptance paths in Section 15.4 instead of patching it twice against an intermediate layout.
+4. **Finish the portfolio release:** add CI, the production Docker image, deployment configuration, public deployment, README expansion, diagrams, screenshots, benchmark report, and demo video only after product behavior is stable. External deployment and video publication still require explicit user authorization.
+
+Track 1 is a prerequisite for every new track. After it lands, Tracks 2 and 3 may proceed independently. Track 4 begins only after the product behavior and proof from both are stable.
+
+The first implementation plan written from this specification covers Track 3 and identifies Track 1 as its baseline prerequisite. Temporal replay/proof and portfolio release remain separate implementation plans because they change different subsystems and have independent acceptance criteria.
+
+WildfireOps is not complete under the original specification until all four tracks are merged, the replacement Playwright journey passes, performance results are measured, and the public demonstration is verified.
+
+## 18. Approved visual references
 
 The following companion artifacts define the intended information hierarchy and interaction direction:
 
