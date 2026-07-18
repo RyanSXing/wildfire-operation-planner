@@ -134,3 +134,45 @@ async def test_source_status_reports_retry_freshness_counts_and_safe_error_codes
     }
     assert "secret-value" not in response.text
     assert "api.weather.gov" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_source_status_uses_weather_policy_for_replay_noaa_ncei(
+    db_session: AsyncSession,
+) -> None:
+    observed_at = _REFERENCE - timedelta(minutes=30)
+    db_session.add(
+        SourceStatusModel(
+            source_name="noaa_ncei",
+            outcome="success",
+            last_attempted_at=observed_at,
+            last_success_at=observed_at,
+            accepted_count=1,
+            deduplicated_count=0,
+            quarantined_count=0,
+            error_message=None,
+        )
+    )
+    await db_session.flush()
+
+    app = _test_app(db_session)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get("/api/sources/status")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [
+        {
+            "sourceName": "noaa_ncei",
+            "lastAttemptedAt": "2024-07-24T18:00:00Z",
+            "lastSuccessAt": "2024-07-24T18:00:00Z",
+            "nextRetryAt": "2024-07-24T18:05:00Z",
+            "freshness": "fresh",
+            "acceptedCount": 1,
+            "deduplicatedCount": 0,
+            "quarantinedCount": 0,
+            "lastErrorCode": None,
+        }
+    ]

@@ -61,11 +61,13 @@ export function RecommendationPanel({
                 <dt>Resource</dt>
                 <dd>{assignment.resourceId}</dd>
                 <dt>Destination</dt>
-                <dd>{assignment.destinationId}</dd>
+                <dd aria-label="Assignment destination ID">
+                  {assignment.destinationId}
+                </dd>
                 <dt>Route status</dt>
                 <dd>{assignment.route.status}</dd>
                 <dt>Edge IDs</dt>
-                <dd>
+                <dd aria-label="Route edge IDs">
                   {assignment.route.edgeIds.length > 0
                     ? assignment.route.edgeIds.join(", ")
                     : "None"}

@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+
+REPLAY_PROJECT="wildfireops-replay-preview"
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+compose() {
+  docker compose -p "$REPLAY_PROJECT" \
+    -f "$ROOT/compose.yaml" \
+    -f "$ROOT/compose.replay.yaml" \
+    "$@"
+}
+
+# Reset only the dedicated replay namespace, including any accidentally started worker.
+compose down --volumes --remove-orphans
+
+python3 - 8000 5173 <<'PY'
+import socket
+import sys
+import time
+
+deadline = time.monotonic() + 10
+while True:
+    occupied = []
+    for value in sys.argv[1:]:
+        port = int(value)
+        listeners = []
+        for family, address in (
+            (socket.AF_INET, ("127.0.0.1", port)),
+            (socket.AF_INET6, ("::1", port)),
+        ):
+            with socket.socket(family) as probe:
+                probe.settimeout(0.25)
+                listeners.append(probe.connect_ex(address) == 0)
+        if any(listeners):
+            occupied.append(str(port))
+    if not occupied:
+        break
+    if time.monotonic() >= deadline:
+        raise SystemExit(
+            "replay preview stopped: host port(s) already occupied: "
+            + ", ".join(occupied)
+            + "; stop the owning process and retry"
+        )
+    time.sleep(0.25)
+PY
+
+compose up -d --force-recreate db api frontend

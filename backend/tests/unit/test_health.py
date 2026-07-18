@@ -1,10 +1,16 @@
 import asyncio
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from wildfireops.api.event_bus import EventBus
+from wildfireops.config import Settings
 from wildfireops.main import create_app
+from wildfireops.replay.loader import ReplayLoader
+
+
+PARK_FIRE_PACKAGE = Path(__file__).parents[3] / "data/replay/park-fire"
 
 
 def test_health_reports_service_name() -> None:
@@ -13,6 +19,21 @@ def test_health_reports_service_name() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "wildfireops-api"}
+
+
+def test_replay_startup_uses_manifest_clock_and_graph() -> None:
+    app = create_app(Settings(replay_package=PARK_FIRE_PACKAGE))
+    loader = ReplayLoader(PARK_FIRE_PACKAGE)
+
+    assert app.state.clock() == loader.manifest.end_at
+    assert loader.manifest.road_graph is not None
+    assert tuple(app.state.graphs) == (loader.manifest.road_graph.graph_version,)
+
+
+def test_live_startup_keeps_wall_clock_and_no_graphs() -> None:
+    app = create_app(Settings(replay_package=None))
+
+    assert app.state.graphs == {}
 
 
 @pytest.mark.asyncio

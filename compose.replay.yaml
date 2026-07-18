@@ -1,0 +1,14 @@
+services:
+  db:
+    ports: !reset []
+
+  api:
+    command: >-
+      sh -c "uv sync --frozen &&
+      uv run alembic upgrade head &&
+      uv run python -m wildfireops.replay.seed /data/replay/park-fire &&
+      uv run uvicorn wildfireops.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      WILDFIREOPS_REPLAY_PACKAGE: /data/replay/park-fire
+    volumes:
+      - ./data/replay/park-fire:/data/replay/park-fire:ro

@@ -1,5 +1,6 @@
 from functools import lru_cache
 from math import isfinite
+from pathlib import Path
 
 from pydantic import (
     AnyHttpUrl,
@@ -21,6 +22,7 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://wildfireops:wildfireops@localhost:5432/wildfireops"
     )
+    replay_package: Path | None = None
     firms_map_key: SecretStr | None = None
     firms_area_url: str = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
     firms_bbox: str = "-122.40,39.20,-120.30,41.00"
