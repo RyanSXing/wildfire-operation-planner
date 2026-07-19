@@ -41,6 +41,7 @@ from wildfireops.replay.seed import (
     ReplaySeedConflict,
     ReplaySeedError,
     _package_digest,
+    _name_highest_priority_snapshot,
     _seed_request_hash,
     seed_replay_package,
 )
@@ -411,23 +412,79 @@ async def test_refresh_after_seed_reuses_named_snapshot(
 
 
 @pytest.mark.asyncio
+async def test_name_highest_priority_snapshot_uses_detection_identities_not_incident_id(
+    isolated_engine: AsyncEngine,
+) -> None:
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    cluster_a_id = UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    cluster_b_id = UUID("00000000-0000-0000-0000-000000000000")
+    point = WKTElement("POINT(-121.5 39.8)", srid=4326)
+    observed_at = datetime(2024, 7, 24, 18, tzinfo=UTC)
+
+    async with factory.begin() as session:
+        session.add_all(
+            [
+                WildfireIncidentModel(
+                    id=cluster_a_id,
+                    risk_score=1.0,
+                    geometry=point,
+                    first_observed_at=observed_at,
+                    last_observed_at=observed_at,
+                ),
+                WildfireIncidentModel(
+                    id=cluster_b_id,
+                    risk_score=1.0,
+                    geometry=point,
+                    first_observed_at=observed_at,
+                    last_observed_at=observed_at,
+                ),
+            ]
+        )
+        await session.flush()
+        snapshots = [
+            IncidentSnapshotModel(
+                id=UUID("11111111-1111-1111-1111-111111111111"),
+                incident_id=cluster_a_id,
+                snapshot_version=1,
+                source_versions={},
+                incident_state={"detection_identities": ["nasa_firms:fire-a"]},
+                asset_state=[],
+                resource_state=[],
+            ),
+            IncidentSnapshotModel(
+                id=UUID("22222222-2222-2222-2222-222222222222"),
+                incident_id=cluster_b_id,
+                snapshot_version=1,
+                source_versions={},
+                incident_state={"detection_identities": ["nasa_firms:fire-b"]},
+                asset_state=[],
+                resource_state=[],
+            ),
+        ]
+        session.add_all(snapshots)
+        await _name_highest_priority_snapshot(
+            session,
+            [snapshot.id for snapshot in snapshots],
+            "Park Fire",
+        )
+
+    async with factory() as session:
+        named = await session.scalar(
+            select(IncidentSnapshotModel).where(
+                IncidentSnapshotModel.incident_state["name"].astext == "Park Fire"
+            )
+        )
+
+    assert cluster_b_id < cluster_a_id
+    assert named is not None
+    assert named.incident_id == cluster_a_id
+
+
+@pytest.mark.asyncio
 async def test_equal_priority_clusters_name_the_same_detection_cluster_on_fresh_seeds(
     isolated_engine: AsyncEngine,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    incident_ids = iter(
-        (
-            UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),  # cluster A
-            UUID("00000000-0000-0000-0000-000000000000"),  # cluster B; sorts first
-        )
-        * 2
-    )
-    monkeypatch.setattr(
-        WildfireIncidentModel.id.default,
-        "arg",
-        lambda _context: next(incident_ids),
-    )
     fire_records = tuple(
         {
             "observation_type": "fire_detection",
