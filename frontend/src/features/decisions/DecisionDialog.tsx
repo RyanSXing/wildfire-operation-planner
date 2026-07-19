@@ -363,7 +363,7 @@ function DecisionResult({
       </dl>
       <ul aria-label="Final assignments">
         {decision.assignments.map(({ resourceId, destinationId }) => (
-          <li key={`${resourceId}:${destinationId}`}>
+          <li key={resourceId}>
             {recordedLabel(resources, resourceId, "Unavailable resource")} → {recordedLabel(destinations, destinationId, "Unavailable destination")}
           </li>
         ))}

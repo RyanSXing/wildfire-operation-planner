@@ -110,6 +110,26 @@ describe("DecisionDialog", () => {
     expect(finalAssignments).not.toHaveTextContent("retired-asset");
   });
 
+  it("renders colon-containing final assignments without duplicate key warnings", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(apiClient, "createDecision").mockResolvedValue({
+      ...decision,
+      assignments: [
+        { ...decision.assignments[0], resourceId: "a:b", destinationId: "c" },
+        { ...decision.assignments[0], resourceId: "a", destinationId: "b:c" },
+      ],
+    });
+    const user = userEvent.setup();
+    renderDialog({ resources: ["a:b", "a"], destinations: ["c", "b:c"] });
+
+    await user.click(screen.getByRole("button", { name: "Approve recommendation" }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    await user.click(screen.getByRole("button", { name: "Submit approve decision" }));
+
+    await screen.findByRole("list", { name: "Final assignments" });
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("unique key");
+  });
+
   it("sends an exact trimmed reject request without edited assignments", async () => {
     const createDecision = vi.spyOn(apiClient, "createDecision").mockResolvedValue({
       ...decision,
