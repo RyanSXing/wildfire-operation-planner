@@ -78,7 +78,7 @@ describe("RecommendationPanel", () => {
 
     await user.click(screen.getByText("Technical recommendation evidence"));
 
-    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("unique key");
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("Encountered two children with the same key");
     consoleError.mockRestore();
   });
 

@@ -127,7 +127,7 @@ describe("DecisionDialog", () => {
     await user.click(screen.getByRole("button", { name: "Submit approve decision" }));
 
     await screen.findByRole("list", { name: "Final assignments" });
-    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("unique key");
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("Encountered two children with the same key");
   });
 
   it("sends an exact trimmed reject request without edited assignments", async () => {
