@@ -1,6 +1,6 @@
 # WildfireOps Map-First Command Workspace Design
 
-**Status:** Approved direction; awaiting written-spec review
+**Status:** Approved for implementation planning
 
 **Date:** 2026-07-18
 
@@ -185,6 +185,8 @@ Guidance is contextual rather than a forced wizard. Short mission prompts appear
 4. review the recommendation.
 
 Each prompt disappears after its action succeeds. Completion derives from existing selected-incident, draft, recommendation, and decision state. Guidance does not create a separate workflow state machine, block expert use, or prevent the operator from dismissing it.
+
+Replay is conditional guidance, not a requirement of this redesign. While the package has fewer than two ordered snapshots, the map control explains why replay is unavailable and the mission prompts continue directly from Observe to Plan. Once a usable timeline exists, Replay appears as the second prompt between Observe and Plan and completes from the existing replay position/playback state; this does not move replay repair into this redesign's scope.
 
 ## 8. Frontend architecture
 
