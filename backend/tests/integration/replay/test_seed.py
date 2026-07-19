@@ -469,15 +469,19 @@ async def test_name_highest_priority_snapshot_uses_detection_identities_not_inci
         )
 
     async with factory() as session:
-        named = await session.scalar(
-            select(IncidentSnapshotModel).where(
-                IncidentSnapshotModel.incident_state["name"].astext == "Park Fire"
-            )
+        named_incident_ids = set(
+            (
+                await session.scalars(
+                    select(IncidentSnapshotModel.incident_id).where(
+                        IncidentSnapshotModel.incident_state["name"].astext
+                        == "Park Fire"
+                    )
+                )
+            ).all()
         )
 
     assert cluster_b_id < cluster_a_id
-    assert named is not None
-    assert named.incident_id == cluster_a_id
+    assert named_incident_ids == {cluster_a_id}
 
 
 @pytest.mark.asyncio
