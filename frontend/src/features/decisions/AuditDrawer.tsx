@@ -45,15 +45,20 @@ function AuditRow({ event, onView }: { event: AuditEvent; onView: () => void }) 
         <dt>Actor</dt><dd>{event.actorId}</dd>
         <dt>Event type</dt><dd>{event.eventType}</dd>
         <dt>Occurred</dt><dd><time dateTime={event.occurredAt}>{event.occurredAt}</time></dd>
-        <dt>Scenario version</dt><dd>{event.scenarioVersionId}</dd>
-        <dt>Recommendation</dt><dd>{event.recommendationId}</dd>
-        <dt>Incident snapshot</dt><dd>{event.incidentSnapshotId}</dd>
-        <dt>Source versions</dt><dd><JsonText value={objectField(event.inputs, "sourceVersions")} /></dd>
-        <dt>Algorithms</dt><dd><JsonText value={event.algorithms} /></dd>
-        <dt>Before state</dt><dd><JsonText value={event.beforeState} /></dd>
-        <dt>After state</dt><dd><JsonText value={event.afterState} /></dd>
         <dt>Note</dt><dd>{event.note || "Not recorded"}</dd>
       </dl>
+      <details>
+        <summary>Audit event evidence</summary>
+        <dl>
+          <dt>Scenario version</dt><dd>{event.scenarioVersionId}</dd>
+          <dt>Recommendation</dt><dd>{event.recommendationId}</dd>
+          <dt>Incident snapshot</dt><dd>{event.incidentSnapshotId}</dd>
+          <dt>Source versions</dt><dd><JsonText value={objectField(event.inputs, "sourceVersions")} /></dd>
+          <dt>Algorithms</dt><dd><JsonText value={event.algorithms} /></dd>
+          <dt>Before state</dt><dd><JsonText value={event.beforeState} /></dd>
+          <dt>After state</dt><dd><JsonText value={event.afterState} /></dd>
+        </dl>
+      </details>
       <button type="button" onClick={onView}>View details for {event.id}</button>
     </article>
   );

@@ -53,6 +53,8 @@ describe("AuditDrawer", () => {
       expect.stringContaining("operator-2"),
     ]);
     expect(screen.getByText("decision.recorded")).toBeVisible();
+    expect(screen.getAllByText(/allocation-v1/)[0]).not.toBeVisible();
+    await user.click(screen.getAllByText("Audit event evidence")[0]);
     expect(screen.getAllByText("version-1")[0]).toBeVisible();
     expect(screen.getAllByText("recommendation-1")[0]).toBeVisible();
     expect(screen.getAllByText("snapshot-1")[0]).toBeVisible();
@@ -89,10 +91,12 @@ describe("AuditDrawer", () => {
     expect(screen.getByText("fresh-1")).toBeVisible();
     expect(screen.getByText("decision-1")).toBeVisible();
     expect(screen.getByText("Final assignments")).toBeVisible();
-    expect(screen.getAllByText(/"finalPairs"/)[0]).toBeVisible();
-    expect(screen.getByText(/"sourceVersions"/)).toBeInTheDocument();
-    expect(screen.getAllByText(/"proposedPairs"/)[0]).toBeInTheDocument();
-    expect(screen.getAllByText(/"decisionId"/)[0]).toBeInTheDocument();
+    const provenance = screen.getByLabelText("Audit provenance");
+    expect(provenance).toHaveTextContent("firms-v1");
+    expect(provenance).toHaveTextContent("engine-1");
+    expect(provenance).toHaveTextContent("asset-1");
+    expect(provenance).toHaveTextContent("approve");
+    expect(screen.getByText("Complete audit JSON").closest("details")).not.toHaveAttribute("open");
   });
 
   it("renders safe list states and clears selection when recommendation scope changes", async () => {
