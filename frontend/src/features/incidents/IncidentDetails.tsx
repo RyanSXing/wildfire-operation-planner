@@ -28,6 +28,8 @@ export function IncidentDetails({
   riskContext,
   children,
 }: IncidentDetailsProps) {
+  const topDriver = highestContribution(visualizedRisk);
+
   return (
     <article className="decision-workspace" aria-labelledby="decision-workspace-heading">
       <header className="decision-workspace__header">
@@ -44,7 +46,14 @@ export function IncidentDetails({
           <dd>
             <FreshnessBadge freshness={incident.freshness} />
           </dd>
+          <dt>Priority score</dt>
+          <dd>{formatNumber(visualizedRisk.score)}</dd>
         </dl>
+        <p className="decision-workspace__driver-summary">
+          {topDriver
+            ? `Top driver: ${formatLabel(topDriver.name)} contributed ${formatNumber(topDriver.contribution)} points.`
+            : "No priority drivers are available."}
+        </p>
         <div className="decision-workspace__timestamps">
           <time dateTime={incident.firstObservedAt}>
             First observed {formatUtc(incident.firstObservedAt)}
@@ -55,139 +64,162 @@ export function IncidentDetails({
         </div>
       </section>
 
-      <section className="decision-workspace__section" aria-label="Risk explanation">
-        <div className="decision-workspace__section-heading">
-          <h3>Risk explanation</h3>
-          <ContextLabel label={riskContext} />
-        </div>
-        <dl className="decision-workspace__metrics">
-          <dt>Score</dt>
-          <dd>{formatNumber(visualizedRisk.score)}</dd>
-          <dt>Algorithm</dt>
-          <dd>{visualizedRisk.algorithmVersion}</dd>
-        </dl>
+      {children}
 
-        {visualizedRisk.contributions.length === 0 ? (
-          <p className="decision-workspace__empty">
-            No risk factors are available.
-          </p>
-        ) : (
-          <ul className="risk-factor-list" aria-label="Risk factors">
-            {visualizedRisk.contributions.map((factor) => (
-              <li className="risk-factor" key={factor.name}>
-                <h4>{factor.name}</h4>
-                <p>Raw evidence</p>
-                <pre className="decision-workspace__evidence">
-                  {formatJson(factor.rawValue)}
-                </pre>
-                <dl className="risk-factor__metrics">
-                  <dt>Normalized value</dt>
-                  <dd>{formatNumber(factor.normalizedValue)}</dd>
-                  <dt>Weight</dt>
-                  <dd>{formatNumber(factor.weight)}</dd>
-                  <dt>Contribution</dt>
-                  <dd>{formatNumber(factor.contribution)}</dd>
-                </dl>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <section
-          className="decision-workspace__subsection"
-          aria-label="Detailed model configuration"
-        >
+      <details className="decision-workspace__section decision-workspace__disclosure">
+        <summary>
+          <span>Risk evidence</span>
+          <span>{pluralize(visualizedRisk.contributions.length, "factor")}</span>
+        </summary>
+        <section className="decision-workspace__disclosure-content" aria-label="Risk explanation">
           <div className="decision-workspace__section-heading">
-            <h4>Detailed model configuration</h4>
+            <h3>Risk explanation</h3>
+            <ContextLabel label={riskContext} />
+          </div>
+          <dl className="decision-workspace__metrics">
+            <dt>Priority score</dt>
+            <dd>{formatNumber(visualizedRisk.score)}</dd>
+            <dt>Algorithm</dt>
+            <dd>{visualizedRisk.algorithmVersion}</dd>
+          </dl>
+
+          {visualizedRisk.contributions.length === 0 ? (
+            <p className="decision-workspace__empty">
+              No risk factors are available.
+            </p>
+          ) : (
+            <ul className="risk-factor-list" aria-label="Risk factors">
+              {visualizedRisk.contributions.map((factor) => (
+                <li className="risk-factor" key={factor.name}>
+                  <h4>{factor.name}</h4>
+                  <dl className="risk-factor__metrics">
+                    <dt>Normalized value</dt>
+                    <dd>{formatNumber(factor.normalizedValue)}</dd>
+                    <dt>Weight</dt>
+                    <dd>{formatNumber(factor.weight)}</dd>
+                    <dt>Contribution</dt>
+                    <dd>{formatNumber(factor.contribution)}</dd>
+                  </dl>
+                  <details>
+                    <summary>Raw evidence</summary>
+                    <pre className="decision-workspace__evidence">
+                      {formatJson(factor.rawValue)}
+                    </pre>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <details className="decision-workspace__subsection">
+            <summary>Detailed model configuration</summary>
+            <div className="decision-workspace__section-heading">
+              <h4>Model configuration</h4>
+              <ContextLabel label="Current snapshot" />
+            </div>
+            <pre className="decision-workspace__evidence">
+              {formatJson(incident.risk.configuration)}
+            </pre>
+          </details>
+        </section>
+      </details>
+
+      <details className="decision-workspace__section decision-workspace__disclosure">
+        <summary>
+          <span>Source provenance</span>
+          <span>{detectionSummary(incident)}</span>
+        </summary>
+        <section className="decision-workspace__disclosure-content" aria-label="Source provenance">
+          <div className="decision-workspace__section-heading">
+            <h3>Detection provenance</h3>
             <ContextLabel label="Current snapshot" />
           </div>
-          <pre className="decision-workspace__evidence">
-            {formatJson(incident.risk.configuration)}
-          </pre>
+          <details>
+            <summary>Source versions</summary>
+            <pre className="decision-workspace__evidence">
+              {formatJson(incident.sourceVersions)}
+            </pre>
+          </details>
+          {incident.detections.length === 0 ? (
+            <p className="decision-workspace__empty">
+              No detection provenance is available.
+            </p>
+          ) : (
+            <ul className="provenance-list" aria-label="Detection provenance">
+              {incident.detections.map((detection) => (
+                <li
+                  className="provenance-list__item"
+                  key={`${detection.sourceName}:${detection.sourceRecordId}`}
+                >
+                  <h5>{sourceLabel(detection.sourceName)}</h5>
+                  <dl>
+                    <dt>Source record</dt>
+                    <dd>{detection.sourceRecordId}</dd>
+                    <dt>Observed</dt>
+                    <dd>
+                      <time dateTime={detection.observedAt}>
+                        Observed {formatUtc(detection.observedAt)}
+                      </time>
+                    </dd>
+                    <dt>Confidence</dt>
+                    <dd>{formatNumber(detection.confidence)}</dd>
+                    <dt>Intensity</dt>
+                    <dd>{formatOptionalNumber(detection.intensity)}</dd>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
-      </section>
+      </details>
 
-      <section className="decision-workspace__section" aria-label="Source provenance">
-        <div className="decision-workspace__section-heading">
-          <h3>Source provenance</h3>
-          <ContextLabel label="Current snapshot" />
-        </div>
-        <h4>Source versions</h4>
-        <pre className="decision-workspace__evidence">
-          {formatJson(incident.sourceVersions)}
-        </pre>
-        <h4>Detections</h4>
-        {incident.detections.length === 0 ? (
-          <p className="decision-workspace__empty">
-            No detection provenance is available.
-          </p>
-        ) : (
-          <ul className="provenance-list" aria-label="Detection provenance">
-            {incident.detections.map((detection) => (
-              <li
-                className="provenance-list__item"
-                key={`${detection.sourceName}:${detection.sourceRecordId}`}
-              >
-                <h5>{detection.sourceName}</h5>
-                <dl>
-                  <dt>Source record</dt>
-                  <dd>{detection.sourceRecordId}</dd>
-                  <dt>Observed</dt>
-                  <dd>
-                    <time dateTime={detection.observedAt}>
-                      Observed {formatUtc(detection.observedAt)}
-                    </time>
-                  </dd>
-                  <dt>Confidence</dt>
-                  <dd>{formatNumber(detection.confidence)}</dd>
-                  <dt>Intensity</dt>
-                  <dd>{formatOptionalNumber(detection.intensity)}</dd>
-                </dl>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <details className="decision-workspace__section decision-workspace__disclosure">
+        <summary>
+          <span>Exposed assets</span>
+          <span>{pluralize(incident.exposedAssets.length, "exposed asset")}</span>
+        </summary>
+        <section className="decision-workspace__disclosure-content" aria-label="Exposed assets">
+          <div className="decision-workspace__section-heading">
+            <h3>Exposed assets</h3>
+            <ContextLabel label="Current snapshot" />
+          </div>
+          {incident.exposedAssets.length === 0 ? (
+            <p className="decision-workspace__empty">
+              No exposed assets are available.
+            </p>
+          ) : (
+            <ul className="asset-list" aria-label="Exposed assets">
+              {incident.exposedAssets.map((asset) => (
+                <AssetItem asset={asset} key={asset.assetId} />
+              ))}
+            </ul>
+          )}
+        </section>
+      </details>
 
-      <section className="decision-workspace__section" aria-label="Exposed assets">
-        <div className="decision-workspace__section-heading">
-          <h3>Exposed assets</h3>
-          <ContextLabel label="Current snapshot" />
-        </div>
-        {incident.exposedAssets.length === 0 ? (
-          <p className="decision-workspace__empty">
-            No exposed assets are available.
-          </p>
-        ) : (
-          <ul className="asset-list" aria-label="Exposed assets">
-            {incident.exposedAssets.map((asset) => (
-              <AssetItem asset={asset} key={asset.assetId} />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section
-        className="decision-workspace__section"
-        aria-label="Simulated resources"
-      >
-        <div className="decision-workspace__section-heading">
-          <h3>Simulated resources</h3>
-          <ContextLabel label="Current snapshot" />
-        </div>
-        {incident.simulatedResources.length === 0 ? (
-          <p className="decision-workspace__empty">
-            No simulated resources are available.
-          </p>
-        ) : (
-          <ul className="resource-list" aria-label="Simulated resources">
-            {incident.simulatedResources.map((resource) => (
-              <ResourceItem resource={resource} key={resource.resourceId} />
-            ))}
-          </ul>
-        )}
-      </section>
-      {children}
+      <details className="decision-workspace__section decision-workspace__disclosure">
+        <summary>
+          <span>Simulated resources</span>
+          <span>{pluralize(incident.simulatedResources.length, "simulated resource")}</span>
+        </summary>
+        <section className="decision-workspace__disclosure-content" aria-label="Simulated resources">
+          <div className="decision-workspace__section-heading">
+            <h3>Simulated resources</h3>
+            <ContextLabel label="Current snapshot" />
+          </div>
+          {incident.simulatedResources.length === 0 ? (
+            <p className="decision-workspace__empty">
+              No simulated resources are available.
+            </p>
+          ) : (
+            <ul className="resource-list" aria-label="Simulated resources">
+              {incident.simulatedResources.map((resource) => (
+                <ResourceItem resource={resource} key={resource.resourceId} />
+              ))}
+            </ul>
+          )}
+        </section>
+      </details>
     </article>
   );
 }
@@ -263,4 +295,45 @@ function formatOptionalNumber(value: number | null): string {
 
 function formatUtc(timestamp: string): string {
   return `${new Date(timestamp).toISOString().slice(0, 19).replace("T", " ")} UTC`;
+}
+
+function highestContribution(risk: Risk): Risk["contributions"][number] | undefined {
+  return risk.contributions.reduce<Risk["contributions"][number] | undefined>(
+    (highest, factor) =>
+      !highest || factor.contribution > highest.contribution ? factor : highest,
+    undefined,
+  );
+}
+
+function formatLabel(value: string): string {
+  const words = value.replaceAll("_", " ").trim().toLowerCase();
+  return words ? `${words[0].toUpperCase()}${words.slice(1)}` : value;
+}
+
+function sourceLabel(sourceName: string): string {
+  return sourceName
+    .split("_")
+    .filter(Boolean)
+    .map((word) =>
+      ["firms", "nasa", "ncei", "noaa"].includes(word.toLowerCase())
+        ? word.toUpperCase()
+        : formatLabel(word),
+    )
+    .join(" ");
+}
+
+function detectionSummary(incident: IncidentDetail): string {
+  const count = incident.detections.length;
+  const sources = [...new Set(incident.detections.map(({ sourceName }) => sourceLabel(sourceName)))];
+  if (count === 0) {
+    return "No detections";
+  }
+  if (sources.length === 1) {
+    return `${count} ${sources[0]} ${count === 1 ? "detection" : "detections"}`;
+  }
+  return `${pluralize(count, "detection")} from ${sources.join(", ")}`;
+}
+
+function pluralize(count: number, label: string): string {
+  return `${count} ${label}${count === 1 ? "" : "s"}`;
 }

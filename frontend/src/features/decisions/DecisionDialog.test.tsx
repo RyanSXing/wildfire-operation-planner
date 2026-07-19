@@ -402,6 +402,10 @@ describe("DecisionDialog", () => {
     settle(decision);
 
     expect(await screen.findByText("Decision recorded")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Decision recorded" })).toHaveFocus();
+    expect(screen.getByRole("status", { name: "Decision recorded" })).toHaveTextContent(
+      "Decision recorded.",
+    );
     expect(screen.getByText("operator-1")).toBeVisible();
     expect(screen.getByText("Proceed")).toBeVisible();
     expect(screen.getByRole("button", { name: "Approve recommendation" })).toBeDisabled();

@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import type { Recommendation } from "../../api/types";
@@ -74,7 +75,8 @@ describe("RecommendationPanel", () => {
     ).toBeVisible();
   });
 
-  it("renders an actionable result with complete assignment evidence", () => {
+  it("renders an actionable result with complete assignment evidence", async () => {
+    const user = userEvent.setup();
     render(
       <RecommendationPanel
         recommendation={recommendation}
@@ -94,7 +96,7 @@ describe("RecommendationPanel", () => {
     expectDefinition(assignment, "Resource", "engine-1");
     expectDefinition(assignment, "Destination", "town-1");
     expectDefinition(assignment, "Route status", "reachable");
-    expectDefinition(assignment, "Edge IDs", "edge-2, edge-9");
+    expect(within(assignment).queryByText("edge-2, edge-9")).not.toBeInTheDocument();
     expectDefinition(assignment, "Distance", "1,250.5 m");
     expectDefinition(assignment, "Route travel", "8.25 min");
     expectDefinition(assignment, "Assignment travel", "8.25 min");
@@ -105,6 +107,12 @@ describe("RecommendationPanel", () => {
         screen.getByRole("list", { name: "Uncovered destinations" }),
       ).getByText("town-2"),
     ).toBeVisible();
+    await user.click(screen.getByText("Technical recommendation evidence"));
+    expectDefinition(
+      screen.getByRole("region", { name: "Assignment identifiers" }),
+      "Route edge IDs",
+      "edge-2, edge-9",
+    );
     expectDefinition(screen.getByRole("region", { name: "Solver evidence" }), "Runtime", "17 ms");
     expectDefinition(screen.getByRole("region", { name: "Solver evidence" }), "Travel cost", "8");
     expectDefinition(
@@ -117,9 +125,46 @@ describe("RecommendationPanel", () => {
     expectDefinition(screen.getByRole("region", { name: "Solver evidence" }), "Risk", "risk-v1");
     expectDefinition(screen.getByRole("region", { name: "Solver evidence" }), "Allocation", "allocation-v1");
     expectDefinition(screen.getByRole("region", { name: "Solver evidence" }), "Input", "input-hash");
+    await user.click(screen.getByText("Source versions"));
     expect(
       screen.getByText(/"observation_inputs": "snapshot-1"/),
     ).toBeVisible();
+  });
+
+  it("uses selected-incident labels on the operational recommendation surface", () => {
+    render(
+      <RecommendationPanel
+        recommendation={recommendation}
+        versionLabel="Current scenario version 2"
+        freshness="current"
+        resourceLabels={{ "engine-1": "Engine 12" }}
+        destinationLabels={{ "town-1": "Pine Junction", "town-2": "Forest Ranch" }}
+      />,
+    );
+
+    const result = screen.getByRole("region", { name: "Recommendation result" });
+    const assignment = within(
+      screen.getByRole("list", { name: "Recommendation assignments" }),
+    ).getByRole("listitem");
+    expect(assignment).toHaveTextContent("Engine 12");
+    expect(assignment).toHaveTextContent("Pine Junction");
+    expect(result).toHaveTextContent("Forest Ranch");
+    expect(assignment).not.toHaveTextContent("edge-2, edge-9");
+  });
+
+  it("focuses and announces a generated recommendation", () => {
+    render(
+      <RecommendationPanel
+        recommendation={recommendation}
+        versionLabel="Current scenario version 2"
+        freshness="current"
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Recommendation" })).toHaveFocus();
+    expect(screen.getByRole("status", { name: "Recommendation generated" })).toHaveTextContent(
+      "Recommendation generated.",
+    );
   });
 
   it.each(["FEASIBLE", "OPTIMAL"])(
@@ -213,7 +258,8 @@ describe("RecommendationPanel", () => {
     );
   });
 
-  it("renders only the valid known diagnostic when its sibling is malformed", () => {
+  it("renders only the valid known diagnostic when its sibling is malformed", async () => {
+    const user = userEvent.setup();
     render(
       <RecommendationPanel
         recommendation={{
@@ -228,6 +274,7 @@ describe("RecommendationPanel", () => {
       />,
     );
 
+    await user.click(screen.getByText("Technical recommendation evidence"));
     const diagnostics = screen.getByRole("region", {
       name: "Constraint diagnostics",
     });

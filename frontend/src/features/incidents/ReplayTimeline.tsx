@@ -76,7 +76,10 @@ export function ReplayTimeline({
         </>
       ) : (
         <>
-          <p className="replay-timeline__empty">Replay unavailable.</p>
+          <p className="replay-timeline__empty">
+            Replay requires at least two time-ordered snapshots; this incident does not
+            have a usable replay range.
+          </p>
           <div className="replay-timeline__endpoints">
             <span>Start unavailable</span>
             <span>End unavailable</span>

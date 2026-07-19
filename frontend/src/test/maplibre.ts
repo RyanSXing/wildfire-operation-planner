@@ -45,6 +45,7 @@ export class RecordedMap {
   readonly layers = new Map<string, RecordedLayerSpecification>();
   readonly layerVisibility = new Map<string, string>();
   readonly listeners = new Map<string, Set<Listener>>();
+  readonly setStyleCalls: unknown[] = [];
   removed = false;
   removeCalls = 0;
 
@@ -105,6 +106,11 @@ export class RecordedMap {
     if (property === "visibility" && typeof value === "string") {
       this.layerVisibility.set(id, value);
     }
+    return this;
+  }
+
+  setStyle(style: unknown): this {
+    this.setStyleCalls.push(style);
     return this;
   }
 

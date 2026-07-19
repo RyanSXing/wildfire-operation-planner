@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { ApiClientError } from "../../api/client";
@@ -14,9 +14,10 @@ export type DecisionDialogProps = {
   recommendation: Recommendation;
   freshness: "current" | "stale";
   planningDisabled: boolean;
-  resources: readonly string[];
-  destinations: readonly string[];
+  resources: readonly DecisionOptionInput[];
+  destinations: readonly DecisionOptionInput[];
   onStale?: () => void;
+  onDecisionRecorded?: () => void;
 };
 
 export function DecisionDialog({
@@ -26,6 +27,7 @@ export function DecisionDialog({
   resources,
   destinations,
   onStale,
+  onDecisionRecorded,
 }: DecisionDialogProps) {
   const createDecision = useCreateDecisionMutation();
   const queryClient = useQueryClient();
@@ -119,6 +121,7 @@ export function DecisionDialog({
       }
       setDecision(result);
       setAction(null);
+      onDecisionRecorded?.();
     } catch (error) {
       if (
         error instanceof ApiClientError &&
@@ -141,6 +144,7 @@ export function DecisionDialog({
       if (error instanceof ApiClientError && error.code === "recommendation_already_decided") {
         setAlreadyDecided(true);
         setAction(null);
+        onDecisionRecorded?.();
       }
     } finally {
       submitting.current = false;
@@ -202,8 +206,8 @@ export function DecisionDialog({
                         }}
                       >
                         <option value="">Select resource</option>
-                        {resourceOptions.map((resourceId) => (
-                          <option value={resourceId} key={resourceId}>{resourceId}</option>
+                        {resourceOptions.map((resource) => (
+                          <option value={resource.id} key={resource.id}>{resource.label}</option>
                         ))}
                       </select>
                     </label>
@@ -219,8 +223,8 @@ export function DecisionDialog({
                         }}
                       >
                         <option value="">Select destination</option>
-                        {destinationOptions.map((destinationId) => (
-                          <option value={destinationId} key={destinationId}>{destinationId}</option>
+                        {destinationOptions.map((destination) => (
+                          <option value={destination.id} key={destination.id}>{destination.label}</option>
                         ))}
                       </select>
                     </label>
@@ -254,8 +258,24 @@ function replace(
   return rows.map((row, current) => (current === index ? value : row));
 }
 
-function optionsFor(options: readonly string[], historical: readonly string[]): string[] {
-  return [...new Set([...options, ...historical])].sort();
+type DecisionOption = {
+  id: string;
+  label: string;
+};
+
+type DecisionOptionInput = DecisionOption | string;
+
+function optionsFor(options: readonly DecisionOptionInput[], historical: readonly string[]): DecisionOption[] {
+  const all = new Map(
+    options.map((option) => {
+      const normalized = typeof option === "string" ? { id: option, label: option } : option;
+      return [normalized.id, normalized];
+    }),
+  );
+  for (const id of historical) {
+    all.set(id, all.get(id) ?? { id, label: id });
+  }
+  return [...all.values()].sort((left, right) => left.label.localeCompare(right.label));
 }
 
 function validate(
@@ -311,9 +331,16 @@ function safeDecisionError(error: unknown): string {
 }
 
 function DecisionResult({ decision }: { decision: Decision }) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
   return (
     <section aria-label="Recorded decision">
-      <h6>Decision recorded</h6>
+      <h6 ref={heading} tabIndex={-1}>Decision recorded</h6>
+      <p aria-label="Decision recorded" aria-live="polite" role="status">
+        Decision recorded.
+      </p>
       <dl>
         <dt>Action</dt><dd>{decision.action}</dd>
         <dt>Note</dt><dd>{decision.note}</dd>

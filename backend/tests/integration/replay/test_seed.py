@@ -21,6 +21,7 @@ from wildfireops.persistence.decision_models import (
     IdempotencyKeyModel,
     IncidentSnapshotModel,
 )
+from wildfireops.persistence.exposures import refresh_exposure_and_risk
 from wildfireops.persistence.incidents import _INCIDENT_REFRESH_LOCK_ID
 from wildfireops.persistence.observations import IngestStats, ObservationRepository
 from wildfireops.persistence.observed_models import (
@@ -357,6 +358,118 @@ async def test_identical_seed_is_a_noop(
     assert result.incidents_created == 0
     assert result.snapshots_created == 0
     assert await _row_counts(factory) == counts
+
+
+@pytest.mark.asyncio
+async def test_refresh_after_seed_reuses_named_snapshot(
+    isolated_engine: AsyncEngine,
+    tmp_path: Path,
+) -> None:
+    loader = _build_synthetic_package(
+        tmp_path,
+        variant="named-refresh",
+        package_id="park-fire-2024-v1",
+    )
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    await seed_replay_package(
+        loader=loader,
+        session_factory=factory,
+        clustering_config=CLUSTERING,
+        exposure_config=EXPOSURE,
+        risk_config=RISK,
+    )
+
+    async with factory.begin() as session:
+        original = (
+            await session.scalars(
+                select(IncidentSnapshotModel).order_by(
+                    IncidentSnapshotModel.snapshot_version
+                )
+            )
+        ).all()
+        refreshed_ids = await refresh_exposure_and_risk(
+            session,
+            reference_at=loader.manifest.end_at,
+            exposure_config=EXPOSURE,
+            risk_config=RISK,
+            clustering_algorithm_version=CLUSTERING.algorithm_version,
+        )
+        refreshed = (
+            await session.scalars(
+                select(IncidentSnapshotModel).order_by(
+                    IncidentSnapshotModel.snapshot_version
+                )
+            )
+        ).all()
+
+    assert refreshed_ids == tuple(snapshot.id for snapshot in original)
+    assert [snapshot.snapshot_version for snapshot in refreshed] == [1]
+    assert refreshed[0].incident_state["name"] == "Park Fire"
+
+
+@pytest.mark.asyncio
+async def test_identical_seed_does_not_mutate_unrelated_snapshots(
+    isolated_engine: AsyncEngine,
+    tmp_path: Path,
+) -> None:
+    loader = _build_synthetic_package(
+        tmp_path,
+        variant="name-backfill",
+        package_id="park-fire-2024-v1",
+    )
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    await seed_replay_package(
+        loader=loader,
+        session_factory=factory,
+        clustering_config=CLUSTERING,
+        exposure_config=EXPOSURE,
+        risk_config=RISK,
+    )
+    async with factory.begin() as session:
+        snapshot = (await session.scalars(select(IncidentSnapshotModel))).one()
+        session.add(
+            IncidentSnapshotModel(
+                incident_id=snapshot.incident_id,
+                snapshot_version=snapshot.snapshot_version + 1,
+                source_versions={},
+                incident_state={"status": "active", "name": "Unrelated Fire"},
+                asset_state=[],
+                resource_state=[],
+            )
+        )
+        session.add(
+            IncidentSnapshotModel(
+                incident_id=snapshot.incident_id,
+                snapshot_version=snapshot.snapshot_version + 2,
+                source_versions={},
+                incident_state={"status": "active"},
+                asset_state=[],
+                resource_state=[],
+            )
+        )
+    counts = await _row_counts(factory)
+
+    result = await seed_replay_package(
+        loader=loader,
+        session_factory=factory,
+        clustering_config=CLUSTERING,
+        exposure_config=EXPOSURE,
+        risk_config=RISK,
+    )
+
+    assert result.status == "already_seeded"
+    assert await _row_counts(factory) == counts
+    async with factory() as session:
+        snapshots = (
+            await session.scalars(
+                select(IncidentSnapshotModel).order_by(
+                    IncidentSnapshotModel.snapshot_version
+                )
+            )
+        ).all()
+    assert snapshots[0].incident_state["name"] == "Park Fire"
+    assert snapshots[1].incident_state["name"] == "Unrelated Fire"
+    assert snapshots[2].incident_state == {"status": "active"}
 
 
 @pytest.mark.asyncio

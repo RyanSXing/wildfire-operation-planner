@@ -125,6 +125,7 @@ async def test_park_fire_replay_matches_golden_semantics(
             for summary in summaries
         ]
         selected = max(details, key=lambda item: item["risk"]["score"])
+        assert selected["name"] == "Park Fire"
 
         baseline_version = await _json(
             client.post(

@@ -9,7 +9,9 @@ import {
   type RecordedMap,
 } from "../../test/maplibre";
 import {
+  BASEMAP_STYLE_URL,
   EMPTY_FEATURE_COLLECTION,
+  INLINE_MAP_STYLE,
   MAP_IMAGE_IDS,
   MAP_LAYER_IDS,
   MAP_SOURCE_IDS,
@@ -93,7 +95,7 @@ beforeEach(() => {
 });
 
 describe("OperationsMap", () => {
-  it("constructs one network-independent map and adds stable sources and layers once", () => {
+  it("loads the external basemap and adds stable sources and overlays once", () => {
     render(<OperationsMap {...currentProps} />);
 
     const region = screen.getByRole("region", {
@@ -101,15 +103,12 @@ describe("OperationsMap", () => {
     });
     const map = onlyMap();
     expect(map.options.container).toBe(region);
-    expect(map.options.style).toMatchObject({
-      version: 8,
-      sources: {},
-    });
-    expect(JSON.stringify(map.options.style)).not.toMatch(/https?:\/\//);
+    expect(map.options.style).toBe(BASEMAP_STYLE_URL);
+    expect(map.options.attributionControl).toEqual({});
 
     act(() => {
-      map.emit("load");
-      map.emit("load");
+      map.emit("style.load");
+      map.emit("style.load");
     });
 
     expect(map.sourceAdds.map(({ id }) => id)).toEqual(
@@ -144,6 +143,33 @@ describe("OperationsMap", () => {
     });
   });
 
+  it("falls back to the inline style once when the external style fails", () => {
+    render(<OperationsMap {...currentProps} />);
+    const map = onlyMap();
+
+    act(() => {
+      map.emit("error");
+      map.emit("error");
+    });
+
+    expect(map.setStyleCalls).toEqual([INLINE_MAP_STYLE]);
+    expect(map.sourceAdds).toHaveLength(0);
+
+    act(() => {
+      map.emit("style.load");
+      map.emit("error");
+      map.emit("style.load");
+    });
+
+    expect(map.setStyleCalls).toEqual([INLINE_MAP_STYLE]);
+    expect(map.sourceAdds.map(({ id }) => id)).toEqual(
+      Object.values(MAP_SOURCE_IDS),
+    );
+    expect(map.layerAdds.map(({ id }) => id)).toEqual(
+      Object.values(MAP_LAYER_IDS),
+    );
+  });
+
   it("keeps critical counts and a textual legend outside the canvas region", () => {
     render(<OperationsMap {...currentProps} />);
 
@@ -169,7 +195,7 @@ describe("OperationsMap", () => {
     const { rerender } = render(<OperationsMap {...currentProps} />);
     const map = onlyMap();
     act(() => {
-      map.emit("load");
+      map.emit("style.load");
     });
 
     rerender(
@@ -213,7 +239,7 @@ describe("OperationsMap", () => {
     const unavailable = collection([pointFeature("unavailable-1", [-121.7, 39.7])]);
     const { rerender } = render(<OperationsMap {...currentProps} routesData={routes} roadClosuresData={closures} unavailableResourcesData={unavailable} />);
     const map = onlyMap();
-    act(() => map.emit("load"));
+    act(() => map.emit("style.load"));
 
     expect(map.sources.get(MAP_SOURCE_IDS.routes)?.data).toEqual(routes);
     expect(map.sources.get(MAP_SOURCE_IDS.roadClosures)?.data).toEqual(closures);
@@ -235,6 +261,7 @@ describe("OperationsMap", () => {
 
     expect(map.removed).toBe(true);
     expect(map.removeCalls).toBe(1);
-    expect(map.listeners.get("load")).toHaveLength(0);
+    expect(map.listeners.get("style.load")).toHaveLength(0);
+    expect(map.listeners.get("error")).toHaveLength(0);
   });
 });

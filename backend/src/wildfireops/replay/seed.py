@@ -9,6 +9,7 @@ from hashlib import sha256
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 from geoalchemy2.elements import WKTElement
 from shapely.geometry import shape  # type: ignore[import-untyped]
@@ -23,6 +24,7 @@ from wildfireops.geospatial.clustering import cluster_detections
 from wildfireops.geospatial.exposure import ExposureConfig
 from wildfireops.ingestion.worker import build_exposure_config, build_risk_config
 from wildfireops.persistence.exposures import refresh_exposure_and_risk
+from wildfireops.persistence.decision_models import IncidentSnapshotModel
 from wildfireops.persistence.incidents import (
     acquire_incident_refresh_lock,
     load_current_fire_detections,
@@ -246,6 +248,11 @@ async def seed_replay_package(
                 risk_config=risk_config,
                 clustering_algorithm_version=clustering_config.algorithm_version,
             )
+            await _name_highest_priority_snapshot(
+                session,
+                snapshot_ids,
+                _package_incident_name(loader.manifest.package_id),
+            )
             for source_name in sorted({item.source_name for item in observations}):
                 source_observations = [
                     item for item in observations if item.source_name == source_name
@@ -274,6 +281,44 @@ async def seed_replay_package(
                 incidents_created=incidents_created,
                 snapshots_created=len(snapshot_ids),
             )
+
+
+def _package_incident_name(package_id: str) -> str:
+    parts = package_id.strip().split("-")
+    year_index = next(
+        (
+            index
+            for index, part in enumerate(parts)
+            if len(part) == 4 and part.isdigit()
+        ),
+        len(parts),
+    )
+    name_parts = parts[:year_index] or parts
+    return " ".join(part.capitalize() for part in name_parts if part)
+
+
+async def _name_highest_priority_snapshot(
+    session: AsyncSession,
+    snapshot_ids: Sequence[UUID],
+    incident_name: str,
+) -> None:
+    if not snapshot_ids:
+        return
+    snapshot = await session.scalar(
+        select(IncidentSnapshotModel)
+        .join(
+            WildfireIncidentModel,
+            WildfireIncidentModel.id == IncidentSnapshotModel.incident_id,
+        )
+        .where(IncidentSnapshotModel.id.in_(snapshot_ids))
+        .order_by(
+            WildfireIncidentModel.risk_score.desc().nullslast(),
+            WildfireIncidentModel.id,
+        )
+        .limit(1)
+    )
+    if snapshot is not None:
+        snapshot.incident_state = {**snapshot.incident_state, "name": incident_name}
 
 
 def _argument_parser() -> argparse.ArgumentParser:

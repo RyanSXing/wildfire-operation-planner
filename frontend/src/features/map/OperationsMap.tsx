@@ -3,6 +3,7 @@ import maplibregl, { type GeoJSONSource } from "maplibre-gl";
 import { useEffect, useRef } from "react";
 
 import {
+  BASEMAP_STYLE_URL,
   INLINE_MAP_STYLE,
   MAP_IMAGES,
   MAP_LAYERS,
@@ -77,12 +78,13 @@ export function OperationsMap({
 
     const map = new maplibregl.Map({
       container,
-      style: INLINE_MAP_STYLE,
+      style: BASEMAP_STYLE_URL,
       center: [-121.58, 39.79],
       zoom: 8,
-      attributionControl: false,
+      attributionControl: {},
     });
     mapRef.current = map;
+    let fallbackAttempted = false;
 
     const initializeLayers = (): void => {
       if (loadedRef.current) {
@@ -128,10 +130,20 @@ export function OperationsMap({
       loadedRef.current = true;
     };
 
-    map.on("load", initializeLayers);
+    const handleStyleError = (): void => {
+      if (loadedRef.current || fallbackAttempted) {
+        return;
+      }
+      fallbackAttempted = true;
+      map.setStyle(INLINE_MAP_STYLE);
+    };
+
+    map.on("style.load", initializeLayers);
+    map.on("error", handleStyleError);
 
     return () => {
-      map.off("load", initializeLayers);
+      map.off("style.load", initializeLayers);
+      map.off("error", handleStyleError);
       map.remove();
       mapRef.current = null;
       loadedRef.current = false;

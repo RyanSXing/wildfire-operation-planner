@@ -124,7 +124,11 @@ describe("ReplayTimeline", () => {
     expect(range).toHaveAttribute("value", "0");
     expect(range).toHaveAttribute("aria-valuetext", "Replay unavailable");
     expect(screen.getByRole("button", { name: "Play" })).toBeDisabled();
-    expect(screen.getByText("Replay unavailable.")).toBeVisible();
+    expect(
+      screen.getByText(
+        "Replay requires at least two time-ordered snapshots; this incident does not have a usable replay range.",
+      ),
+    ).toBeVisible();
     expect(screen.getByText("Start unavailable")).toBeVisible();
     expect(screen.getByText("End unavailable")).toBeVisible();
   });

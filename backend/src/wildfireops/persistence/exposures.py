@@ -187,7 +187,7 @@ async def refresh_exposure_and_risk(
             normalized.raw_evidence,
         )
         risk_state["config"] = serialize_risk_config(risk_config)
-        incident_state = {
+        incident_state: dict[str, object] = {
             "status": incident.status,
             "geometry_geojson": _canonical_source_json(
                 json.loads(row.geometry_geojson)
@@ -437,6 +437,13 @@ async def _reuse_or_create_snapshot(
         .limit(1)
     )
     if latest is not None:
+        previous_name = latest.incident_state.get("name")
+        if (
+            "name" not in incident_state
+            and isinstance(previous_name, str)
+            and previous_name.strip()
+        ):
+            incident_state = {**incident_state, "name": previous_name.strip()}
         is_identical = await session.scalar(
             select(
                 and_(

@@ -107,6 +107,9 @@ export function ScenarioPlanningPanel({
     string | null
   >(null);
   const [mapMode, setMapMode] = useState<"baseline" | "scenario">("baseline");
+  const [decidedRecommendationId, setDecidedRecommendationId] = useState<
+    string | null
+  >(null);
 
   useLayoutEffect(() => {
     latestPolicy.current = {
@@ -344,6 +347,7 @@ export function ScenarioPlanningPanel({
     setStaleLatched(false);
     setSessionFreshnessToken(null);
     setMapMode("baseline");
+    setDecidedRecommendationId(null);
   };
 
   return (
@@ -351,6 +355,20 @@ export function ScenarioPlanningPanel({
       className="decision-workspace__section scenario-planning-panel"
       aria-label="Scenario planning"
     >
+      <WorkflowGuide
+        planned={baselineVersion !== null}
+        recommended={
+          lastSuccessful !== null &&
+          latestVersion !== null &&
+          lastSuccessful.version.id === latestVersion.id
+        }
+        decided={
+          lastSuccessful !== null &&
+          latestVersion !== null &&
+          lastSuccessful.version.id === latestVersion.id &&
+          decidedRecommendationId === lastSuccessful.recommendation.id
+        }
+      />
       <div className="decision-workspace__section-heading">
         <h3>Scenario planning</h3>
         <span className="snapshot-context">Current snapshot</span>
@@ -418,16 +436,6 @@ export function ScenarioPlanningPanel({
             </label>
           </div>
 
-          <RoadCatalog
-            roadQuery={roadQuery}
-            searchDraft={roadSearchDraft}
-            onSearchDraftChange={setRoadSearchDraft}
-            onSearch={(event) => {
-              event.preventDefault();
-              setRoadSearch(roadSearchDraft.trim());
-            }}
-          />
-
           {latestVersion ? (
             <fieldset aria-label="Scenario map selection">
               <legend>Map overlays</legend>
@@ -468,28 +476,95 @@ export function ScenarioPlanningPanel({
             </button>
           ) : null}
 
-          {baselineRecommendation && latestVersion ? (
-            <section
-              className="scenario-planning-panel__editor"
-              aria-label="Immutable scenario branch"
-            >
-              <h4>Immutable scenario branch</h4>
-              <p>
-                Active scenario version {latestVersion.version}. Saving creates
-                a new immutable version.
-              </p>
-              <ScenarioEditor
-                roadEdges={roadQuery.data?.items ?? []}
-                resources={incident.simulatedResources}
-                version={latestVersion}
-                busy={createVersion.isPending}
-                disabled={
-                  commandsDisabled || generateRecommendation.isPending
-                }
-                errorMessage={null}
-                onSubmit={(request) => void saveVersion(request)}
+          <RoadCatalog
+            roadQuery={roadQuery}
+            searchDraft={roadSearchDraft}
+            onSearchDraftChange={setRoadSearchDraft}
+            onSearch={(event) => {
+              event.preventDefault();
+              setRoadSearch(roadSearchDraft.trim());
+            }}
+          />
+
+          {lastSuccessful && baselineVersion ? (
+            <>
+              <RecommendationPanel
+                recommendation={lastSuccessful.recommendation}
+                freshness={sessionStale ? "stale" : "current"}
+                versionLabel={recommendationLabel(
+                  lastSuccessful.version,
+                  latestVersion,
+                  baselineVersion,
+                )}
+                resourceLabels={Object.fromEntries(
+                  incident.simulatedResources.map(({ resourceId, resourceType }) => [
+                    resourceId,
+                    titleCase(resourceType),
+                  ]),
+                )}
+                destinationLabels={Object.fromEntries(
+                  incident.exposedAssets.map(({ assetId, name }) => [assetId, name]),
+                )}
               />
-            </section>
+              <DecisionDialog
+                key={`decision:${lastSuccessful.recommendation.id}`}
+                recommendation={lastSuccessful.recommendation}
+                freshness={sessionStale ? "stale" : "current"}
+                planningDisabled={planningDisabled}
+                resources={incident.simulatedResources.map(({ resourceId, resourceType }) => ({
+                  id: resourceId,
+                  label: titleCase(resourceType),
+                }))}
+                destinations={incident.exposedAssets.map(({ assetId, name }) => ({
+                  id: assetId,
+                  label: name,
+                }))}
+                onStale={() => setStaleLatched(true)}
+                onDecisionRecorded={() =>
+                  setDecidedRecommendationId(lastSuccessful.recommendation.id)
+                }
+              />
+              <AuditDrawer
+                key={`audit:${lastSuccessful.recommendation.id}`}
+                recommendationId={lastSuccessful.recommendation.id}
+              />
+            </>
+          ) : null}
+
+          {baselineRecommendation &&
+          lastSuccessful &&
+          baselineVersion &&
+          lastSuccessful.version.id !== baselineVersion.id ? (
+            <div className="scenario-planning-panel__table-overflow">
+              <ScenarioComparison
+                baseline={baselineRecommendation.outcome}
+                scenario={lastSuccessful.recommendation.outcome}
+              />
+            </div>
+          ) : null}
+
+          {baselineRecommendation && latestVersion ? (
+            <details className="scenario-planning-panel__editor">
+              <summary>Modify scenario assumptions (optional)</summary>
+              <section aria-label="Immutable scenario branch">
+                <h4>Immutable scenario branch</h4>
+                <p>
+                  Active scenario version {latestVersion.version}. Saving creates
+                  a new immutable version.
+                </p>
+                <ScenarioEditor
+                  roadEdges={roadQuery.data?.items ?? []}
+                  resources={incident.simulatedResources}
+                  version={latestVersion}
+                  busy={createVersion.isPending}
+                  disabled={
+                    commandsDisabled || generateRecommendation.isPending
+                  }
+                  errorMessage={null}
+                  onSubmit={(request) => void saveVersion(request)}
+                />
+              </section>
+            </details>
           ) : null}
 
           {baselineRecommendation &&
@@ -531,45 +606,6 @@ export function ScenarioPlanningPanel({
         </p>
       ) : null}
 
-      {lastSuccessful && baselineVersion ? (
-        <>
-          <RecommendationPanel
-            recommendation={lastSuccessful.recommendation}
-            freshness={sessionStale ? "stale" : "current"}
-            versionLabel={recommendationLabel(
-              lastSuccessful.version,
-              latestVersion,
-              baselineVersion,
-            )}
-          />
-          <DecisionDialog
-            key={`decision:${lastSuccessful.recommendation.id}`}
-            recommendation={lastSuccessful.recommendation}
-            freshness={sessionStale ? "stale" : "current"}
-            planningDisabled={planningDisabled}
-            resources={incident.simulatedResources.map(({ resourceId }) => resourceId)}
-            destinations={incident.exposedAssets.map(({ assetId }) => assetId)}
-            onStale={() => setStaleLatched(true)}
-          />
-          <AuditDrawer
-            key={`audit:${lastSuccessful.recommendation.id}`}
-            recommendationId={lastSuccessful.recommendation.id}
-          />
-        </>
-      ) : null}
-
-      {baselineRecommendation &&
-      lastSuccessful &&
-      baselineVersion &&
-      lastSuccessful.version.id !== baselineVersion.id ? (
-        <div className="scenario-planning-panel__table-overflow">
-          <ScenarioComparison
-            baseline={baselineRecommendation.outcome}
-            scenario={lastSuccessful.recommendation.outcome}
-          />
-        </div>
-      ) : null}
-
       {baselineVersion ||
       commandError ||
       sessionStale ||
@@ -584,6 +620,10 @@ export function ScenarioPlanningPanel({
   );
 }
 
+function titleCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function RoadCatalog({
   roadQuery,
   searchDraft,
@@ -595,36 +635,45 @@ function RoadCatalog({
   onSearchDraftChange: (value: string) => void;
   onSearch: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  return (
-    <section aria-label="Road catalog">
-      <h4>Road catalog</h4>
-      <form aria-label="Road edge search" onSubmit={onSearch}>
-        <label>
-          Search road edges
-          <input
-            type="search"
-            value={searchDraft}
-            onChange={(event) => onSearchDraftChange(event.currentTarget.value)}
-          />
-        </label>
-        <button type="submit">Search roads</button>
-      </form>
+  const summary = roadQuery.isPending
+    ? "Loading road catalog…"
+    : roadQuery.isError
+      ? "Road catalog unavailable"
+      : roadQuery.data
+        ? `Showing ${roadQuery.data.items.length} of ${roadQuery.data.total} road edges.`
+        : "Road catalog";
 
-      {roadQuery.isPending ? (
-        <p role="status">Loading road catalog…</p>
-      ) : roadQuery.isError ? (
-        <LocalReadFailure
-          label="Road catalog unavailable"
-          message="Road catalog could not be loaded."
-          retryLabel="Retry road catalog"
-          onRetry={() => void roadQuery.refetch()}
-        />
-      ) : roadQuery.data ? (
-        <>
-          <p role="status" aria-live="polite">
-            Showing {roadQuery.data.items.length} of {roadQuery.data.total} road
-            edges.
-          </p>
+  return (
+    <details
+      className="scenario-planning-panel__road-catalog"
+      open={roadQuery.isError || undefined}
+    >
+      <summary>
+        <span>Road catalog</span>
+        <span role="status" aria-live="polite">{summary}</span>
+      </summary>
+      <section aria-label="Road catalog">
+        <form aria-label="Road edge search" onSubmit={onSearch}>
+          <label>
+            Search road edges
+            <input
+              type="search"
+              value={searchDraft}
+              onChange={(event) => onSearchDraftChange(event.currentTarget.value)}
+            />
+          </label>
+          <button type="submit">Search roads</button>
+        </form>
+
+        {roadQuery.isError ? (
+          <LocalReadFailure
+            label="Road catalog unavailable"
+            message="Road catalog could not be loaded."
+            retryLabel="Retry road catalog"
+            onRetry={() => void roadQuery.refetch()}
+          />
+        ) : roadQuery.data ? (
+          <>
           {roadQuery.data.total > roadQuery.data.items.length ? (
             <p>Road catalog is a bounded subset of matching edges.</p>
           ) : null}
@@ -648,9 +697,72 @@ function RoadCatalog({
               Missing road edge IDs: {roadQuery.data.missingEdgeIds.join(", ")}
             </p>
           ) : null}
-        </>
-      ) : null}
-    </section>
+          </>
+        ) : null}
+      </section>
+    </details>
+  );
+}
+
+function WorkflowGuide({
+  planned,
+  recommended,
+  decided,
+}: {
+  planned: boolean;
+  recommended: boolean;
+  decided: boolean;
+}) {
+  const steps = [
+    { label: "Observe", status: "complete" as const },
+    {
+      label: "Plan",
+      status: planned ? ("complete" as const) : ("current" as const),
+    },
+    {
+      label: "Recommend",
+      status: recommended
+        ? ("complete" as const)
+        : planned
+          ? ("current" as const)
+          : ("upcoming" as const),
+    },
+    {
+      label: "Decide",
+      status: decided
+        ? ("complete" as const)
+        : recommended
+          ? ("current" as const)
+          : ("upcoming" as const),
+    },
+  ];
+  const next = !planned
+    ? "Create a baseline scenario and recommendation."
+    : !recommended
+      ? "Generate a recommendation for the active scenario."
+      : !decided
+        ? "Review and record a decision."
+        : "Open audit history to inspect the recorded decision.";
+
+  return (
+    <details className="workflow-guide" open>
+      <summary>Decision workflow</summary>
+      <nav aria-label="Decision workflow">
+        <ol>
+          {steps.map(({ label, status }) => (
+            <li key={label}>
+              <span
+                data-status={status}
+                aria-current={status === "current" ? "step" : undefined}
+              >
+                {label}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <p><strong>Next:</strong> {next}</p>
+      </nav>
+    </details>
   );
 }
 
