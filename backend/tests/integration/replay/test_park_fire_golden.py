@@ -26,6 +26,7 @@ from wildfireops.replay.seed import seed_replay_package
 
 
 PACKAGE = Path(__file__).parents[4] / "data/replay/park-fire"
+_POINT_DECIMAL_PLACES = 6
 RESET = text(
     "TRUNCATE TABLE quarantined_observations, source_status, "
     "idempotency_keys, resource_units, exposed_assets, "
@@ -229,7 +230,15 @@ def _incident_semantics(
     return {
         "selected": selected,
         "memberships": _memberships(detail),
-        "centroid": detail["geometry"],
+        # PostGIS may serialize equivalent coordinates at different float tails.
+        # Six decimal places preserves sub-meter Point semantics in this replay.
+        "centroid": {
+            "type": detail["geometry"]["type"],
+            "coordinates": [
+                round(coordinate, _POINT_DECIMAL_PLACES)
+                for coordinate in detail["geometry"]["coordinates"]
+            ],
+        },
         "freshness": detail["freshness"],
         "risk": {
             "score": detail["risk"]["score"],

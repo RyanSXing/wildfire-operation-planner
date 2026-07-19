@@ -420,17 +420,17 @@ async def test_equal_priority_clusters_name_the_same_detection_cluster_on_fresh_
             "source_name": "nasa_firms",
             "source_record_id": record_id,
             "observed_at": observed_at,
-            "longitude": -121.5000,
+            "longitude": longitude,
             "latitude": 39.8000,
             "confidence": 0.75,
             "intensity": 327.4,
             "raw_payload": {"satellite": "N20"},
         }
-        for record_id, observed_at in (
-            ("fire-a1", "2024-07-24T18:00:00Z"),
-            ("fire-a2", "2024-07-24T18:01:00Z"),
-            ("fire-b1", "2024-07-24T18:20:00Z"),
-            ("fire-b2", "2024-07-24T18:21:00Z"),
+        for record_id, observed_at, longitude in (
+            ("fire-a1", "2024-07-24T18:27:00Z", -121.7000),
+            ("fire-a2", "2024-07-24T18:30:00Z", -121.7000),
+            ("fire-b1", "2024-07-24T18:27:00Z", -121.7300),
+            ("fire-b2", "2024-07-24T18:30:00Z", -121.7300),
         )
     )
     loader = _build_synthetic_package(
@@ -461,6 +461,13 @@ async def test_equal_priority_clusters_name_the_same_detection_cluster_on_fresh_
                 if snapshot.incident_state.get("name") == "Park Fire"
             ]
             assert len(snapshots) == 2
+            assert {
+                tuple(snapshot.incident_state["detection_identities"])
+                for snapshot in snapshots
+            } == {
+                ("nasa_firms:fire-a1", "nasa_firms:fire-a2"),
+                ("nasa_firms:fire-b1", "nasa_firms:fire-b2"),
+            }
             assert len(set(scores)) == 1
             assert len(named) == 1
             return tuple(named)
