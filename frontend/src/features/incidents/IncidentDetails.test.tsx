@@ -16,6 +16,23 @@ const incident = incidentDetailSchema.parse(incidentDetailResponse);
 const timeline = incidentTimelineSchema.parse(incidentTimelineResponse);
 
 describe("IncidentDetails", () => {
+  it.each([
+    ["Current snapshot", incident.risk],
+    ["Replay frame", timeline.items[0].risk],
+  ] as const)("shows %s beside the overview priority score", (riskContext, visualizedRisk) => {
+    render(
+      <IncidentDetails
+        incident={incident}
+        visualizedRisk={visualizedRisk}
+        riskContext={riskContext}
+      />,
+    );
+
+    expect(
+      within(screen.getByRole("region", { name: "Incident overview" })).getByText(riskContext),
+    ).toBeVisible();
+  });
+
   it("puts the incident priority and planning action before collapsed evidence", async () => {
     const user = userEvent.setup();
     render(

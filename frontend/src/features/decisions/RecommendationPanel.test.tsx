@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Recommendation } from "../../api/types";
 import { RecommendationPanel } from "./RecommendationPanel";
@@ -58,6 +58,29 @@ const recommendation: Recommendation = {
 };
 
 describe("RecommendationPanel", () => {
+  it("keys each assignment identifier evidence group", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    render(
+      <RecommendationPanel
+        recommendation={{
+          ...recommendation,
+          assignments: [
+            ...recommendation.assignments,
+            { ...recommendation.assignments[0], resourceId: "engine-2", destinationId: "town-2" },
+          ],
+        }}
+        versionLabel="Current scenario version 2"
+        freshness="current"
+      />,
+    );
+
+    await user.click(screen.getByText("Technical recommendation evidence"));
+
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("unique key");
+    consoleError.mockRestore();
+  });
+
   it.each([
     ["current", "Current"],
     ["stale", "Stale"],

@@ -110,6 +110,7 @@ export function ScenarioPlanningPanel({
   const [decidedRecommendationId, setDecidedRecommendationId] = useState<
     string | null
   >(null);
+  const resourceLabels = labelsForResources(incident.simulatedResources);
 
   useLayoutEffect(() => {
     latestPolicy.current = {
@@ -496,12 +497,7 @@ export function ScenarioPlanningPanel({
                   latestVersion,
                   baselineVersion,
                 )}
-                resourceLabels={Object.fromEntries(
-                  incident.simulatedResources.map(({ resourceId, resourceType }) => [
-                    resourceId,
-                    titleCase(resourceType),
-                  ]),
-                )}
+                resourceLabels={resourceLabels}
                 destinationLabels={Object.fromEntries(
                   incident.exposedAssets.map(({ assetId, name }) => [assetId, name]),
                 )}
@@ -511,9 +507,9 @@ export function ScenarioPlanningPanel({
                 recommendation={lastSuccessful.recommendation}
                 freshness={sessionStale ? "stale" : "current"}
                 planningDisabled={planningDisabled}
-                resources={incident.simulatedResources.map(({ resourceId, resourceType }) => ({
+                resources={incident.simulatedResources.map(({ resourceId }) => ({
                   id: resourceId,
-                  label: titleCase(resourceType),
+                  label: resourceLabels[resourceId],
                 }))}
                 destinations={incident.exposedAssets.map(({ assetId, name }) => ({
                   id: assetId,
@@ -622,6 +618,21 @@ export function ScenarioPlanningPanel({
 
 function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function labelsForResources(
+  resources: readonly { resourceId: string; resourceType: string }[],
+): Record<string, string> {
+  const counts = new Map<string, number>();
+  return Object.fromEntries(
+    [...resources]
+      .sort((left, right) => left.resourceId.localeCompare(right.resourceId))
+      .map((resource) => {
+        const ordinal = (counts.get(resource.resourceType) ?? 0) + 1;
+        counts.set(resource.resourceType, ordinal);
+        return [resource.resourceId, `${titleCase(resource.resourceType)} ${ordinal}`];
+      }),
+  );
 }
 
 function RoadCatalog({

@@ -272,7 +272,7 @@ describe("ScenarioPlanningPanel", () => {
       screen.getByRole("button", { name: "Approve recommendation" }),
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Edit recommendation" }));
-    expect(screen.getByRole("option", { name: "Engine" })).toHaveValue("engine-1");
+    expect(screen.getByRole("option", { name: "Engine 1" })).toHaveValue("engine-1");
     expect(screen.getByRole("option", { name: "Forest Ranch" })).toHaveValue("community-1");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     const editorDisclosure = screen
@@ -340,6 +340,25 @@ describe("ScenarioPlanningPanel", () => {
     );
     await user.click(screen.getByText("Audit history"));
     expect(await screen.findByRole("list", { name: "Audit events" })).toBeVisible();
+  });
+
+  it("gives duplicate resource types stable unique operational labels", async () => {
+    const calls: RecordedCommand[] = [];
+    installSuccessfulCommands(calls);
+    const user = userEvent.setup();
+    renderPanel(false, {
+      ...incident,
+      simulatedResources: [
+        ...incident.simulatedResources,
+        { ...incident.simulatedResources[0], resourceId: "engine-2" },
+      ],
+    });
+
+    await bootstrapBaseline(user);
+    await user.click(screen.getByRole("button", { name: "Edit recommendation" }));
+
+    expect(screen.getByRole("option", { name: "Engine 1" })).toHaveValue("engine-1");
+    expect(screen.getByRole("option", { name: "Engine 2" })).toHaveValue("engine-2");
   });
 
   it("keeps the baseline graph locked when refreshed context changes its default", async () => {

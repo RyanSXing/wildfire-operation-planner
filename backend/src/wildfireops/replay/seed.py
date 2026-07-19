@@ -304,8 +304,9 @@ async def _name_highest_priority_snapshot(
 ) -> None:
     if not snapshot_ids:
         return
-    snapshot = await session.scalar(
-        select(IncidentSnapshotModel)
+    snapshots = (
+        await session.execute(
+            select(IncidentSnapshotModel, WildfireIncidentModel.risk_score)
         .join(
             WildfireIncidentModel,
             WildfireIncidentModel.id == IncidentSnapshotModel.incident_id,
@@ -313,12 +314,26 @@ async def _name_highest_priority_snapshot(
         .where(IncidentSnapshotModel.id.in_(snapshot_ids))
         .order_by(
             WildfireIncidentModel.risk_score.desc().nullslast(),
-            WildfireIncidentModel.id,
         )
-        .limit(1)
+        )
+    ).all()
+    if not snapshots:
+        return
+    highest_score = snapshots[0][1]
+    snapshot = min(
+        (snapshot for snapshot, score in snapshots if score == highest_score),
+        key=_snapshot_detection_identities,
     )
-    if snapshot is not None:
-        snapshot.incident_state = {**snapshot.incident_state, "name": incident_name}
+    snapshot.incident_state = {**snapshot.incident_state, "name": incident_name}
+
+
+def _snapshot_detection_identities(snapshot: IncidentSnapshotModel) -> tuple[str, ...]:
+    identities = snapshot.incident_state.get("detection_identities")
+    if not isinstance(identities, list) or not all(
+        isinstance(identity, str) for identity in identities
+    ):
+        raise ReplaySeedError("replay snapshot is missing detection identities")
+    return tuple(identities)
 
 
 def _argument_parser() -> argparse.ArgumentParser:

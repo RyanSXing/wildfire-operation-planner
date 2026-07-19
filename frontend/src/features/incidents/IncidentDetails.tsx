@@ -47,7 +47,7 @@ export function IncidentDetails({
             <FreshnessBadge freshness={incident.freshness} />
           </dd>
           <dt>Priority score</dt>
-          <dd>{formatNumber(visualizedRisk.score)}</dd>
+          <dd>{formatNumber(visualizedRisk.score)} <ContextLabel label={riskContext} /></dd>
         </dl>
         <p className="decision-workspace__driver-summary">
           {topDriver

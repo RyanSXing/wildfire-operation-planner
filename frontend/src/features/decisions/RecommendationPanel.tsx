@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 
 import type { JsonValue, Recommendation } from "../../api/types";
 
@@ -137,18 +137,18 @@ export function RecommendationPanel({
           <h5>Assignment identifiers</h5>
           <dl className="recommendation-panel__evidence">
             {recommendation.assignments.map((assignment) => (
-              <>
-                <dt key={`${assignment.resourceId}:resource`}>Resource ID</dt>
-                <dd key={`${assignment.resourceId}:resource-value`}>{assignment.resourceId}</dd>
-                <dt key={`${assignment.resourceId}:destination`}>Destination ID</dt>
-                <dd key={`${assignment.resourceId}:destination-value`}>{assignment.destinationId}</dd>
-                <dt key={`${assignment.resourceId}:edge`}>Route edge IDs</dt>
-                <dd key={`${assignment.resourceId}:edge-value`}>
+              <Fragment key={`${assignment.resourceId}:${assignment.destinationId}`}>
+                <dt>Resource ID</dt>
+                <dd>{assignment.resourceId}</dd>
+                <dt>Destination ID</dt>
+                <dd>{assignment.destinationId}</dd>
+                <dt>Route edge IDs</dt>
+                <dd>
                   {assignment.route.edgeIds.length > 0
                     ? assignment.route.edgeIds.join(", ")
                     : "None"}
                 </dd>
-              </>
+              </Fragment>
             ))}
           </dl>
         </section>

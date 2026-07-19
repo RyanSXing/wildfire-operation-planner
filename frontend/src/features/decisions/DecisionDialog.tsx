@@ -173,7 +173,13 @@ export function DecisionDialog({
         </button>
       </p>
 
-      {decision ? <DecisionResult decision={decision} /> : null}
+      {decision ? (
+        <DecisionResult
+          decision={decision}
+          resources={resources}
+          destinations={destinations}
+        />
+      ) : null}
 
       {action ? (
         <dialog open aria-labelledby="decision-dialog-title">
@@ -330,7 +336,15 @@ function safeDecisionError(error: unknown): string {
   }
 }
 
-function DecisionResult({ decision }: { decision: Decision }) {
+function DecisionResult({
+  decision,
+  resources,
+  destinations,
+}: {
+  decision: Decision;
+  resources: readonly DecisionOptionInput[];
+  destinations: readonly DecisionOptionInput[];
+}) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     heading.current?.focus();
@@ -349,9 +363,19 @@ function DecisionResult({ decision }: { decision: Decision }) {
       </dl>
       <ul aria-label="Final assignments">
         {decision.assignments.map(({ resourceId, destinationId }) => (
-          <li key={`${resourceId}:${destinationId}`}>{resourceId} → {destinationId}</li>
+          <li key={`${resourceId}:${destinationId}`}>
+            {recordedLabel(resources, resourceId, "Unavailable resource")} → {recordedLabel(destinations, destinationId, "Unavailable destination")}
+          </li>
         ))}
       </ul>
     </section>
   );
+}
+
+function recordedLabel(
+  options: readonly DecisionOptionInput[],
+  id: string,
+  fallback: string,
+): string {
+  return optionsFor(options, []).find((option) => option.id === id)?.label ?? fallback;
 }
