@@ -68,7 +68,7 @@ export function RecommendationPanel({
           aria-label="Recommendation assignments"
         >
           {recommendation.assignments.map((assignment) => (
-            <li key={`${assignment.resourceId}:${assignment.destinationId}`}>
+            <li key={assignment.resourceId}>
               <dl>
                 <dt>Resource</dt>
                 <dd>{labelFor(resourceLabels, assignment.resourceId)}</dd>
@@ -137,7 +137,7 @@ export function RecommendationPanel({
           <h5>Assignment identifiers</h5>
           <dl className="recommendation-panel__evidence">
             {recommendation.assignments.map((assignment) => (
-              <Fragment key={`${assignment.resourceId}:${assignment.destinationId}`}>
+              <Fragment key={assignment.resourceId}>
                 <dt>Resource ID</dt>
                 <dd>{assignment.resourceId}</dd>
                 <dt>Destination ID</dt>

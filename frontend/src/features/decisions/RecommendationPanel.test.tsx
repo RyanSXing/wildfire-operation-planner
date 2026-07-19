@@ -58,7 +58,7 @@ const recommendation: Recommendation = {
 };
 
 describe("RecommendationPanel", () => {
-  it("keys each assignment identifier evidence group", async () => {
+  it("renders colliding delimiter assignments without duplicate key warnings", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const user = userEvent.setup();
     render(
@@ -67,7 +67,8 @@ describe("RecommendationPanel", () => {
           ...recommendation,
           assignments: [
             ...recommendation.assignments,
-            { ...recommendation.assignments[0], resourceId: "engine-2", destinationId: "town-2" },
+            { ...recommendation.assignments[0], resourceId: "a:b", destinationId: "c" },
+            { ...recommendation.assignments[0], resourceId: "a", destinationId: "b:c" },
           ],
         }}
         versionLabel="Current scenario version 2"
