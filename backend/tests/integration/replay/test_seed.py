@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -413,7 +414,20 @@ async def test_refresh_after_seed_reuses_named_snapshot(
 async def test_equal_priority_clusters_name_the_same_detection_cluster_on_fresh_seeds(
     isolated_engine: AsyncEngine,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    incident_ids = iter(
+        (
+            UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),  # cluster A
+            UUID("00000000-0000-0000-0000-000000000000"),  # cluster B; sorts first
+        )
+        * 2
+    )
+    monkeypatch.setattr(
+        WildfireIncidentModel.id.default,
+        "arg",
+        lambda _context: next(incident_ids),
+    )
     fire_records = tuple(
         {
             "observation_type": "fire_detection",
