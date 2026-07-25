@@ -544,6 +544,15 @@ class ExercisePlanningService:
         explanation = cast(Mapping[str, object], output["explanation"])
         changes = explanation["changes"]
         assert isinstance(changes, list)
+        changed = any(
+            current.output_data.get(key) != output.get(key)
+            for key in (
+                "assignments",
+                "coveredTaskIds",
+                "uncoveredTaskIds",
+                "objectiveComponents",
+            )
+        )
         changes.extend(
             [
                 {
@@ -552,8 +561,16 @@ class ExercisePlanningService:
                     "evidence": {"resourceId": resource_id, "taskId": task_id},
                 },
                 {
-                    "code": "operator.override-changed-plan",
-                    "summary": "The operator override changed the stored plan.",
+                    "code": (
+                        "operator.override-changed-plan"
+                        if changed
+                        else "operator.override-validated"
+                    ),
+                    "summary": (
+                        "The operator override changed the stored plan."
+                        if changed
+                        else "The requested operator lock was validated and recorded."
+                    ),
                     "evidence": {
                         "resourceId": resource_id,
                         "taskId": task_id,
@@ -590,6 +607,7 @@ class ExercisePlanningService:
         checkpoint_key: str,
         event_inputs: Mapping[str, object],
     ) -> tuple[ExercisePlanRun, dict[str, object]]:
+        output = cast(dict[str, object], _json_for_storage(output))
         output["versions"] = {
             "inputHash": planning_input_hash(payload),
             "exercise": self._definition.version,
@@ -615,6 +633,15 @@ class ExercisePlanningService:
             },
             idempotency_key_id=claim_id,
         )
+        plans = await self._repository.list_plans(session.id)
+        visible = next(
+            (
+                item
+                for item in reversed(plans)
+                if item.output_data.get("status") in {"FEASIBLE", "OPTIMAL"}
+            ),
+            None,
+        )
         before = _session_state(session)
         session.version += 1
         if event_type == "exercise.override-applied":
@@ -636,7 +663,14 @@ class ExercisePlanningService:
             resulting_session_version=session.version,
             before_state=before,
             after_state=_session_state(session),
-            inputs=_event_inputs({**event_inputs, "planId": str(stored.id)}, projection),
+            inputs=_event_inputs(
+                {
+                    **event_inputs,
+                    "planId": str(stored.id),
+                    "visiblePlanId": None if visible is None else str(visible.id),
+                },
+                projection,
+            ),
             note=None,
         )
         await self._repository.complete_idempotency(
@@ -700,6 +734,25 @@ class ExercisePlanningService:
         if not actionable:
             actions = snapshot.get("allowedActions")
             if not isinstance(actions, tuple) or "generate-plan" not in actions:
+                raise RuntimeError("exercise replay response is invalid")
+            visible_id = event.inputs.get("visiblePlanId")
+            if visible_id is None:
+                if snapshot.get("latestPlan") is not None:
+                    raise RuntimeError("exercise replay response is invalid")
+            elif isinstance(visible_id, str):
+                try:
+                    visible = await self._repository.get_plan(session_id, UUID(visible_id))
+                except ValueError as error:
+                    raise RuntimeError("exercise replay response is invalid") from error
+                plans = await self._repository.list_plans(session_id)
+                if (
+                    visible is None
+                    or visible.output_data.get("status") not in {"FEASIBLE", "OPTIMAL"}
+                    or visible.id not in [item.id for item in plans[: plans.index(stored)]]
+                    or snapshot.get("latestPlan") != visible.output_data
+                ):
+                    raise RuntimeError("exercise replay response is invalid")
+            else:
                 raise RuntimeError("exercise replay response is invalid")
         return stored, _copy_json_object(snapshot)
 
