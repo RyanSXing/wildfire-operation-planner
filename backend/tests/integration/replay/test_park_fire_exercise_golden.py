@@ -214,7 +214,10 @@ async def _completed_session(client: AsyncClient) -> dict[str, Any]:
         client.post(
             f"/api/exercise-sessions/{session['id']}/objective",
             headers={"Idempotency-Key": "sandbox-objective"},
-            json={"objective": "fastest-response", "expectedVersion": session["version"]},
+            json={
+                "objective": "protect-critical-services",
+                "expectedVersion": session["version"],
+            },
         ),
         200,
     )
@@ -222,6 +225,7 @@ async def _completed_session(client: AsyncClient) -> dict[str, Any]:
     cascade = await _plan(
         client, await _advance(client, initial["session"], "sandbox-advance-1"), "sandbox-cascade"
     )
+    assert cascade["plan"]["outputData"]["explanation"]["changes"]
     final = await _plan(
         client, await _advance(client, cascade["session"], "sandbox-advance-2"), "sandbox-final"
     )
@@ -243,10 +247,38 @@ async def _completed_session(client: AsyncClient) -> dict[str, Any]:
             headers={"Idempotency-Key": "sandbox-approve"},
             json={
                 "expectedVersion": override["session"]["version"],
-                "note": "Approve fixture sandbox journey.",
+                "displayName": "Portfolio Reviewer",
+                "note": (
+                    "Redirected transport after the shelter capacity field report."
+                ),
             },
         ),
         201,
+    )
+
+
+@pytest.mark.asyncio
+async def test_park_fire_complete_backend_journey_is_frontend_ready(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=exercise_app), base_url="http://test"
+    ) as client:
+        completed = await _completed_session(client)
+        audit = await _request(
+            client.get(f"/api/exercise-sessions/{completed['id']}/audit"), 200
+        )
+        debrief = await _request(
+            client.get(f"/api/exercise-sessions/{completed['id']}/debrief"), 200
+        )
+
+    assert completed["status"] == "completed"
+    assert [item["eventType"] for item in audit["items"]][-2:] == [
+        "exercise.override-applied",
+        "exercise.plan-approved",
+    ]
+    assert debrief["finalPlan"]["operatorOverride"]["taskId"] == (
+        "shelter-capacity-transport"
     )
 
 
