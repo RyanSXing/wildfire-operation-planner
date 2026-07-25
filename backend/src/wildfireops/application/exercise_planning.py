@@ -1,12 +1,13 @@
 """Deterministic, session-scoped exercise plan materialization."""
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from hashlib import sha256
 import json
 from math import isfinite
-from typing import cast
+from types import MappingProxyType
+from typing import Literal, cast
 from uuid import UUID
 
 from pyproj import Geod
@@ -17,6 +18,7 @@ from wildfireops.application.exercises import (
     ExercisePlanRun,
     ExerciseRepositoryProtocol,
     ExerciseSession,
+    ExerciseSessionNotFound,
     ExerciseSessionService,
     ExerciseTransitionInvalid,
     ExerciseVersionConflict,
@@ -73,6 +75,26 @@ class MaterializedCheckpoint:
     wind: Mapping[str, float] | None
     source_versions: Mapping[str, object]
     incidents: tuple[Mapping[str, object], ...]
+
+
+type TaskPriorityPreset = Literal["standard", "elevated", "urgent"]
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxPlanControls:
+    expected_version: int
+    checkpoint_key: str
+    objective: ObjectivePreset
+    closed_edge_ids: tuple[str, ...]
+    wind_preset: str
+    unavailable_resource_ids: frozenset[str]
+    task_priority_presets: Mapping[str, TaskPriorityPreset]
+    locked_assignments: tuple[LockedTaskAssignment, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "task_priority_presets", MappingProxyType(dict(self.task_priority_presets))
+        )
 
 
 class ExerciseRuntimeInvalid(ValueError):
@@ -629,6 +651,153 @@ class ExercisePlanningService:
             checkpoint.checkpoint_key,
             {"inputHash": planning_input_hash(payload)},
         )
+
+    async def generate_sandbox_plan(
+        self, session_id: UUID, controls: SandboxPlanControls
+    ) -> dict[str, object]:
+        session = await self._repository.get_session(session_id)
+        if session is None:
+            raise ExerciseSessionNotFound("exercise session was not found")
+        _require_definition(session, self._definition, self._definition_digest)
+        if session.status != "completed":
+            raise ExerciseTransitionInvalid("sandbox requires a completed guided exercise")
+        if session.version != controls.expected_version:
+            raise ExerciseVersionConflict(
+                f"expected session version {controls.expected_version}, current version {session.version}"
+            )
+        allowed = self._definition.sandbox
+        if controls.checkpoint_key not in allowed.checkpoint_keys:
+            raise ExerciseCommandInvalid(
+                f"sandbox checkpoint is not allowed: {controls.checkpoint_key}",
+                fields=("checkpointKey",),
+            )
+        if controls.objective not in self._definition.objectives:
+            raise ExerciseCommandInvalid(
+                f"unsupported objective: {controls.objective}", fields=("objective",)
+            )
+        unknown_edges = sorted(set(controls.closed_edge_ids) - set(allowed.closure_edge_ids))
+        if unknown_edges:
+            raise ExerciseCommandInvalid(
+                f"sandbox closure is not allowed: {unknown_edges[0]}",
+                fields=("closedEdgeIds",),
+            )
+        wind = allowed.wind_presets.get(controls.wind_preset)
+        if wind is None:
+            raise ExerciseCommandInvalid(
+                f"sandbox wind preset is not allowed: {controls.wind_preset}",
+                fields=("windPreset",),
+            )
+        resource_ids = {item.resource_id for item in self._definition.resources}
+        unknown_resources = sorted(controls.unavailable_resource_ids - resource_ids)
+        if unknown_resources:
+            raise ExerciseCommandInvalid(
+                f"unknown sandbox resource: {unknown_resources[0]}",
+                fields=("unavailableResourceIds",),
+            )
+        checkpoint_index = next(
+            index
+            for index, item in enumerate(self._definition.checkpoints)
+            if item.checkpoint_key == controls.checkpoint_key
+        )
+        materialized = materialize_checkpoint(
+            self._definition,
+            checkpoint_index=checkpoint_index,
+            objective=controls.objective,
+            consequences=session.consequences,
+        )
+        task_ids = {item.task_id for item in materialized.tasks}
+        unknown_tasks = sorted(set(controls.task_priority_presets) - task_ids)
+        if unknown_tasks:
+            raise ExerciseCommandInvalid(
+                f"unknown sandbox task: {unknown_tasks[0]}",
+                fields=("taskPriorityPresets",),
+            )
+        invalid_priorities = sorted(
+            value
+            for value in controls.task_priority_presets.values()
+            if value not in allowed.priority_multipliers
+        )
+        if invalid_priorities:
+            raise ExerciseCommandInvalid(
+                f"sandbox priority is not allowed: {invalid_priorities[0]}",
+                fields=("taskPriorityPresets",),
+            )
+        resources = tuple(
+            replace(
+                item,
+                available=(
+                    item.available
+                    and item.resource_id not in controls.unavailable_resource_ids
+                ),
+            )
+            for item in materialized.resources
+        )
+        tasks = tuple(
+            replace(
+                item,
+                uncovered_penalty=(
+                    item.uncovered_penalty
+                    * allowed.priority_multipliers[
+                        controls.task_priority_presets.get(item.task_id, "standard")
+                    ]
+                ),
+            )
+            for item in materialized.tasks
+        )
+        sandbox = replace(
+            materialized,
+            resources=resources,
+            tasks=tasks,
+            closed_edge_ids=tuple(sorted(set(controls.closed_edge_ids))),
+            wind={
+                "speedMps": wind.wind_speed_mps,
+                "directionDegrees": wind.wind_direction_degrees,
+            },
+        )
+        routes = candidate_routes(
+            self._graph,
+            sandbox.resources,
+            sandbox.tasks,
+            sandbox.asset_positions,
+            sandbox.closed_edge_ids,
+        )
+        payload = self._payload(sandbox, routes, session.consequences, controls.locked_assignments)
+        try:
+            solved = solve_task_plan(
+                TaskOptimizationRequest(
+                    sandbox.resources,
+                    sandbox.tasks,
+                    routes,
+                    controls.locked_assignments,
+                    self._definition.objectives[controls.objective].travel_weight,
+                    max_solver_seconds=2,
+                )
+            )
+        except ValueError as error:
+            raise ExerciseCommandInvalid(str(error), fields=("lockedAssignments",)) from error
+        output = serialize_task_result(solved, routes, sandbox)
+        output["explanation"] = serialize_task_explanation(
+            explain_task_plan(None, {**payload, "assignments": output["assignments"]})
+        )
+        input_hash = planning_input_hash(payload)
+        output["versions"] = {
+            "inputHash": input_hash,
+            "exercise": self._definition.version,
+            "definitionDigest": self._definition_digest,
+            "graph": self._definition.graph_version,
+            "sources": payload["sourceVersions"],
+            "objective": payload["objective"],
+            "algorithm": payload["algorithm"],
+            "riskVersion": "not-applicable",
+            "riskReason": "task planning consumes no risk model",
+        }
+        return {
+            "sandbox": True,
+            "sessionVersion": session.version,
+            "inputHash": input_hash,
+            "input": payload,
+            "output": output,
+        }
 
     async def apply_override(
         self,

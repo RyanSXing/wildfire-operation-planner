@@ -9,6 +9,7 @@ from pydantic import JsonValue
 from wildfireops.api.dependencies import (
     get_exercise_planning_service,
     get_exercise_query_service,
+    get_exercise_sandbox_planning_service,
     get_exercise_session_service,
 )
 from wildfireops.api.schemas.exercises import (
@@ -21,10 +22,15 @@ from wildfireops.api.schemas.exercises import (
     ExercisePlanResponse,
     ExerciseSessionResponse,
     OverrideRequest,
+    SandboxPlanRequest,
+    SandboxPlanResponse,
     SelectObjectiveRequest,
     SessionCommand,
 )
-from wildfireops.application.exercise_planning import ExercisePlanningService
+from wildfireops.application.exercise_planning import (
+    ExercisePlanningService,
+    SandboxPlanControls,
+)
 from wildfireops.application.exercises import (
     ExerciseEvent,
     ExerciseNotFound,
@@ -32,6 +38,7 @@ from wildfireops.application.exercises import (
     ExerciseQueryService,
     ExerciseSessionService,
 )
+from wildfireops.decision.task_optimizer import LockedTaskAssignment
 
 
 router = APIRouter(tags=["exercises"])
@@ -116,6 +123,37 @@ async def generate_plan(
         idempotency_key=idempotency_key,
     )
     return _plan_command_response(plan, session)
+
+
+@router.post(
+    "/api/exercise-sessions/{session_id}/sandbox-plans",
+    response_model=SandboxPlanResponse,
+)
+async def generate_sandbox_plan(
+    session_id: UUID,
+    body: SandboxPlanRequest,
+    service: Annotated[
+        ExercisePlanningService,
+        Depends(get_exercise_sandbox_planning_service, scope="function"),
+    ],
+) -> SandboxPlanResponse:
+    result = await service.generate_sandbox_plan(
+        session_id,
+        SandboxPlanControls(
+            expected_version=body.expected_version,
+            checkpoint_key=body.checkpoint_key,
+            objective=body.objective,
+            closed_edge_ids=body.closed_edge_ids,
+            wind_preset=body.wind_preset,
+            unavailable_resource_ids=body.unavailable_resource_ids,
+            task_priority_presets=body.task_priority_presets,
+            locked_assignments=tuple(
+                LockedTaskAssignment(item.resource_id, item.task_id)
+                for item in body.locked_assignments
+            ),
+        ),
+    )
+    return SandboxPlanResponse.model_validate(result)
 
 
 @router.post(

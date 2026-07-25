@@ -129,6 +129,31 @@ class CommandServiceProvider:
                 )
 
     @asynccontextmanager
+    async def exercise_sandbox_planning(self) -> AsyncIterator[ExercisePlanningService]:
+        definition = self._exercise_definition
+        if definition is None:
+            raise ExerciseNotFound("exercise is not configured")
+        graph = self._graphs().get(definition.graph_version)
+        if graph is None:
+            raise ExerciseCommandInvalid("exercise graph is unavailable")
+        async with self._session_factory() as session:
+            repository = ExerciseRepository(session)
+            yield ExercisePlanningService(
+                definition=definition,
+                definition_digest=exercise_definition_digest(definition),
+                graph=graph,
+                repository=repository,
+                session_service=ExerciseSessionService(
+                    definition=definition,
+                    definition_digest=exercise_definition_digest(definition),
+                    repository=repository,
+                    clock=self._clock,
+                    callsign=self._callsign,
+                ),
+                clock=self._clock,
+            )
+
+    @asynccontextmanager
     async def exercise_queries(self) -> AsyncIterator[ExerciseQueryService]:
         definition = self._exercise_definition
         if definition is None:

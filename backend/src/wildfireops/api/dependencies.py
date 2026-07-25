@@ -89,6 +89,14 @@ async def get_exercise_planning_service(
         yield service
 
 
+async def get_exercise_sandbox_planning_service(
+    request: Request,
+) -> AsyncIterator[ExercisePlanningService]:
+    provider: CommandServiceProvider = request.app.state.command_service_provider
+    async with provider.exercise_sandbox_planning() as service:
+        yield service
+
+
 async def get_exercise_query_service(
     request: Request,
 ) -> AsyncIterator[ExerciseQueryService]:

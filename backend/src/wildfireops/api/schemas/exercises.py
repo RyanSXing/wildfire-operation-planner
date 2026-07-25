@@ -26,6 +26,31 @@ class OverrideRequest(SessionCommand):
     task_id: str = Field(min_length=1)
 
 
+class LockedAssignmentInput(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resource_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+
+
+class SandboxPlanRequest(SessionCommand):
+    model_config = ConfigDict(extra="forbid")
+
+    checkpoint_key: str = Field(min_length=1)
+    objective: Literal[
+        "fastest-response",
+        "protect-critical-services",
+        "maximize-population-coverage",
+    ]
+    closed_edge_ids: tuple[str, ...] = ()
+    wind_preset: str = Field(min_length=1)
+    unavailable_resource_ids: frozenset[str] = Field(default_factory=frozenset)
+    task_priority_presets: dict[
+        str, Literal["standard", "elevated", "urgent"]
+    ] = Field(default_factory=dict)
+    locked_assignments: tuple[LockedAssignmentInput, ...] = ()
+
+
 class ExerciseDecisionRequest(SessionCommand):
     display_name: str | None = Field(default=None, max_length=120)
     note: str = Field(min_length=1, max_length=2000)
@@ -75,6 +100,14 @@ class ExercisePlanResponse(ApiModel):
 class ExercisePlanCommandResponse(ApiModel):
     session: ExerciseSessionResponse
     plan: ExercisePlanResponse
+
+
+class SandboxPlanResponse(ApiModel):
+    sandbox: Literal[True]
+    session_version: int
+    input_hash: str
+    input: dict[str, JsonValue]
+    output: dict[str, JsonValue]
 
 
 class ExerciseEventResponse(ApiModel):

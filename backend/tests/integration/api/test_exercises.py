@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
@@ -154,6 +155,53 @@ async def _advance(
     return response.json()
 
 
+async def _complete(client: AsyncClient) -> dict[str, object]:
+    selected = await _objective(client, await _create(client))
+    initial = await _plan(client, selected)
+    cascade = await _advance(client, initial["session"], "advance-initial")
+    cascade_plan = await _plan(client, cascade, "cascade-plan")
+    final = await _advance(client, cascade_plan["session"], "advance-cascade")
+    planned = await _plan(client, final, "final-plan")
+    overridden = await client.post(
+        f"/api/exercise-sessions/{final['id']}/overrides",
+        headers={"Idempotency-Key": "override"},
+        json={
+            "resourceId": "bus-1",
+            "taskId": "shelter-capacity-transport",
+            "expectedVersion": planned["session"]["version"],
+        },
+    )
+    assert overridden.status_code == 201, overridden.text
+    completed = await client.post(
+        f"/api/exercise-sessions/{final['id']}/decisions",
+        headers={"Idempotency-Key": "approve"},
+        json={
+            "expectedVersion": overridden.json()["session"]["version"],
+            "note": "Approve the checked shelter transport.",
+        },
+    )
+    assert completed.status_code == 201, completed.text
+    return completed.json()
+
+
+async def _sandbox_counts(app: FastAPI, session_id: str) -> tuple[int, int, int, int]:
+    async with app.state.engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT "
+                    "(SELECT count(*) FROM exercise_plan_runs WHERE session_id = :session_id), "
+                    "(SELECT count(*) FROM exercise_events WHERE session_id = :session_id), "
+                    "(SELECT version FROM exercise_sessions WHERE id = :session_id), "
+                    "(SELECT count(*) FROM idempotency_keys "
+                    "WHERE scope LIKE 'exercise-session:' || :session_id || ':%')"
+                ),
+                {"session_id": session_id},
+            )
+        ).one()
+    return tuple(int(value) for value in row)
+
+
 def _journey_definition() -> ExerciseDefinition:
     value = _canonicalize(_test_definition())
     assert isinstance(value, dict)
@@ -163,6 +211,23 @@ def _journey_definition() -> ExerciseDefinition:
     clearing["incidentKey"] = "park-fire"
     clearing["assetId"] = "park-asset"
     clearing["basePriority"] = 100
+    return ExerciseDefinition.model_validate(value)
+
+
+def _sandbox_definition() -> ExerciseDefinition:
+    value = _canonicalize(_journey_definition())
+    assert isinstance(value, dict)
+    value["sandbox"] = {
+        "checkpointKeys": ["cascade"],
+        "closureEdgeIds": ["edge-32"],
+        "windPresets": {
+            "strong-northeast": {
+                "windSpeedMps": 12,
+                "windDirectionDegrees": 45,
+            }
+        },
+        "priorityMultipliers": {"standard": 1, "elevated": 2, "urgent": 3},
+    }
     return ExerciseDefinition.model_validate(value)
 
 
@@ -581,6 +646,167 @@ async def test_final_decision_requires_a_note_and_debrief_restores_in_a_new_clie
     assert debrief.status_code == 200, debrief.text
     assert restored.status_code == 200, restored.text
     assert restored.json() == debrief.json()
+
+
+@pytest.mark.asyncio
+async def test_completed_session_sandbox_plan_is_read_only_without_idempotency_key(
+    exercise_app: FastAPI,
+) -> None:
+    exercise = _sandbox_definition()
+    exercise_app.state.exercise_definition = exercise
+    exercise_app.state.command_service_provider = CommandServiceProvider(
+        session_factory=lambda: exercise_app.state.session_factory(),
+        graphs=lambda: exercise_app.state.graphs,
+        settings=exercise_app.state.settings,
+        exercise_definition=exercise,
+        clock=lambda: exercise_app.state.clock(),
+        callsign=lambda: "EMBER-101",
+    )
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        completed = await _complete(client)
+        session_id = completed["id"]
+        before_counts = await _sandbox_counts(exercise_app, session_id)
+        before_session = await client.get(f"/api/exercise-sessions/{session_id}")
+        before_audit = await client.get(f"/api/exercise-sessions/{session_id}/audit")
+        response = await client.post(
+            f"/api/exercise-sessions/{session_id}/sandbox-plans",
+            json={
+                "expectedVersion": completed["version"],
+                "checkpointKey": "cascade",
+                "objective": "maximize-population-coverage",
+                "windPreset": "strong-northeast",
+                "unavailableResourceIds": ["engine-1"],
+                "taskPriorityPresets": {"park-task": "urgent"},
+            },
+        )
+        after_session = await client.get(f"/api/exercise-sessions/{session_id}")
+        after_audit = await client.get(f"/api/exercise-sessions/{session_id}/audit")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["sandbox"] is True
+    assert body["sessionVersion"] == completed["version"]
+    assert body["inputHash"] == body["output"]["versions"]["inputHash"]
+    assert body["output"]["versions"]["riskVersion"] == "not-applicable"
+    assert after_session.json() == before_session.json()
+    assert after_audit.json() == before_audit.json()
+    assert await _sandbox_counts(exercise_app, session_id) == before_counts
+
+
+@pytest.mark.asyncio
+async def test_sandbox_rejects_unbounded_controls_without_state_changes(
+    exercise_app: FastAPI,
+) -> None:
+    exercise = _sandbox_definition()
+    exercise_app.state.command_service_provider = CommandServiceProvider(
+        session_factory=lambda: exercise_app.state.session_factory(),
+        graphs=lambda: exercise_app.state.graphs,
+        settings=exercise_app.state.settings,
+        exercise_definition=exercise,
+        clock=lambda: exercise_app.state.clock(),
+        callsign=lambda: "EMBER-101",
+    )
+    base = {
+        "checkpointKey": "cascade",
+        "objective": "maximize-population-coverage",
+        "windPreset": "strong-northeast",
+    }
+    cases = (
+        ({"checkpointKey": "unknown"}, "exercise_command_invalid", "sandbox checkpoint"),
+        ({"objective": "unknown"}, "validation_error", "Input should be"),
+        ({"closedEdgeIds": ["unknown"]}, "exercise_command_invalid", "sandbox closure"),
+        ({"windPreset": "unknown"}, "exercise_command_invalid", "sandbox wind"),
+        ({"unavailableResourceIds": ["unknown"]}, "exercise_command_invalid", "unknown sandbox resource"),
+        ({"taskPriorityPresets": {"unknown": "urgent"}}, "exercise_command_invalid", "unknown sandbox task"),
+        ({"lockedAssignments": [{"resourceId": "bus-1", "taskId": "park-task"}]}, "exercise_command_invalid", "locked assignment"),
+        ({"extra": True}, "validation_error", "Extra inputs are not permitted"),
+    )
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        completed = await _complete(client)
+        session_id = completed["id"]
+        before_counts = await _sandbox_counts(exercise_app, session_id)
+        before_session = await client.get(f"/api/exercise-sessions/{session_id}")
+        before_audit = await client.get(f"/api/exercise-sessions/{session_id}/audit")
+        for patch, code, message in cases:
+            response = await client.post(
+                f"/api/exercise-sessions/{session_id}/sandbox-plans",
+                json={**base, "expectedVersion": completed["version"], **patch},
+            )
+            assert response.status_code == 422, response.text
+            assert response.json()["error"]["code"] == code
+            assert message in response.text
+            assert await _sandbox_counts(exercise_app, session_id) == before_counts
+            assert (await client.get(f"/api/exercise-sessions/{session_id}")).json() == before_session.json()
+            assert (await client.get(f"/api/exercise-sessions/{session_id}/audit")).json() == before_audit.json()
+
+        stale = await client.post(
+            f"/api/exercise-sessions/{session_id}/sandbox-plans",
+            json={**base, "expectedVersion": completed["version"] - 1},
+        )
+        assert await _sandbox_counts(exercise_app, session_id) == before_counts
+        assert (await client.get(f"/api/exercise-sessions/{session_id}")).json() == before_session.json()
+        assert (await client.get(f"/api/exercise-sessions/{session_id}/audit")).json() == before_audit.json()
+        incomplete = await _create(client, "incomplete")
+        incomplete_before = await _sandbox_counts(exercise_app, incomplete["id"])
+        incomplete_response = await client.post(
+            f"/api/exercise-sessions/{incomplete['id']}/sandbox-plans",
+            json={**base, "expectedVersion": incomplete["version"]},
+        )
+
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["error"]["code"] == "exercise_session_version_conflict"
+    assert await _sandbox_counts(exercise_app, session_id) == before_counts
+    assert incomplete_response.status_code == 409, incomplete_response.text
+    assert incomplete_response.json()["error"]["code"] == "exercise_transition_invalid"
+    assert await _sandbox_counts(exercise_app, incomplete["id"]) == incomplete_before
+
+
+@pytest.mark.asyncio
+async def test_concurrent_and_failing_sandbox_requests_never_write(
+    exercise_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exercise = _sandbox_definition()
+    exercise_app.state.command_service_provider = CommandServiceProvider(
+        session_factory=lambda: exercise_app.state.session_factory(),
+        graphs=lambda: exercise_app.state.graphs,
+        settings=exercise_app.state.settings,
+        exercise_definition=exercise,
+        clock=lambda: exercise_app.state.clock(),
+        callsign=lambda: "EMBER-101",
+    )
+    body = {
+        "checkpointKey": "cascade",
+        "objective": "maximize-population-coverage",
+        "windPreset": "strong-northeast",
+    }
+    async with AsyncClient(
+        transport=ASGITransport(app=exercise_app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        completed = await _complete(client)
+        session_id = completed["id"]
+        before = await _sandbox_counts(exercise_app, session_id)
+        responses = await asyncio.gather(
+            *(
+                client.post(
+                    f"/api/exercise-sessions/{session_id}/sandbox-plans",
+                    json={**body, "expectedVersion": completed["version"]},
+                )
+                for _ in range(3)
+            )
+        )
+        monkeypatch.setattr(
+            "wildfireops.application.exercise_planning.solve_task_plan",
+            lambda request: (_ for _ in ()).throw(RuntimeError("solver failed")),
+        )
+        failed = await client.post(
+            f"/api/exercise-sessions/{session_id}/sandbox-plans",
+            json={**body, "expectedVersion": completed["version"]},
+        )
+
+    assert all(response.status_code == 200 for response in responses)
+    assert failed.status_code == 500, failed.text
+    assert await _sandbox_counts(exercise_app, session_id) == before
 
 
 @pytest.mark.asyncio

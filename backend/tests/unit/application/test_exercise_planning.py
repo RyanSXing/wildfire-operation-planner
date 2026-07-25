@@ -750,6 +750,65 @@ async def test_failed_plan_replay_rejects_attempt_missing_from_history(
 
 
 @pytest.mark.asyncio
+async def test_sandbox_plan_is_completed_session_read_only_and_versioned() -> None:
+    from wildfireops.application.exercise_planning import SandboxPlanControls
+
+    exercise_data = definition().model_dump(
+        mode="json", by_alias=True, fallback=dict, warnings=False
+    )
+    exercise_data["sandbox"] = {
+        "checkpointKeys": ["cascade"],
+        "closureEdgeIds": ["edge-32"],
+        "windPresets": {
+            "strong-northeast": {
+                "windSpeedMps": 12,
+                "windDirectionDegrees": 45,
+            }
+        },
+        "priorityMultipliers": {"standard": 1, "elevated": 2, "urgent": 3},
+    }
+    repository = FakeExerciseRepository()
+    service, _ = planning_service(
+        repository, ExerciseDefinition.model_validate(exercise_data)
+    )
+    current = session(repository)
+    current.status = "completed"
+    before = (
+        len(repository.plans),
+        len(repository.events),
+        current.version,
+        len(repository.claims),
+    )
+
+    result = await service.generate_sandbox_plan(
+        current.id,
+        SandboxPlanControls(
+            expected_version=current.version,
+            checkpoint_key="cascade",
+            objective="maximize-population-coverage",
+            closed_edge_ids=(),
+            wind_preset="strong-northeast",
+            unavailable_resource_ids=frozenset({"engine-1"}),
+            task_priority_presets={"park-task": "urgent"},
+            locked_assignments=(),
+        ),
+    )
+
+    assert result["sandbox"] is True
+    assert result["sessionVersion"] == current.version
+    assert result["inputHash"] == result["output"]["versions"]["inputHash"]
+    assert result["output"]["versions"]["sources"] == result["input"]["sourceVersions"]
+    assert result["output"]["versions"]["riskVersion"] == "not-applicable"
+    assert result["output"]["status"] in {"FEASIBLE", "OPTIMAL"}
+    assert (
+        len(repository.plans),
+        len(repository.events),
+        current.version,
+        len(repository.claims),
+    ) == before
+
+
+@pytest.mark.asyncio
 async def test_generate_rejects_checkpoint_three_after_override() -> None:
     repository = FakeExerciseRepository()
     service, _ = planning_service(repository)
