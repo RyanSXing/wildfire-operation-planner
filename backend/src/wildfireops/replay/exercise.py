@@ -6,7 +6,14 @@ from hashlib import sha256
 from types import MappingProxyType
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from wildfireops.domain.observations import NormalizedObservation, WeatherObservation
 from wildfireops.replay.loader import ReplayLoader, ReplayPackageCorrupt
@@ -165,11 +172,22 @@ class SandboxControls(ExerciseModel):
         int,
     ]
 
-    @model_validator(mode="after")
-    def validate_unique_closure_edges(self) -> "SandboxControls":
-        if len(set(self.closure_edge_ids)) != len(self.closure_edge_ids):
-            raise ValueError("closure_edge_ids must be unique")
-        return self
+    @field_validator("closure_edge_ids", mode="before")
+    @classmethod
+    def validate_unique_closure_edges(cls, value: object) -> object:
+        if not isinstance(value, list | tuple):
+            return value
+        first_index_by_edge: dict[str, int] = {}
+        for index, edge_id in enumerate(value):
+            if not isinstance(edge_id, str):
+                continue
+            first_index = first_index_by_edge.setdefault(edge_id, index)
+            if first_index != index:
+                raise ValueError(
+                    "sandbox.closureEdgeIds: duplicate closure edge "
+                    f"{edge_id!r} at indices {first_index} and {index}"
+                )
+        return tuple(value)
 
 
 class ExerciseDefinition(ExerciseModel):

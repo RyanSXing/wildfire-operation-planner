@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 import json
+from math import isfinite
 from typing import cast
 from uuid import UUID
 
@@ -179,11 +180,17 @@ def _validate_snappable(
         )
     try:
         node = nearest_road_node(graph, position.longitude, position.latitude)
-        node_longitude, node_latitude = graph.node_position(node)
     except (RoadGraphInvalid, ValueError) as error:
         raise ExerciseRuntimeInvalid(
             f"exercise.json: {path} {_position_identity(position)}: "
             "cannot snap to road graph"
+        ) from error
+    try:
+        node_longitude, node_latitude = graph.node_position(node)
+    except RoadGraphInvalid as error:
+        raise ExerciseRuntimeInvalid(
+            f"exercise.json: {path} {_position_identity(position)}: "
+            f"selected road node={node!r} has invalid WGS84 coordinates"
         ) from error
     distance = abs(
         _WGS84.inv(
@@ -193,6 +200,13 @@ def _validate_snappable(
             node_latitude,
         )[2]
     )
+    if not isfinite(distance):
+        raise ExerciseRuntimeInvalid(
+            f"exercise.json: {path} {_position_identity(position)}: "
+            f"selected road node={node!r} "
+            f"(longitude={node_longitude}, latitude={node_latitude}) "
+            "produced a non-finite WGS84 distance"
+        )
     if distance > _MAX_EXERCISE_SNAP_METERS:
         raise ExerciseRuntimeInvalid(
             f"exercise.json: {path} {_position_identity(position)}: "

@@ -227,10 +227,6 @@ def test_sandbox_closures_preserve_authored_order(exercise_package: Path) -> Non
             ),
             "no resource supports capability: aircraft",
         ),
-        (
-            lambda body: body["sandbox"].update(closureEdgeIds=["edge-a", "edge-a"]),
-            "closure_edge_ids must be unique",
-        ),
     ],
 )
 def test_definition_rejects_invalid_contract(
@@ -242,6 +238,25 @@ def test_definition_rejects_invalid_contract(
 
     with pytest.raises(ReplayPackageCorrupt, match=message):
         load_exercise_definition(ReplayLoader(exercise_package))
+
+
+def test_definition_reports_duplicate_sandbox_closure_source_indices(
+    exercise_package: Path,
+) -> None:
+    rewrite_exercise(
+        exercise_package,
+        lambda body: body["sandbox"].update(
+            closureEdgeIds=["edge-x", "edge-y", "edge-x"]
+        ),
+    )
+
+    with pytest.raises(ReplayPackageCorrupt) as error:
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+    assert (
+        "sandbox.closureEdgeIds: duplicate closure edge 'edge-x' at indices 0 and 2"
+        in str(error.value)
+    )
 
 
 @pytest.mark.parametrize(

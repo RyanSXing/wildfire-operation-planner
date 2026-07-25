@@ -148,6 +148,27 @@ def test_present_graph_node_coordinates_must_be_finite_numbers(
         RoadGraph.from_graph(_coordinate_graph(**coordinates))
 
 
+@pytest.mark.parametrize(
+    ("coordinates", "node"),
+    [
+        ({"x": 181, "y": 0}, "A"),
+        ({"x": 0, "y": 90.1}, "A"),
+    ],
+)
+def test_node_position_rejects_coordinates_outside_wgs84_bounds(
+    coordinates: dict[str, object],
+    node: str,
+) -> None:
+    roads = RoadGraph.from_graph(_coordinate_graph(**coordinates))
+
+    assert roads.node_coordinates == ((-121.6, 39.8),)
+    with pytest.raises(
+        RoadGraphInvalid,
+        match=rf"^road node has coordinates outside WGS84 bounds: {node!r}$",
+    ):
+        roads.node_position(node)
+
+
 def test_road_edge_catalog_is_stable_geographic_and_read_only() -> None:
     graph = nx.MultiDiGraph()
     graph.add_node("A", x=-121.7, y=39.7)

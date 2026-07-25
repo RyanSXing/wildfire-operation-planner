@@ -175,3 +175,36 @@ Success: no issues found in 3 source files
 
 The serialized fixture bytes and its golden output are unchanged, so no manifest
 regeneration was required.
+
+## Final trust-boundary hardening
+
+`RoadGraph.node_position` now rejects finite coordinates outside WGS84 bounds,
+and the public coordinate envelope excludes those invalid nodes. Startup reports
+the exact exercise path, position, and selected node when the degree-based
+router selects an invalid node. It also rejects a non-finite WGS84 distance
+before applying the 1,000-meter threshold.
+
+Sandbox closure duplicate validation now runs before model construction. It
+preserves tuple order and reports `sandbox.closureEdgeIds`, the duplicate edge,
+and both authored indices. The Park Fire fixture and semantic golden bytes are
+unchanged, so the manifest was not regenerated.
+
+```text
+cd backend && uv run pytest tests/unit/replay/test_exercise.py tests/unit/application/test_exercise_planning.py tests/unit/geospatial/test_road_graph.py -q
+96 passed
+
+cd backend && uv run pytest tests/unit/replay/test_park_fire_package.py tests/integration/replay/test_park_fire_exercise_golden.py -q
+4 passed
+
+cd backend && WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test uv run pytest tests/integration/replay -q
+25 passed
+
+cd backend && WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test uv run pytest tests/unit tests/architecture -q
+732 passed, 3 existing macOS fork warnings
+
+cd backend && uv run ruff check [touched files]
+All checks passed
+
+cd backend && uv run mypy src/wildfireops/replay/exercise.py src/wildfireops/geospatial/road_graph.py src/wildfireops/application/exercise_planning.py
+Success: no issues found in 3 source files
+```

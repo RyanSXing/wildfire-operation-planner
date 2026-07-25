@@ -876,6 +876,55 @@ def test_runtime_validation_uses_router_selected_node_for_snap_distance() -> Non
         )
 
 
+def test_runtime_validation_rejects_selected_node_outside_wgs84_bounds() -> None:
+    from wildfireops.application.exercise_planning import (
+        ExerciseRuntimeInvalid,
+        validate_exercise_runtime,
+    )
+
+    payload = _runtime_payload()
+    payload["assets"][0]["position"] = {"longitude": 0, "latitude": 90}
+    payload["assets"][1]["position"] = {"longitude": 1, "latitude": 90}
+    payload["assets"][2]["position"] = {"longitude": 2, "latitude": 90}
+    for resource in payload["resources"]:
+        resource["position"]["latitude"] = 90
+
+    with pytest.raises(
+        ExerciseRuntimeInvalid,
+        match=(
+            r"^exercise\.json: assets\[0\]\.position "
+            r"\(longitude=0\.0, latitude=90\.0\): selected road node='invalid' "
+            r"has invalid WGS84 coordinates$"
+        ),
+    ):
+        validate_exercise_runtime(
+            ExerciseDefinition.model_validate(payload),
+            _out_of_bounds_node_graph(),
+        )
+
+
+def test_runtime_validation_rejects_nonfinite_wgs84_distance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wildfireops.application.exercise_planning import (
+        ExerciseRuntimeInvalid,
+        validate_exercise_runtime,
+    )
+
+    monkeypatch.setattr(RoadGraph, "node_position", lambda _self, _node: (0.0, 90.1))
+
+    with pytest.raises(
+        ExerciseRuntimeInvalid,
+        match=(
+            r"^exercise\.json: assets\[0\]\.position "
+            r"\(longitude=1\.0, latitude=0\.0\): selected road node='park' "
+            r"\(longitude=0\.0, latitude=90\.1\) produced a non-finite WGS84 "
+            r"distance$"
+        ),
+    ):
+        validate_exercise_runtime(_runtime_definition(), graph())
+
+
 def test_runtime_validation_rejects_an_infeasible_shelter_override() -> None:
     from wildfireops.application.exercise_planning import (
         ExerciseRuntimeInvalid,
@@ -940,6 +989,22 @@ def _anisotropic_graph() -> RoadGraph:
     value.add_node("park", x=1.0, y=80.01)
     value.add_node("spot", x=2.0, y=80.0)
     value.add_node("geodesic-near", x=1.02, y=80.0)
+    value.add_edge(
+        "depot", "park", edge_id="edge-01", travel_minutes=5.0, distance_meters=500
+    )
+    value.add_edge(
+        "park", "spot", edge_id="edge-32", travel_minutes=5.0, distance_meters=500
+    )
+    return RoadGraph.from_graph(value)
+
+
+def _out_of_bounds_node_graph() -> RoadGraph:
+    value = nx.MultiDiGraph()
+    value.add_node("south", x=0.0, y=89.0)
+    value.add_node("depot", x=1.0, y=90.0)
+    value.add_node("invalid", x=0.0, y=90.1)
+    value.add_node("park", x=1.0, y=90.0)
+    value.add_node("spot", x=2.0, y=90.0)
     value.add_edge(
         "depot", "park", edge_id="edge-01", travel_minutes=5.0, distance_meters=500
     )

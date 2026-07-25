@@ -169,18 +169,13 @@ class RoadGraph:
 
     @property
     def node_coordinates(self) -> tuple[tuple[float, float], ...]:
-        """Finite node coordinates in deterministic order for graph validation."""
+        """Valid WGS84 node coordinates in deterministic order."""
         return tuple(
             sorted(
                 {
-                    (float(data["x"]), float(data["y"]))
+                    coordinates
                     for _, data in self._graph.nodes(data=True)
-                    if isinstance(data.get("x"), int | float)
-                    and not isinstance(data.get("x"), bool)
-                    and isinstance(data.get("y"), int | float)
-                    and not isinstance(data.get("y"), bool)
-                    and isfinite(float(data["x"]))
-                    and isfinite(float(data["y"]))
+                    if (coordinates := _valid_wgs84_node_coordinates(data)) is not None
                 }
             )
         )
@@ -192,6 +187,10 @@ class RoadGraph:
         coordinates = _node_coordinates(self._graph.nodes[node])
         if coordinates is None:
             raise RoadGraphInvalid(f"road node has no finite coordinates: {node!r}")
+        if not _is_wgs84_position(*coordinates):
+            raise RoadGraphInvalid(
+                f"road node has coordinates outside WGS84 bounds: {node!r}"
+            )
         return coordinates
 
 
@@ -278,6 +277,19 @@ def _node_coordinates(data: dict[str, object]) -> tuple[float, float] | None:
     ):
         return None
     return float(x), float(y)
+
+
+def _valid_wgs84_node_coordinates(
+    data: dict[str, object],
+) -> tuple[float, float] | None:
+    coordinates = _node_coordinates(data)
+    if coordinates is None or not _is_wgs84_position(*coordinates):
+        return None
+    return coordinates
+
+
+def _is_wgs84_position(longitude: float, latitude: float) -> bool:
+    return -180 <= longitude <= 180 and -90 <= latitude <= 90
 
 
 def nearest_road_node(
