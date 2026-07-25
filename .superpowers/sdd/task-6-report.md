@@ -101,3 +101,11 @@ ruff + mypy: passed
   `corridorCleared` consequence.
 - Full unit (701), architecture (3), and designated PostGIS persistence (16)
   checks passed again.
+
+## Replay visibility follow-up
+
+- Stored output is thawed before JSON persistence.
+- Failed-attempt replay now authenticates the event's session-scoped prior
+  actionable `visiblePlanId` against the persisted snapshot.
+- Focused application (42), full unit (701), architecture (3), Ruff/mypy, and
+  designated PostGIS persistence (16) passed.
