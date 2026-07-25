@@ -20,6 +20,11 @@ from wildfireops.replay.exercise import (
 
 
 NOW = datetime(2026, 7, 24, 12, tzinfo=UTC)
+SAFETY_STATEMENT = (
+    "Portfolio decision exercise only. Historical inputs are combined with "
+    "simulated operational assumptions. Do not use for emergency or "
+    "life-safety decisions."
+)
 
 
 TEST_DATABASE_URL = "postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test"
@@ -32,7 +37,7 @@ _RESET = text(
 @pytest_asyncio.fixture
 async def exercise_app() -> AsyncIterator[FastAPI]:
     app = create_app(Settings(database_url=TEST_DATABASE_URL))
-    exercise = definition()
+    exercise = _test_definition()
     road_graph = graph()
     app.state.clock = lambda: NOW
     app.state.graphs = {road_graph.graph_version: road_graph}
@@ -68,7 +73,7 @@ async def test_create_and_read_exercise_session(exercise_app: FastAPI) -> None:
         assert created.status_code == 201, created.text
         body = created.json()
         assert body["exerciseId"] == "park-fire-decision"
-        assert body["definitionDigest"] == exercise_definition_digest(definition())
+        assert body["definitionDigest"] == exercise_definition_digest(_test_definition())
         assert body["status"] == "active"
         assert body["version"] == 1
         assert body["allowedActions"] == ["select-objective"]
@@ -84,6 +89,24 @@ async def test_create_and_read_exercise_session(exercise_app: FastAPI) -> None:
     assert replay.json() == body
     assert restored.status_code == 200, restored.text
     assert restored.json() == body
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_exercise_maps_metadata_and_create_to_404() -> None:
+    app = create_app(Settings(database_url=TEST_DATABASE_URL))
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            metadata = await client.get("/api/exercises/park-fire-decision")
+            created = await client.post(
+                "/api/exercises/park-fire-decision/sessions",
+                headers={"Idempotency-Key": "unconfigured"},
+            )
+    finally:
+        await app.state.engine.dispose()
+
+    assert metadata.status_code == created.status_code == 404
+    assert metadata.json()["error"]["code"] == "exercise_not_found"
+    assert created.json()["error"]["code"] == "exercise_not_found"
 
 
 async def _create(client: AsyncClient, key: str = "create") -> dict[str, object]:
@@ -132,7 +155,7 @@ async def _advance(
 
 
 def _journey_definition() -> ExerciseDefinition:
-    value = _canonicalize(definition())
+    value = _canonicalize(_test_definition())
     assert isinstance(value, dict)
     clearing = value["checkpoints"][1]["tasks"][1]
     assert isinstance(clearing, dict)
@@ -140,6 +163,13 @@ def _journey_definition() -> ExerciseDefinition:
     clearing["incidentKey"] = "park-fire"
     clearing["assetId"] = "park-asset"
     clearing["basePriority"] = 100
+    return ExerciseDefinition.model_validate(value)
+
+
+def _test_definition() -> ExerciseDefinition:
+    value = _canonicalize(definition())
+    assert isinstance(value, dict)
+    value["safetyStatement"] = SAFETY_STATEMENT
     return ExerciseDefinition.model_validate(value)
 
 
@@ -152,14 +182,50 @@ async def test_metadata_plainly_discloses_historical_and_exercise_provenance(
 
     assert response.status_code == 200, response.text
     metadata = response.json()
-    assert metadata["safetyStatement"] == "Exercise only"
+    assert metadata["safetyStatement"] == SAFETY_STATEMENT
     assert metadata["objectives"] == [
         "fastest-response",
         "maximize-population-coverage",
         "protect-critical-services",
     ]
-    assert {item["provenance"] for item in metadata["assets"]} == {"historical"}
-    assert {item["provenance"] for item in metadata["resources"]} == {"exercise"}
+    assert {
+        item["assetId"]: {
+            key: item[key]
+            for key in (
+                "sourceName",
+                "sourceVersion",
+                "sourceRecordId",
+                "citationUrl",
+                "provenance",
+            )
+        }
+        for item in metadata["assets"]
+    } == {
+        "park-asset": {
+            "sourceName": "census",
+            "sourceVersion": "v1",
+            "sourceRecordId": "park",
+            "citationUrl": "https://example.test/park",
+            "provenance": "historical",
+        },
+        "spot-asset": {
+            "sourceName": "census",
+            "sourceVersion": "v1",
+            "sourceRecordId": "spot",
+            "citationUrl": "https://example.test/spot",
+            "provenance": "historical",
+        },
+        "shelter-asset": {
+            "sourceName": "census",
+            "sourceVersion": "v1",
+            "sourceRecordId": "shelter",
+            "citationUrl": "https://example.test/shelter",
+            "provenance": "historical",
+        },
+    }
+    assert {
+        item["resourceId"]: item["provenance"] for item in metadata["resources"]
+    } == {"engine-1": "exercise", "bus-1": "exercise"}
 
 
 @pytest.mark.asyncio
@@ -180,6 +246,74 @@ async def test_objective_requires_expected_version_and_idempotency_key(
 
     assert missing_header.status_code == 422
     assert missing_version.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("suffix", "body"),
+    [
+        ("objective", {"objective": "fastest-response", "expectedVersion": True}),
+        ("plans", {"expectedVersion": "1"}),
+        ("advance", {"expectedVersion": True}),
+        (
+            "overrides",
+            {
+                "resourceId": "bus-1",
+                "taskId": "shelter-capacity-transport",
+                "expectedVersion": "1",
+            },
+        ),
+        ("decisions", {"note": "Approve", "expectedVersion": True}),
+    ],
+)
+async def test_command_schemas_reject_coerced_expected_version(
+    exercise_app: FastAPI, suffix: str, body: dict[str, object]
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        created = await _create(client)
+        response = await client.post(
+            f"/api/exercise-sessions/{created['id']}/{suffix}",
+            headers={"Idempotency-Key": f"strict-{suffix}"},
+            json=body,
+        )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("suffix", "body"),
+    [
+        (
+            "objective",
+            {"objective": "fastest-response", "expectedVersion": 1, "extra": True},
+        ),
+        ("plans", {"expectedVersion": 1, "extra": True}),
+        ("advance", {"expectedVersion": 1, "extra": True}),
+        (
+            "overrides",
+            {
+                "resourceId": "bus-1",
+                "taskId": "shelter-capacity-transport",
+                "expectedVersion": 1,
+                "extra": True,
+            },
+        ),
+        ("decisions", {"note": "Approve", "expectedVersion": 1, "extra": True}),
+    ],
+)
+async def test_command_schemas_forbid_extra_fields(
+    exercise_app: FastAPI, suffix: str, body: dict[str, object]
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        created = await _create(client)
+        response = await client.post(
+            f"/api/exercise-sessions/{created['id']}/{suffix}",
+            headers={"Idempotency-Key": f"extra-{suffix}"},
+            json=body,
+        )
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -230,7 +364,7 @@ async def test_plan_replay_returns_the_original_status_and_json(
     assert replay.status_code == 201, replay.text
     assert replay.json() == first
     assert first["plan"]["outputData"]["versions"]["definitionDigest"] == (
-        exercise_definition_digest(definition())
+        exercise_definition_digest(_test_definition())
     )
 
 
@@ -245,6 +379,23 @@ async def test_unreachable_task_is_a_stored_uncovered_plan_not_an_api_error(
         result = await _plan(client, cascade, "cascade-plan")
 
     assert "spot-task" in result["plan"]["outputData"]["uncoveredTaskIds"]
+
+
+@pytest.mark.asyncio
+async def test_missing_exercise_graph_maps_to_stable_command_error(
+    exercise_app: FastAPI,
+) -> None:
+    exercise_app.state.graphs = {}
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        selected = await _objective(client, await _create(client))
+        response = await client.post(
+            f"/api/exercise-sessions/{selected['id']}/plans",
+            headers={"Idempotency-Key": "missing-graph"},
+            json={"expectedVersion": selected["version"]},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "exercise_command_invalid"
 
 
 @pytest.mark.asyncio
@@ -304,9 +455,57 @@ async def test_invalid_override_is_422_without_changing_the_visible_plan(
                 "expectedVersion": planned["session"]["version"],
             },
         )
+        invalid_target = await client.post(
+            f"/api/exercise-sessions/{final['id']}/overrides",
+            headers={"Idempotency-Key": "bad-target"},
+            json={
+                "resourceId": "bus-1",
+                "taskId": "wrong-task",
+                "expectedVersion": planned["session"]["version"],
+            },
+        )
+        invalid_joint = await client.post(
+            f"/api/exercise-sessions/{final['id']}/overrides",
+            headers={"Idempotency-Key": "bad-joint"},
+            json={
+                "resourceId": "bus-1",
+                "taskId": "shelter-capacity-transport",
+                "expectedVersion": planned["session"]["version"],
+            },
+        )
         restored = await client.get(f"/api/exercise-sessions/{final['id']}")
 
     assert invalid.status_code == 422, invalid.text
+    assert invalid.json()["error"]["details"] == {
+        "fields": [
+            {
+                "field": "resourceId",
+                "message": "override requires an evacuation-bus resource",
+            }
+        ]
+    }
+    assert invalid_target.status_code == 422, invalid_target.text
+    assert invalid_target.json()["error"]["details"] == {
+        "fields": [
+            {
+                "field": "taskId",
+                "message": "guided override must target shelter transport",
+            }
+        ]
+    }
+    assert invalid_joint.status_code == 422, invalid_joint.text
+    assert invalid_joint.json()["error"]["details"] == {
+        "fields": [
+            {
+                "field": "resourceId",
+                "message": "override fails capability, capacity, route, deadline, or uniqueness",
+            },
+            {
+                "field": "taskId",
+                "message": "override fails capability, capacity, route, deadline, or uniqueness",
+            },
+        ]
+    }
     assert restored.json()["latestPlan"]["versions"]["inputHash"] == planned["plan"]["inputHash"]
 
 

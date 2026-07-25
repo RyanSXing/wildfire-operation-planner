@@ -118,7 +118,21 @@ def exercise_api_error(
             ),
         )
     if isinstance(error, ExerciseCommandInvalid):
-        return ApiError(status_code=422, code=error.code, message=str(error))
+        return ApiError(
+            status_code=422,
+            code=error.code,
+            message=str(error),
+            details=(
+                {}
+                if not error.fields
+                else {
+                    "fields": [
+                        {"field": field, "message": str(error)}
+                        for field in error.fields
+                    ]
+                }
+            ),
+        )
     return ApiError(
         status_code=500,
         code="internal_error",

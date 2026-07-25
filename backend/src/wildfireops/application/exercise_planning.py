@@ -453,7 +453,9 @@ class ExercisePlanningService:
         if session.checkpoint_index != 2:
             raise ExerciseTransitionInvalid("override requires checkpoint three")
         if task_id != "shelter-capacity-transport":
-            raise ExerciseCommandInvalid("guided override must target shelter transport")
+            raise ExerciseCommandInvalid(
+                "guided override must target shelter transport", fields=("taskId",)
+            )
         resource = next(
             (
                 item
@@ -464,7 +466,7 @@ class ExercisePlanningService:
         )
         if resource is None or resource.resource_type != "evacuation-bus":
             raise ExerciseCommandInvalid(
-                "override fails capability, capacity, route, deadline, or uniqueness"
+                "override requires an evacuation-bus resource", fields=("resourceId",)
             )
         if session.objective is None:
             raise ExerciseTransitionInvalid("select an objective before overriding")
@@ -517,14 +519,16 @@ class ExercisePlanningService:
             result = solve_task_plan(request)
         except ValueError as error:
             raise ExerciseCommandInvalid(
-                "override fails capability, capacity, route, deadline, or uniqueness"
+                "override fails capability, capacity, route, deadline, or uniqueness",
+                fields=("resourceId", "taskId"),
             ) from error
         if not any(
             item.resource_id == resource_id and item.task_id == task_id
             for item in result.assignments
         ):
             raise ExerciseCommandInvalid(
-                "override fails capability, capacity, route, deadline, or uniqueness"
+                "override fails capability, capacity, route, deadline, or uniqueness",
+                fields=("resourceId", "taskId"),
             )
         output = serialize_task_result(result, routes, checkpoint)
         output["explanation"] = serialize_task_explanation(

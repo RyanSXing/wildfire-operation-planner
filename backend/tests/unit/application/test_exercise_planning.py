@@ -533,10 +533,7 @@ async def test_override_rejects_non_bus_resource_without_storing_plan_or_event()
     current = session(repository, checkpoint_index=2, consequences={"corridorCleared": True})
     await service.generate_plan(current.id, expected_version=1, idempotency_key="plan")
 
-    with pytest.raises(
-        ExerciseCommandInvalid,
-        match="override fails capability, capacity, route, deadline, or uniqueness",
-    ):
+    with pytest.raises(ExerciseCommandInvalid, match="evacuation-bus") as error:
         await service.apply_override(
             current.id,
             resource_id="engine-1",
@@ -545,6 +542,7 @@ async def test_override_rejects_non_bus_resource_without_storing_plan_or_event()
             idempotency_key="override",
         )
 
+    assert error.value.fields == ("resourceId",)
     assert len(repository.plans) == len(repository.events) == 1
 
 

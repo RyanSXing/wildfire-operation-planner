@@ -6,7 +6,6 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header
 from pydantic import JsonValue
 
-from wildfireops.api.command_errors import exercise_api_error
 from wildfireops.api.dependencies import (
     get_exercise_planning_service,
     get_exercise_query_service,
@@ -27,14 +26,11 @@ from wildfireops.api.schemas.exercises import (
 )
 from wildfireops.application.exercise_planning import ExercisePlanningService
 from wildfireops.application.exercises import (
-    ExerciseError,
     ExerciseEvent,
     ExerciseNotFound,
     ExercisePlanRun,
     ExerciseQueryService,
     ExerciseSessionService,
-    ExerciseTransitionInvalid,
-    ExerciseVersionConflict,
 )
 
 
@@ -46,10 +42,7 @@ async def exercise_metadata(
     exercise_id: str,
     service: Annotated[ExerciseQueryService, Depends(get_exercise_query_service)],
 ) -> ExerciseMetadataResponse:
-    try:
-        return _metadata_response(await service.metadata(exercise_id))
-    except ExerciseError as error:
-        raise exercise_api_error(error) from error
+    return _metadata_response(await service.metadata(exercise_id))
 
 
 @router.post(
@@ -65,12 +58,10 @@ async def create_session(
         Depends(get_exercise_session_service, scope="function"),
     ],
 ) -> ExerciseSessionResponse:
-    try:
-        if exercise_id != service.exercise_id:
-            raise ExerciseNotFound("exercise was not found")
-        return _session_response(await service.project(await service.create(idempotency_key=idempotency_key)))
-    except ExerciseError as error:
-        raise exercise_api_error(error) from error
+    if exercise_id != service.exercise_id:
+        raise ExerciseNotFound("exercise was not found")
+    session = await service.create(idempotency_key=idempotency_key)
+    return _session_response(await service.project(session))
 
 
 @router.get(
@@ -80,10 +71,7 @@ async def read_session(
     session_id: UUID,
     service: Annotated[ExerciseQueryService, Depends(get_exercise_query_service)],
 ) -> ExerciseSessionResponse:
-    try:
-        return _session_response(await service.session(session_id))
-    except ExerciseError as error:
-        raise exercise_api_error(error) from error
+    return _session_response(await service.session(session_id))
 
 
 @router.post(
@@ -98,18 +86,14 @@ async def select_objective(
         ExerciseSessionService,
         Depends(get_exercise_session_service, scope="function"),
     ],
-    queries: Annotated[ExerciseQueryService, Depends(get_exercise_query_service)],
 ) -> ExerciseSessionResponse:
-    try:
-        session = await service.select_objective(
-            session_id,
-            body.objective,
-            expected_version=body.expected_version,
-            idempotency_key=idempotency_key,
-        )
-        return _session_response(await service.project(session))
-    except ExerciseError as error:
-        raise await _command_error(error, queries, session_id) from error
+    session = await service.select_objective(
+        session_id,
+        body.objective,
+        expected_version=body.expected_version,
+        idempotency_key=idempotency_key,
+    )
+    return _session_response(await service.project(session))
 
 
 @router.post(
@@ -125,17 +109,13 @@ async def generate_plan(
         ExercisePlanningService,
         Depends(get_exercise_planning_service, scope="function"),
     ],
-    queries: Annotated[ExerciseQueryService, Depends(get_exercise_query_service)],
 ) -> ExercisePlanCommandResponse:
-    try:
-        plan, session = await service.generate_plan(
-            session_id,
-            expected_version=body.expected_version,
-            idempotency_key=idempotency_key,
-        )
-        return _plan_command_response(plan, session)
-    except ExerciseError as error:
-        raise await _command_error(error, queries, session_id) from error
+    plan, session = await service.generate_plan(
+        session_id,
+        expected_version=body.expected_version,
+        idempotency_key=idempotency_key,
+    )
+    return _plan_command_response(plan, session)
 
 
 @router.post(
@@ -150,17 +130,13 @@ async def advance(
         ExerciseSessionService,
         Depends(get_exercise_session_service, scope="function"),
     ],
-    queries: Annotated[ExerciseQueryService, Depends(get_exercise_query_service)],
 ) -> ExerciseSessionResponse:
-    try:
-        session = await service.advance(
-            session_id,
-            expected_version=body.expected_version,
-            idempotency_key=idempotency_key,
-        )
-        return _session_response(await service.project(session))
-    except ExerciseError as error:
-        raise await _command_error(error, queries, session_id) from error
+    session = await service.advance(
+        session_id,
+        expected_version=body.expected_version,
+        idempotency_key=idempotency_key,
+    )
+    return _session_response(await service.project(session))
 
 
 @router.post(
@@ -176,19 +152,15 @@ async def apply_override(
         ExercisePlanningService,
         Depends(get_exercise_planning_service, scope="function"),
     ],
-    queries: Annotated[ExerciseQueryService, Depends(get_exercise_query_service)],
 ) -> ExercisePlanCommandResponse:
-    try:
-        plan, session = await service.apply_override(
-            session_id,
-            resource_id=body.resource_id,
-            task_id=body.task_id,
-            expected_version=body.expected_version,
-            idempotency_key=idempotency_key,
-        )
-        return _plan_command_response(plan, session)
-    except ExerciseError as error:
-        raise await _command_error(error, queries, session_id) from error
+    plan, session = await service.apply_override(
+        session_id,
+        resource_id=body.resource_id,
+        task_id=body.task_id,
+        expected_version=body.expected_version,
+        idempotency_key=idempotency_key,
+    )
+    return _plan_command_response(plan, session)
 
 
 @router.post(
@@ -204,19 +176,15 @@ async def decide(
         ExerciseSessionService,
         Depends(get_exercise_session_service, scope="function"),
     ],
-    queries: Annotated[ExerciseQueryService, Depends(get_exercise_query_service)],
 ) -> ExerciseSessionResponse:
-    try:
-        session = await service.decide(
-            session_id,
-            display_name=body.display_name,
-            note=body.note,
-            expected_version=body.expected_version,
-            idempotency_key=idempotency_key,
-        )
-        return _session_response(await service.project(session))
-    except ExerciseError as error:
-        raise await _command_error(error, queries, session_id) from error
+    session = await service.decide(
+        session_id,
+        display_name=body.display_name,
+        note=body.note,
+        expected_version=body.expected_version,
+        idempotency_key=idempotency_key,
+    )
+    return _session_response(await service.project(session))
 
 
 @router.get("/api/exercise-sessions/{session_id}/audit", response_model=ExerciseAuditResponse)
@@ -224,10 +192,9 @@ async def audit(
     session_id: UUID,
     service: Annotated[ExerciseQueryService, Depends(get_exercise_query_service)],
 ) -> ExerciseAuditResponse:
-    try:
-        return ExerciseAuditResponse(items=tuple(_event_response(item) for item in await service.audit(session_id)))
-    except ExerciseError as error:
-        raise exercise_api_error(error) from error
+    return ExerciseAuditResponse(
+        items=tuple(_event_response(item) for item in await service.audit(session_id))
+    )
 
 
 @router.get(
@@ -237,30 +204,12 @@ async def debrief(
     session_id: UUID,
     service: Annotated[ExerciseQueryService, Depends(get_exercise_query_service)],
 ) -> ExerciseDebriefResponse:
-    try:
-        result = await service.debrief(session_id)
-        return ExerciseDebriefResponse(
-            session=_json_object(result["session"]),
-            plans=tuple(_json_object(item) for item in _json_sequence(result["plans"])),
-            final_plan=_json_object(result["finalPlan"]),
-            events=tuple(_json_object(item) for item in _json_sequence(result["events"])),
-        )
-    except ExerciseError as error:
-        raise exercise_api_error(error) from error
-
-
-async def _command_error(
-    error: ExerciseError, queries: ExerciseQueryService, session_id: UUID
-) -> Exception:
-    if not isinstance(error, (ExerciseVersionConflict, ExerciseTransitionInvalid)):
-        return exercise_api_error(error)
-    try:
-        current = await queries.session(session_id)
-    except ExerciseError:
-        return exercise_api_error(error)
-    return exercise_api_error(
-        error,
-        current_state=_session_response(current).model_dump(mode="json", by_alias=True),
+    result = await service.debrief(session_id)
+    return ExerciseDebriefResponse(
+        session=_json_object(result["session"]),
+        plans=tuple(_json_object(item) for item in _json_sequence(result["plans"])),
+        final_plan=_json_object(result["finalPlan"]),
+        events=tuple(_json_object(item) for item in _json_sequence(result["events"])),
     )
 
 

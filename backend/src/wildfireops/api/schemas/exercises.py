@@ -2,12 +2,15 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import Field, JsonValue
+from pydantic import ConfigDict
 
 from wildfireops.api.schemas.incidents import ApiModel
 
 
 class SessionCommand(ApiModel):
-    expected_version: int = Field(ge=1)
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1, strict=True)
 
 
 class SelectObjectiveRequest(SessionCommand):

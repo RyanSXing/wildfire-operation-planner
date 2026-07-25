@@ -205,6 +205,10 @@ class ExerciseTransitionInvalid(ExerciseError):
 class ExerciseCommandInvalid(ExerciseError):
     code = "exercise_command_invalid"
 
+    def __init__(self, message: str, *, fields: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.fields = fields
+
 
 class ExerciseIdempotencyConflict(ExerciseError):
     code = "exercise_idempotency_conflict"
