@@ -83,6 +83,102 @@ def test_initial_plan_explains_outcome_and_each_uncovered_task() -> None:
     assert explanation.changes[1].evidence["resourceIds"] == ("engine-1",)
 
 
+def test_unassigned_eligible_capacity_is_an_objective_tradeoff_not_contention() -> None:
+    explanation = explain_task_plan(
+        None,
+        {
+            "objective": "fastest-response",
+            "algorithm": {"objectiveWeights": {"travelWeight": 3}},
+            "status": "OPTIMAL",
+            "tasks": [
+                {
+                    "taskId": "remote-structure",
+                    "requiredCapacity": 1,
+                    "penalty": 10,
+                }
+            ],
+            "assignments": [],
+            "coveredTaskIds": [],
+            "uncoveredTaskIds": ["remote-structure"],
+            "candidateFacts": [
+                {
+                    "resourceId": "engine-1",
+                    "taskId": "remote-structure",
+                    "capacity": 1,
+                    "available": True,
+                    "capabilityCompatible": True,
+                    "routeReachable": True,
+                    "travelMinutes": 12.1,
+                    "deadlineMinutes": 30,
+                    "eligible": True,
+                }
+            ],
+        },
+    )
+
+    reason = explanation.changes[1]
+    assert reason.code == "task.uncovered-objective-tradeoff"
+    assert reason.summary == (
+        "remote-structure remains uncovered because assigning eligible resources "
+        "would not improve the selected objective."
+    )
+    assert reason.evidence == {
+        "taskId": "remote-structure",
+        "objective": "fastest-response",
+        "requiredCapacity": 1,
+        "uncoveredPenalty": 10,
+        "travelWeight": 3,
+        "minimumCoverTravelCost": 39,
+        "comparison": "travel-cost-higher",
+        "candidateTravelCosts": (
+            {
+                "resourceId": "engine-1",
+                "capacity": 1,
+                "travelMinutes": 12.1,
+                "weightedTravelCost": 39,
+            },
+        ),
+    }
+    assert all(item.code != "task.uncovered-contention" for item in explanation.changes)
+
+
+def test_objective_tradeoff_reports_a_tie_without_calling_it_more_expensive() -> None:
+    explanation = explain_task_plan(
+        None,
+        {
+            "objective": "fastest-response",
+            "algorithm": {"objectiveWeights": {"travelWeight": 2}},
+            "status": "OPTIMAL",
+            "tasks": [
+                {"taskId": "equal-cost-task", "requiredCapacity": 1, "penalty": 10}
+            ],
+            "assignments": [],
+            "coveredTaskIds": [],
+            "uncoveredTaskIds": ["equal-cost-task"],
+            "candidateFacts": [
+                {
+                    "resourceId": "engine-1",
+                    "taskId": "equal-cost-task",
+                    "capacity": 1,
+                    "available": True,
+                    "capabilityCompatible": True,
+                    "routeReachable": True,
+                    "travelMinutes": 5,
+                    "deadlineMinutes": 30,
+                    "eligible": True,
+                }
+            ],
+        },
+    )
+
+    reason = explanation.changes[1]
+    assert reason.code == "task.uncovered-objective-tradeoff"
+    assert reason.evidence["minimumCoverTravelCost"] == 10
+    assert reason.evidence["uncoveredPenalty"] == 10
+    assert reason.evidence["comparison"] == "equal"
+    assert "more expensive" not in reason.summary
+
+
 def test_uncovered_reason_uses_candidate_evidence_not_scores() -> None:
     explanation = explain_task_plan(
         None,

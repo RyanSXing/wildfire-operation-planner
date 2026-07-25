@@ -16,6 +16,7 @@ from wildfireops.application.exercises import (
     ExerciseTransitionInvalid,
 )
 from wildfireops.decision.task_optimizer import (
+    TaskAssignment,
     TaskOptimizationRequest,
     TaskOptimizationResult,
 )
@@ -866,6 +867,69 @@ def test_runtime_validation_accepts_the_curated_definition() -> None:
     from wildfireops.application.exercise_planning import validate_exercise_runtime
 
     validate_exercise_runtime(_runtime_definition(), graph())
+
+
+def test_runtime_validation_accepts_a_feasible_shelter_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wildfireops.application import exercise_planning
+
+    def feasible_shelter_plan(
+        request: TaskOptimizationRequest,
+    ) -> TaskOptimizationResult:
+        lock = request.locked_assignments[0]
+        task = next(item for item in request.tasks if item.task_id == lock.task_id)
+        resource = next(
+            item for item in request.resources if item.resource_id == lock.resource_id
+        )
+        route = next(
+            item
+            for item in request.routes
+            if item.resource_id == lock.resource_id and item.task_id == lock.task_id
+        )
+        return TaskOptimizationResult(
+            "FEASIBLE",
+            (
+                TaskAssignment(
+                    resource.resource_id,
+                    task.task_id,
+                    task.incident_id,
+                    task.asset_id,
+                    route.route.travel_minutes,
+                    resource.capacity,
+                ),
+            ),
+            tuple(item.task_id for item in request.tasks if item.task_id != task.task_id),
+            tuple(
+                item.resource_id
+                for item in request.resources
+                if item.resource_id != resource.resource_id
+            ),
+            0,
+            0,
+            0,
+            (),
+            2_000,
+            "task-allocation-v1",
+        )
+
+    monkeypatch.setattr(exercise_planning, "solve_task_plan", feasible_shelter_plan)
+
+    exercise_planning.validate_exercise_runtime(_runtime_definition(), graph())
+
+
+def test_runtime_validation_rejects_an_unknown_shelter_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wildfireops.application import exercise_planning
+
+    monkeypatch.setattr(exercise_planning, "solve_task_plan", _unknown_task_plan)
+
+    with pytest.raises(
+        exercise_planning.ExerciseRuntimeInvalid,
+        match=r"shelter override is unavailable for fastest-response",
+    ):
+        exercise_planning.validate_exercise_runtime(_runtime_definition(), graph())
 
 
 def test_runtime_validation_rejects_unknown_closure_edge() -> None:

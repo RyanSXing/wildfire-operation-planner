@@ -3,6 +3,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import json
+from math import ceil, isfinite
 
 from wildfireops.domain.observations import (
     FrozenJsonObject,
@@ -29,6 +30,7 @@ _ORDER = {
     "task.uncovered-deadline": 104,
     "task.uncovered-capacity": 105,
     "task.uncovered-contention": 106,
+    "task.uncovered-objective-tradeoff": 107,
 }
 
 
@@ -116,7 +118,14 @@ def _outcome_changes(current: FrozenJsonObject) -> list[PlanChange]:
     )
     facts = _candidate_facts(current.get("candidateFacts"))
     changes.extend(
-        _uncovered_reason(task_id, status, tasks.get(task_id), assignments, facts)
+        _uncovered_reason(
+            task_id,
+            status,
+            tasks.get(task_id),
+            assignments,
+            facts,
+            current,
+        )
         for task_id in uncovered_ids
     )
     return changes
@@ -128,6 +137,7 @@ def _uncovered_reason(
     task: FrozenJsonObject | None,
     assignments: Mapping[str, FrozenJsonObject],
     facts: tuple[FrozenJsonObject, ...],
+    planning: FrozenJsonObject,
 ) -> PlanChange:
     task_facts = tuple(item for item in facts if item.get("taskId") == task_id)
     if status not in {"FEASIBLE", "OPTIMAL"}:
@@ -184,6 +194,21 @@ def _uncovered_reason(
             "because eligible resources cannot supply its required capacity",
             {"requiredCapacity": required, "eligibleCapacity": capacity},
         )
+    unassigned = tuple(
+        item for item in eligible if item.get("resourceId") not in assignments
+    )
+    unassigned_capacity = sum(
+        value
+        for item in unassigned
+        if isinstance((value := item.get("capacity")), int)
+        and not isinstance(value, bool)
+    )
+    if (
+        isinstance(required, int)
+        and not isinstance(required, bool)
+        and unassigned_capacity >= required
+    ):
+        return _objective_tradeoff_reason(task_id, task, unassigned, planning)
     assigned_ids = {
         str(item.get("resourceId"))
         for item in eligible
@@ -202,6 +227,103 @@ def _uncovered_reason(
         f"{task_id} remains uncovered because {wording}.",
         {"taskId": task_id, "resourceIds": tuple(sorted(resource_ids))},
     )
+
+
+def _objective_tradeoff_reason(
+    task_id: str,
+    task: FrozenJsonObject | None,
+    candidates: tuple[FrozenJsonObject, ...],
+    planning: FrozenJsonObject,
+) -> PlanChange:
+    algorithm = planning.get("algorithm")
+    weights = algorithm.get("objectiveWeights") if isinstance(algorithm, Mapping) else None
+    travel_weight = weights.get("travelWeight") if isinstance(weights, Mapping) else None
+    required = None if task is None else task.get("requiredCapacity")
+    penalty = None if task is None else task.get("penalty")
+    candidate_costs: list[dict[str, object]] = []
+    capacity_costs: list[tuple[int, int]] = []
+    for item in sorted(candidates, key=lambda value: str(value.get("resourceId"))):
+        capacity = item.get("capacity")
+        travel_minutes = item.get("travelMinutes")
+        weighted_cost = (
+            travel_weight * ceil(travel_minutes)
+            if isinstance(travel_weight, int)
+            and not isinstance(travel_weight, bool)
+            and isinstance(travel_minutes, int | float)
+            and not isinstance(travel_minutes, bool)
+            and isfinite(travel_minutes)
+            else None
+        )
+        row: dict[str, object] = {
+            "resourceId": item.get("resourceId"),
+            "capacity": capacity,
+            "travelMinutes": travel_minutes,
+        }
+        if weighted_cost is not None:
+            row["weightedTravelCost"] = weighted_cost
+        candidate_costs.append(row)
+        if (
+            isinstance(capacity, int)
+            and not isinstance(capacity, bool)
+            and weighted_cost is not None
+        ):
+            capacity_costs.append((capacity, weighted_cost))
+    minimum_cost = (
+        _minimum_cover_cost(required, capacity_costs)
+        if isinstance(required, int) and not isinstance(required, bool)
+        else None
+    )
+    comparison = (
+        "travel-cost-higher"
+        if isinstance(penalty, int)
+        and not isinstance(penalty, bool)
+        and minimum_cost is not None
+        and minimum_cost > penalty
+        else (
+            "equal"
+            if isinstance(penalty, int)
+            and not isinstance(penalty, bool)
+            and minimum_cost == penalty
+            else "travel-cost-lower"
+        )
+    )
+    evidence: dict[str, object] = {
+        "taskId": task_id,
+        "objective": planning.get("objective"),
+        "requiredCapacity": required,
+        "uncoveredPenalty": penalty,
+        "travelWeight": travel_weight,
+        "candidateTravelCosts": candidate_costs,
+    }
+    if minimum_cost is not None:
+        evidence["minimumCoverTravelCost"] = minimum_cost
+        evidence["comparison"] = comparison
+    summary = (
+        f"{task_id} remains uncovered because assigning eligible resources "
+        "would not improve the selected objective."
+        if comparison != "travel-cost-lower"
+        else (
+            f"{task_id} remains uncovered despite unassigned eligible resources "
+            "that would improve the selected objective."
+        )
+    )
+    return _change("task.uncovered-objective-tradeoff", summary, evidence)
+
+
+def _minimum_cover_cost(
+    required_capacity: int,
+    candidates: Sequence[tuple[int, int]],
+) -> int | None:
+    costs = {0: 0}
+    for capacity, cost in candidates:
+        updated = dict(costs)
+        for supplied, current_cost in costs.items():
+            new_supplied = min(required_capacity, supplied + capacity)
+            new_cost = current_cost + cost
+            if new_cost < updated.get(new_supplied, new_cost + 1):
+                updated[new_supplied] = new_cost
+        costs = updated
+    return costs.get(required_capacity)
 
 
 def _candidate_reason(

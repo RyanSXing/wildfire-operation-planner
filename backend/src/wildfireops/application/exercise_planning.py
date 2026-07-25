@@ -284,7 +284,7 @@ def _has_valid_shelter_override(
         )
     except ValueError:
         return False
-    return result.status == "OPTIMAL" and any(
+    return result.status in {"FEASIBLE", "OPTIMAL"} and any(
         assignment.resource_id == resource_id
         and assignment.task_id == "shelter-capacity-transport"
         for assignment in result.assignments
