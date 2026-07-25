@@ -102,3 +102,23 @@ uv run pytest tests/unit tests/architecture -q
 
 Results: focused suite `38 passed`; backend unit/architecture `684 passed`
 (the same three multiprocessing fork warnings).
+
+## Replay projection boundary
+
+RED: added replay tests that forge missing and unexpected projection keys plus
+malformed actions, checkpoint, and latest-plan values; all five initially
+replayed successfully.
+
+GREEN: replay snapshots now require exactly the session state keys plus
+`allowedActions`, `currentCheckpoint`, and `latestPlan`. Actions must be the
+frozen nonblank-string sequence, checkpoint must equal the frozen definition
+checkpoint, and latest plan must be null or a frozen object.
+
+```bash
+cd backend
+WILDFIREOPS_DATABASE_URL='postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test' uv run pytest tests/unit/application/test_exercises.py tests/integration/persistence/test_exercises.py -q
+uv run ruff check src/wildfireops/application/exercises.py src/wildfireops/persistence/exercises.py tests/unit/application/test_exercises.py tests/integration/persistence/test_exercises.py
+uv run mypy src/wildfireops/application/exercises.py src/wildfireops/persistence/exercises.py
+```
+
+Result: focused suite `43 passed`; Ruff and mypy passed.

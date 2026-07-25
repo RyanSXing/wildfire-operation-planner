@@ -3,6 +3,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from types import MappingProxyType
 from typing import Literal, Protocol, cast
 from uuid import UUID
 
@@ -37,6 +38,11 @@ _STATE_KEYS = frozenset(
     }
 )
 _RESPONSE_SNAPSHOT = "_responseProjection"
+_PROJECTION_KEYS = _STATE_KEYS | {
+    "allowedActions",
+    "currentCheckpoint",
+    "latestPlan",
+}
 
 
 @dataclass(slots=True)
@@ -197,6 +203,34 @@ def _require_definition(
         or session.definition_digest != definition_digest
     ):
         raise ExerciseSessionNotFound("exercise session was not found")
+
+
+def _validate_replay_snapshot(
+    snapshot: object,
+    session: ExerciseSession,
+    definition: ExerciseDefinition,
+) -> None:
+    if not isinstance(snapshot, MappingProxyType) or set(snapshot) != _PROJECTION_KEYS:
+        raise RuntimeError("exercise replay response is invalid")
+    actions = snapshot["allowedActions"]
+    if not isinstance(actions, tuple) or not all(
+        isinstance(action, str) and action.strip() for action in actions
+    ):
+        raise RuntimeError("exercise replay response is invalid")
+    checkpoint = snapshot["currentCheckpoint"]
+    expected_checkpoint = freeze_json_object(
+        definition.checkpoints[session.checkpoint_index].model_dump(
+            mode="json", by_alias=True
+        )
+    )
+    if (
+        not isinstance(checkpoint, MappingProxyType)
+        or checkpoint != expected_checkpoint
+    ):
+        raise RuntimeError("exercise replay response is invalid")
+    latest_plan = snapshot["latestPlan"]
+    if latest_plan is not None and not isinstance(latest_plan, MappingProxyType):
+        raise RuntimeError("exercise replay response is invalid")
 
 
 class ExerciseSessionService:
@@ -474,8 +508,8 @@ class ExerciseSessionService:
         session = _session_from_state(event.after_state)
         _require_definition(session, self._definition, self._definition_digest)
         snapshot = event.inputs.get(_RESPONSE_SNAPSHOT)
-        if not isinstance(snapshot, Mapping):
-            raise RuntimeError("exercise replay response is missing")
+        _validate_replay_snapshot(snapshot, session, self._definition)
+        assert isinstance(snapshot, Mapping)
         snapshot_session = _session_from_state(
             {key: snapshot.get(key) for key in _STATE_KEYS}
         )

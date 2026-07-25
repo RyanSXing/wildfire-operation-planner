@@ -380,6 +380,43 @@ async def test_forged_same_session_snapshot_is_rejected() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda snapshot: snapshot.pop("allowedActions"),
+        lambda snapshot: snapshot.__setitem__("unexpected", True),
+        lambda snapshot: snapshot.__setitem__("allowedActions", ("", 1)),
+        lambda snapshot: snapshot.__setitem__("currentCheckpoint", {}),
+        lambda snapshot: snapshot.__setitem__("latestPlan", "not-an-object"),
+    ],
+)
+async def test_replay_rejects_malformed_full_projection(
+    mutate: object,
+) -> None:
+    repository = FakeExerciseRepository()
+    commands = service(repository)
+    session = await commands.create(idempotency_key="create")
+    await commands.select_objective(
+        session.id, "fastest-response", expected_version=1, idempotency_key="objective"
+    )
+    event = repository.events[-1]
+    snapshot = dict(event.inputs["_responseProjection"])
+    mutate(snapshot)  # type: ignore[operator]
+    repository.events[-1] = replace(
+        event,
+        inputs=freeze_json_object({**event.inputs, "_responseProjection": snapshot}),
+    )
+
+    with pytest.raises(RuntimeError, match="exercise replay response is invalid"):
+        await commands.select_objective(
+            session.id,
+            "fastest-response",
+            expected_version=1,
+            idempotency_key="objective",
+        )
+
+
+@pytest.mark.asyncio
 async def test_mismatched_definition_session_is_unavailable_to_commands_and_queries() -> (
     None
 ):
