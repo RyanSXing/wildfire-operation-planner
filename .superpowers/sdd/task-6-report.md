@@ -55,8 +55,22 @@ uv run pytest tests/architecture -q
 3 passed
 ```
 
-## Integration limitation
+## Local default database note
 
 The configured local PostgreSQL server lacks PostGIS. `uv run alembic upgrade
 head` fails on migration `0001` with `extension "postgis" is not available`,
 so `tests/integration/persistence/test_exercises.py` cannot create its schema.
+
+## PostGIS verification follow-up
+
+The designated test database was available at `localhost:55432` in container
+`wildfireops-exercise-test-db`. With
+`WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test`:
+
+```text
+uv run alembic upgrade head
+uv run pytest tests/integration/persistence/test_exercises.py -q
+16 passed in 3.02s
+```
+
+The non-PostGIS local default database limitation above is not a Task 6 defect.
