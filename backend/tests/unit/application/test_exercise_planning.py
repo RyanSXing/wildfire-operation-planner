@@ -13,6 +13,10 @@ from wildfireops.application.exercises import (
     ExerciseSessionService,
     ExerciseTransitionInvalid,
 )
+from wildfireops.decision.task_optimizer import (
+    TaskOptimizationRequest,
+    TaskOptimizationResult,
+)
 from wildfireops.domain.observations import freeze_json_object
 from wildfireops.domain.scenario_versions import IdempotencyClaim
 from wildfireops.geospatial.road_graph import RoadGraph
@@ -343,11 +347,11 @@ class FakeExerciseRepository:
 
 
 def planning_service(
-    repository: FakeExerciseRepository,
+    repository: FakeExerciseRepository, exercise_definition: ExerciseDefinition | None = None
 ) -> tuple[object, ExerciseSessionService]:
     from wildfireops.application.exercise_planning import ExercisePlanningService
 
-    exercise = definition()
+    exercise = definition() if exercise_definition is None else exercise_definition
     sessions = ExerciseSessionService(
         definition=exercise,
         definition_digest="a" * 64,
@@ -390,6 +394,21 @@ def session(
     )
     repository.sessions[value.id] = value
     return value
+
+
+def _unknown_task_plan(request: TaskOptimizationRequest) -> TaskOptimizationResult:
+    return TaskOptimizationResult(
+        "UNKNOWN",
+        (),
+        tuple(task.task_id for task in request.tasks),
+        tuple(resource.resource_id for resource in request.resources),
+        0,
+        0,
+        0,
+        (),
+        0,
+        "task-allocation-v1",
+    )
 
 
 def test_checkpoint_materialization_combines_both_incidents() -> None:
@@ -491,17 +510,8 @@ async def test_duplicate_plan_command_replays_same_plan() -> None:
 @pytest.mark.asyncio
 async def test_unknown_plan_is_stored_but_cannot_advance(monkeypatch: pytest.MonkeyPatch) -> None:
     from wildfireops.application import exercise_planning
-    from wildfireops.decision.task_optimizer import TaskOptimizationResult
 
-    monkeypatch.setattr(
-        exercise_planning,
-        "solve_task_plan",
-        lambda request: TaskOptimizationResult(
-            "UNKNOWN", (), tuple(task.task_id for task in request.tasks),
-            tuple(resource.resource_id for resource in request.resources),
-            0, 0, 0, (), 0, "task-allocation-v1"
-        ),
-    )
+    monkeypatch.setattr(exercise_planning, "solve_task_plan", _unknown_task_plan)
     repository = FakeExerciseRepository()
     service, sessions = planning_service(repository)
     current = session(repository)
@@ -584,6 +594,159 @@ async def test_override_recalculates_uncovered_tasks_and_objective() -> None:
     assert "operator.override-changed-plan" in {
         item["code"] for item in plan.output_data["explanation"]["changes"]
     }
+
+
+@pytest.mark.asyncio
+async def test_override_validates_a_semantically_unchanged_frozen_plan() -> None:
+    exercise_data = definition().model_dump(
+        mode="json", by_alias=True, fallback=dict, warnings=False
+    )
+    tasks = exercise_data["checkpoints"][2]["tasks"]
+    tasks[1]["basePriority"] = 1
+    tasks[2]["basePriority"] = 100
+    repository = FakeExerciseRepository()
+    service, _ = planning_service(
+        repository, ExerciseDefinition.model_validate(exercise_data)
+    )
+    current = session(repository, checkpoint_index=2, consequences={"corridorCleared": True})
+    prior, _ = await service.generate_plan(
+        current.id, expected_version=1, idempotency_key="plan"
+    )
+
+    override, _ = await service.apply_override(
+        current.id,
+        resource_id="bus-1",
+        task_id="shelter-capacity-transport",
+        expected_version=2,
+        idempotency_key="override",
+    )
+
+    assert prior.output_data["assignments"] == override.output_data["assignments"]
+    assert "operator.override-validated" in {
+        item["code"] for item in override.output_data["explanation"]["changes"]
+    }
+
+
+@pytest.mark.asyncio
+async def test_failed_plan_replay_returns_latest_prior_actionable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wildfireops.application import exercise_planning
+
+    repository = FakeExerciseRepository()
+    service, _ = planning_service(repository)
+    current = session(repository)
+    await service.generate_plan(current.id, expected_version=1, idempotency_key="first")
+    latest, _ = await service.generate_plan(
+        current.id, expected_version=2, idempotency_key="latest"
+    )
+    monkeypatch.setattr(exercise_planning, "solve_task_plan", _unknown_task_plan)
+    failed, projection = await service.generate_plan(
+        current.id, expected_version=3, idempotency_key="failed"
+    )
+
+    replay, replay_projection = await service.generate_plan(
+        current.id, expected_version=3, idempotency_key="failed"
+    )
+
+    assert repository.events[-1].inputs["visiblePlanId"] == str(latest.id)
+    assert projection["latestPlan"] == latest.output_data
+    assert replay.id == failed.id
+    assert replay_projection == projection
+
+
+@pytest.mark.asyncio
+async def test_failed_plan_replay_rejects_older_visible_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wildfireops.application import exercise_planning
+
+    repository = FakeExerciseRepository()
+    service, _ = planning_service(repository)
+    current = session(repository)
+    older, _ = await service.generate_plan(
+        current.id, expected_version=1, idempotency_key="older"
+    )
+    await service.generate_plan(current.id, expected_version=2, idempotency_key="latest")
+    monkeypatch.setattr(exercise_planning, "solve_task_plan", _unknown_task_plan)
+    await service.generate_plan(current.id, expected_version=3, idempotency_key="failed")
+    event = repository.events[-1]
+    snapshot = dict(event.inputs["_responseProjection"])
+    snapshot["latestPlan"] = older.output_data
+    repository.events[-1] = replace(
+        event,
+        inputs=freeze_json_object(
+            {
+                **event.inputs,
+                "visiblePlanId": str(older.id),
+                "_responseProjection": snapshot,
+            }
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="exercise replay response is invalid"):
+        await service.generate_plan(
+            current.id, expected_version=3, idempotency_key="failed"
+        )
+
+
+@pytest.mark.asyncio
+async def test_failed_plan_replay_rejects_visible_plan_output_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wildfireops.application import exercise_planning
+
+    repository = FakeExerciseRepository()
+    service, _ = planning_service(repository)
+    current = session(repository)
+    await service.generate_plan(current.id, expected_version=1, idempotency_key="plan")
+    monkeypatch.setattr(exercise_planning, "solve_task_plan", _unknown_task_plan)
+    failed, _ = await service.generate_plan(
+        current.id, expected_version=2, idempotency_key="failed"
+    )
+    event = repository.events[-1]
+    snapshot = dict(event.inputs["_responseProjection"])
+    snapshot["latestPlan"] = failed.output_data
+    repository.events[-1] = replace(
+        event,
+        inputs=freeze_json_object(
+            {**event.inputs, "_responseProjection": snapshot}
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="exercise replay response is invalid"):
+        await service.generate_plan(
+            current.id, expected_version=2, idempotency_key="failed"
+        )
+
+
+@pytest.mark.asyncio
+async def test_failed_plan_replay_rejects_attempt_missing_from_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wildfireops.application import exercise_planning
+
+    repository = FakeExerciseRepository()
+    service, _ = planning_service(repository)
+    current = session(repository)
+    await service.generate_plan(current.id, expected_version=1, idempotency_key="plan")
+    monkeypatch.setattr(exercise_planning, "solve_task_plan", _unknown_task_plan)
+    failed, _ = await service.generate_plan(
+        current.id, expected_version=2, idempotency_key="failed"
+    )
+
+    async def incomplete_history(session_id: UUID) -> tuple[ExercisePlanRun, ...]:
+        return tuple(
+            plan
+            for plan in repository.plans
+            if plan.session_id == session_id and plan.id != failed.id
+        )
+
+    monkeypatch.setattr(repository, "list_plans", incomplete_history)
+    with pytest.raises(RuntimeError, match="exercise replay integrity is invalid"):
+        await service.generate_plan(
+            current.id, expected_version=2, idempotency_key="failed"
+        )
 
 
 @pytest.mark.asyncio

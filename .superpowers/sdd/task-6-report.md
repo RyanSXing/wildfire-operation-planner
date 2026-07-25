@@ -124,3 +124,27 @@ It passed: `1 passed in 1.00s`.
 Override validation compares thawed JSON shapes, so it reports a neutral
 validated lock when the persisted plan is unchanged. Failed replay validates
 the exact latest actionable plan preceding the attempted run.
+
+## Regression coverage follow-up
+
+- Unit coverage now proves a frozen persisted plan whose assignments and
+  objective fields are unchanged emits `operator.override-validated`; the
+  existing changed-plan assertion continues to cover
+  `operator.override-changed-plan`.
+- Failed-plan replay returns the exact latest prior actionable projection and
+  rejects an older substituted `visiblePlanId`, a visible-plan output mismatch,
+  and an attempted plan missing from the ordered history.
+
+```text
+uv run pytest tests/unit/application/test_exercise_planning.py -q
+15 passed in 0.50s
+
+WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test \
+  uv run pytest tests/integration/application/test_exercise_planning.py -q
+1 passed in 0.88s
+
+uv run ruff check src/wildfireops/application/exercise_planning.py \
+  tests/unit/application/test_exercise_planning.py \
+  tests/integration/application/test_exercise_planning.py
+All checks passed
+```
