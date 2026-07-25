@@ -1,5 +1,5 @@
-import type { Feature, FeatureCollection, LineString } from "geojson";
-import maplibregl, { type GeoJSONSource, type StyleSpecification } from "maplibre-gl";
+import type { Feature, FeatureCollection, LineString, Point } from "geojson";
+import maplibregl, { type GeoJSONSource } from "maplibre-gl";
 import { useEffect, useMemo, useRef } from "react";
 
 import type {
@@ -8,30 +8,15 @@ import type {
   ExerciseResource,
   PlanOutput,
 } from "../api/exerciseTypes";
-import type { RoadEdge } from "../api/types";
-
-/**
- * A schematic operations plot rather than a basemap view: the exercise runs
- * against a fixed replay package, so the map is drawn only from geometry the
- * API returned (asset positions, staging points, real road-graph route
- * segments). No third-party tiles means the view is identical on every run,
- * which is what the exercise promises.
- */
-const PLOT_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {},
-  layers: [
-    {
-      id: "wf-backdrop",
-      type: "background",
-      paint: { "background-color": "#10161d" },
-    },
-  ],
-};
+import type { Detection, RoadEdge } from "../api/types";
+import { BASEMAP_STYLE_URL, INLINE_MAP_STYLE } from "../features/map/layers";
 
 const SOURCES = {
-  routes: "wf-routes",
+  scrim: "wf-scrim",
+  detections: "wf-detections",
+  simulated: "wf-simulated",
   closures: "wf-closures",
+  routes: "wf-routes",
 } as const;
 
 const RESOURCE_LETTERS: Record<string, string> = {
@@ -41,11 +26,35 @@ const RESOURCE_LETTERS: Record<string, string> = {
   "road-crew": "R",
 };
 
+/** A world-covering polygon, used to darken whichever basemap resolved. */
+const WORLD: FeatureCollection = {
+  type: "FeatureCollection",
+  features: [
+    {
+      type: "Feature",
+      properties: {},
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-180, -85],
+            [180, -85],
+            [180, 85],
+            [-180, 85],
+            [-180, -85],
+          ],
+        ],
+      },
+    },
+  ],
+};
+
 export type ExerciseMapProps = {
   checkpoint: ExerciseCheckpoint;
   assets: readonly ExerciseAsset[];
   resources: readonly ExerciseResource[];
   plan: PlanOutput | null;
+  detections: readonly Detection[];
   routeEdges: readonly RoadEdge[];
   closedEdges: readonly RoadEdge[];
   selectedId: string | null;
@@ -58,6 +67,7 @@ export function ExerciseMap({
   assets,
   resources,
   plan,
+  detections,
   routeEdges,
   closedEdges,
   selectedId,
@@ -84,20 +94,34 @@ export function ExerciseMap({
     );
   }, [plan, checkpoint.tasks]);
 
-  const routesData = useMemo(
-    () => toLineCollection(routeEdges),
-    [routeEdges],
+  const routesData = useMemo(() => toLineCollection(routeEdges), [routeEdges]);
+  const closuresData = useMemo(() => toLineCollection(closedEdges), [closedEdges]);
+  const detectionsData = useMemo(
+    () => toDetectionCollection(detections),
+    [detections],
   );
-  const closuresData = useMemo(
-    () => toLineCollection(closedEdges),
-    [closedEdges],
+  // Incidents the exercise invents are drawn separately from observed
+  // detections, so a simulated fire can never be read as a historical one.
+  const simulatedData = useMemo(
+    () => toSimulatedCollection(checkpoint),
+    [checkpoint],
   );
 
-  // Sources only exist once the style has loaded. Route geometry usually
-  // arrives before that, so the latest collections are held here and applied
-  // from the load handler as well as from the effect below.
-  const pendingRef = useRef({ routes: routesData, closures: closuresData });
-  pendingRef.current = { routes: routesData, closures: closuresData };
+  // Sources only exist once a style has loaded. Data usually arrives before
+  // that, so the latest collections are held here and applied from the
+  // style.load handler as well as from the effect below.
+  const pendingRef = useRef({
+    routes: routesData,
+    closures: closuresData,
+    detections: detectionsData,
+    simulated: simulatedData,
+  });
+  pendingRef.current = {
+    routes: routesData,
+    closures: closuresData,
+    detections: detectionsData,
+    simulated: simulatedData,
+  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -106,27 +130,88 @@ export function ExerciseMap({
     }
     const map = new maplibregl.Map({
       container,
-      style: PLOT_STYLE,
-      center: [-121.68, 39.83],
-      zoom: 9.4,
-      attributionControl: false,
+      style: BASEMAP_STYLE_URL,
+      center: [-121.68, 39.9],
+      zoom: 8.5,
+      attributionControl: { compact: true },
     });
     mapRef.current = map;
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
-    map.on("error", () => {
-      // A style or source error must not take the workflow down with it.
-    });
+    map.addControl(
+      new maplibregl.NavigationControl({ showCompass: false }),
+      "bottom-right",
+    );
     map.on("click", () => onSelectRef.current(null));
-    map.on("load", () => {
-      loadedRef.current = true;
-      map.addSource(SOURCES.closures, {
-        type: "geojson",
-        data: pendingRef.current.closures,
+
+    let fallbackAttempted = false;
+
+    const initializeLayers = (): void => {
+      if (loadedRef.current) {
+        return;
+      }
+      const data = pendingRef.current;
+
+      // Darken whichever basemap resolved, so daylight cartography sits behind
+      // the operational overlay instead of competing with it.
+      map.addSource(SOURCES.scrim, { type: "geojson", data: WORLD });
+      map.addLayer({
+        id: "wf-scrim",
+        type: "fill",
+        source: SOURCES.scrim,
+        paint: { "fill-color": "#0b1016", "fill-opacity": 0.62 },
       });
-      map.addSource(SOURCES.routes, {
+
+      map.addSource(SOURCES.detections, {
         type: "geojson",
-        data: pendingRef.current.routes,
+        data: data.detections,
       });
+      map.addLayer({
+        id: "wf-detections-glow",
+        type: "circle",
+        source: SOURCES.detections,
+        paint: {
+          "circle-color": "#ff6a3d",
+          "circle-opacity": 0.16,
+          "circle-blur": 1,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 7, 9, 12, 28],
+        },
+      });
+      map.addLayer({
+        id: "wf-detections-core",
+        type: "circle",
+        source: SOURCES.detections,
+        paint: {
+          "circle-color": "#ff6a3d",
+          "circle-opacity": [
+            "interpolate",
+            ["linear"],
+            ["get", "confidence"],
+            0,
+            0.35,
+            1,
+            0.9,
+          ],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 7, 2, 12, 6],
+          "circle-stroke-color": "#ffc7ad",
+          "circle-stroke-width": 0.6,
+          "circle-stroke-opacity": 0.55,
+        },
+      });
+
+      map.addSource(SOURCES.simulated, { type: "geojson", data: data.simulated });
+      map.addLayer({
+        id: "wf-simulated-fire",
+        type: "circle",
+        source: SOURCES.simulated,
+        paint: {
+          "circle-color": "#f5b02e",
+          "circle-opacity": 0.2,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 7, 10, 12, 30],
+          "circle-stroke-color": "#f5b02e",
+          "circle-stroke-width": 1.5,
+        },
+      });
+
+      map.addSource(SOURCES.closures, { type: "geojson", data: data.closures });
       map.addLayer({
         id: "wf-closures-line",
         type: "line",
@@ -134,6 +219,8 @@ export function ExerciseMap({
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#ff6a3d", "line-width": 4, "line-opacity": 0.75 },
       });
+
+      map.addSource(SOURCES.routes, { type: "geojson", data: data.routes });
       map.addLayer({
         id: "wf-routes-glow",
         type: "line",
@@ -148,7 +235,22 @@ export function ExerciseMap({
         layout: { "line-cap": "round", "line-join": "round" },
         paint: { "line-color": "#3fd6ef", "line-width": 2.6 },
       });
-    });
+
+      loadedRef.current = true;
+    };
+
+    // Tiles are a convenience, not a dependency. If the style cannot load, the
+    // plot falls back to a flat dark canvas and every overlay still renders.
+    const handleStyleError = (): void => {
+      if (loadedRef.current || fallbackAttempted) {
+        return;
+      }
+      fallbackAttempted = true;
+      map.setStyle(INLINE_MAP_STYLE);
+    };
+
+    map.on("style.load", initializeLayers);
+    map.on("error", handleStyleError);
 
     const observer =
       typeof ResizeObserver === "undefined"
@@ -161,6 +263,8 @@ export function ExerciseMap({
 
     return () => {
       observer?.disconnect();
+      map.off("style.load", initializeLayers);
+      map.off("error", handleStyleError);
       for (const marker of markers.values()) {
         marker.remove();
       }
@@ -250,7 +354,9 @@ export function ExerciseMap({
     }
     setData(map, SOURCES.routes, routesData);
     setData(map, SOURCES.closures, closuresData);
-  }, [routesData, closuresData]);
+    setData(map, SOURCES.detections, detectionsData);
+    setData(map, SOURCES.simulated, simulatedData);
+  }, [routesData, closuresData, detectionsData, simulatedData]);
 
   // Closed corridors get a ✕ at their midpoint so the reason a unit is taking
   // the long way round is visible without reading the plan text.
@@ -286,12 +392,21 @@ export function ExerciseMap({
     }
   }, [closedEdges]);
 
-  // Keep every asset in frame as checkpoints add and remove them.
+  // Keep the fire and everything it threatens in frame together.
   useEffect(() => {
     const map = mapRef.current;
-    const points = assets.map(
-      (asset) => [asset.position.longitude, asset.position.latitude] as [number, number],
-    );
+    const points: [number, number][] = [
+      ...assets.map(
+        (asset) =>
+          [asset.position.longitude, asset.position.latitude] as [number, number],
+      ),
+      ...detectionsData.features.map(
+        (feature) => feature.geometry.coordinates as [number, number],
+      ),
+      ...simulatedData.features.map(
+        (feature) => feature.geometry.coordinates as [number, number],
+      ),
+    ];
     if (!map || points.length === 0) {
       return;
     }
@@ -299,14 +414,14 @@ export function ExerciseMap({
       (acc, point) => acc.extend(point),
       new maplibregl.LngLatBounds(points[0], points[0]),
     );
-    // Extra padding at the bottom keeps the cluster of staged units clear of
-    // the command dock and whichever panel is sitting above it.
+    // Extra padding at the bottom keeps the staged units clear of the command
+    // dock and whichever panel is sitting above it.
     map.fitBounds(bounds, {
       padding: { top: 72, right: 48, bottom: 200, left: 48 },
-      maxZoom: 10.5,
+      maxZoom: 11,
       duration: 600,
     });
-  }, [assets]);
+  }, [assets, detectionsData, simulatedData]);
 
   return <div ref={containerRef} className="wf-map" data-testid="exercise-map" />;
 }
@@ -314,7 +429,7 @@ export function ExerciseMap({
 function setData(
   map: maplibregl.Map,
   sourceId: string,
-  data: FeatureCollection<LineString>,
+  data: FeatureCollection,
 ): void {
   const source = map.getSource(sourceId) as GeoJSONSource | undefined;
   source?.setData(data);
@@ -335,6 +450,51 @@ function toLineCollection(
         ],
   );
   return { type: "FeatureCollection", features };
+}
+
+function toDetectionCollection(
+  detections: readonly Detection[],
+): FeatureCollection<Point> {
+  const features = detections.flatMap((detection): Feature<Point>[] =>
+    detection.geometry.type === "Point"
+      ? [
+          {
+            type: "Feature",
+            geometry: detection.geometry,
+            properties: {
+              confidence: detection.confidence,
+              intensity: detection.intensity,
+              observedAt: detection.observedAt,
+            },
+          },
+        ]
+      : [],
+  );
+  return { type: "FeatureCollection", features };
+}
+
+function toSimulatedCollection(
+  checkpoint: ExerciseCheckpoint,
+): FeatureCollection<Point> {
+  return {
+    type: "FeatureCollection",
+    features: checkpoint.incidents.flatMap((incident): Feature<Point>[] => {
+      const position = incident.simulatedPosition;
+      if (!position) {
+        return [];
+      }
+      return [
+        {
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [position.longitude, position.latitude],
+          },
+          properties: { name: incident.name },
+        },
+      ];
+    }),
+  };
 }
 
 function midpoint(edge: RoadEdge): [number, number] | null {

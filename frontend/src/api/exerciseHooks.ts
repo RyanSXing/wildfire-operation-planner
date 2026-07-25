@@ -1,7 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { ApiClientError } from "./client";
+import { ApiClientError, apiClient } from "./client";
 import {
   ExerciseConflictError,
   exerciseApiClient,
@@ -193,4 +193,61 @@ function isRetryable(error: unknown): boolean {
       error.status === 429 ||
       error.status >= 500)
   );
+}
+
+/**
+ * Resolves the satellite detections an exercise checkpoint cites as its
+ * provenance.
+ *
+ * The join is by detection identity, not by incident name: the replay's
+ * clustering can put the detection an exercise cites into an incident whose
+ * generated name is not "Park Fire", and drawing the wrong fire would be worse
+ * than drawing none.
+ */
+export function useCitedDetections(identities: readonly string[]) {
+  const wanted = useMemo(
+    () => [...new Set(identities)].sort(),
+    [identities],
+  );
+  return useQuery({
+    queryKey: [...exerciseRoot, "cited-detections", wanted] as const,
+    enabled: wanted.length > 0,
+    queryFn: async ({ signal }) => {
+      const list = await apiClient.listIncidents(signal);
+      const details = await Promise.all(
+        list.items.map((item) => apiClient.getIncident(item.id, signal)),
+      );
+      return selectCitedDetections(details, wanted);
+    },
+  });
+}
+
+type DetectionSource = {
+  readonly detections: readonly {
+    readonly sourceName: string;
+    readonly sourceRecordId: string;
+  }[];
+};
+
+/**
+ * Picks the detections belonging to whichever incidents contain the cited
+ * identities.
+ *
+ * Matching on the incident *name* looks equivalent and is not: the replay's
+ * clustering can place the detection an exercise cites inside an incident whose
+ * generated name is nothing like the exercise's. Drawing that wrong cluster
+ * would put the fire in the wrong place with no visible sign of the error.
+ */
+export function selectCitedDetections<T extends DetectionSource>(
+  incidents: readonly T[],
+  identities: readonly string[],
+): T["detections"][number][] {
+  const wanted = new Set(identities);
+  return incidents
+    .filter((incident) =>
+      incident.detections.some((detection) =>
+        wanted.has(`${detection.sourceName}:${detection.sourceRecordId}`),
+      ),
+    )
+    .flatMap((incident) => [...incident.detections]);
 }

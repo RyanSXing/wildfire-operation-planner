@@ -53,6 +53,25 @@ test("an operator completes the Park Fire decision exercise end to end", async (
   // The planner cannot cover Chico with one bus; the reason must be explained.
   await expect(drawer).toContainText("Evacuate Chico city is uncovered");
 
+  // The fire itself has to be on the plot, drawn from the satellite detections
+  // the checkpoint cites as its provenance.
+  const legend = page.getByLabel("Plot legend");
+  await expect(legend).toContainText("Fire detection (satellite)");
+  const detectionCount = await page.evaluate(async () => {
+    const list = await (await fetch("/api/incidents")).json();
+    const details = await Promise.all(
+      list.items.map(async (item: { id: string }) =>
+        (await fetch(`/api/incidents/${item.id}`)).json(),
+      ),
+    );
+    return details.reduce(
+      (total: number, incident: { detections: unknown[] }) =>
+        total + incident.detections.length,
+      0,
+    );
+  });
+  expect(detectionCount).toBeGreaterThan(0);
+
   await continueToNextCheckpoint(page);
 
   // 5 — cascading disruption, announced as an explained change set.

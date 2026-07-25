@@ -7,6 +7,7 @@ import {
   useExerciseDebrief,
   useExerciseMetadata,
   useExerciseSession,
+  useCitedDetections,
   useSandboxPlan,
 } from "../api/exerciseHooks";
 import type {
@@ -142,6 +143,17 @@ export function ExerciseWorkspace() {
     }
     return [...ids];
   }, [plan, closedEdgeIds]);
+  // The checkpoint cites the satellite detections that establish its historical
+  // incidents; those are the fire on the plot.
+  const citedIdentities = useMemo(
+    () =>
+      (session?.currentCheckpoint.incidents ?? []).flatMap(
+        (incident) => incident.detectionIdentities,
+      ),
+    [session],
+  );
+  const detectionQuery = useCitedDetections(citedIdentities);
+
   const { query: edgeQuery } = useExactRoadEdges(graphVersion, wantedEdgeIds);
   const edges = useMemo(
     () => edgeQuery.data?.items ?? [],
@@ -350,6 +362,7 @@ export function ExerciseWorkspace() {
             assets={metadata.assets}
             resources={metadata.resources}
             plan={plan}
+            detections={detectionQuery.data ?? []}
             routeEdges={routeEdges}
             closedEdges={closedEdges}
             selectedId={selection?.id ?? null}
@@ -388,6 +401,14 @@ export function ExerciseWorkspace() {
         </div>
 
         <div className="wf-legend" aria-label="Plot legend">
+          <span>
+            <span className="wf-key-fire" /> Fire detection (satellite)
+          </span>
+          {checkpoint.incidents.some((item) => item.simulatedPosition) && (
+            <span>
+              <span className="wf-key-simulated" /> Simulated fire
+            </span>
+          )}
           <span>
             <span className="wf-key-unit" /> Response unit
           </span>

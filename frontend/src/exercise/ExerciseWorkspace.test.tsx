@@ -11,7 +11,12 @@ import type {
   PlanOutput,
 } from "../api/exerciseTypes";
 import { AppProviders } from "../app/AppProviders";
-import { mapLibreMock, resetMapLibreTestState } from "../test/maplibre";
+import { BASEMAP_STYLE_URL, INLINE_MAP_STYLE } from "../features/map/layers";
+import {
+  mapLibreMock,
+  mapLibreTestState,
+  resetMapLibreTestState,
+} from "../test/maplibre";
 import { ExerciseWorkspace, SESSION_STORAGE_KEY } from "./ExerciseWorkspace";
 
 vi.mock("maplibre-gl", () => ({ default: mapLibreMock }));
@@ -432,6 +437,31 @@ describe("ExerciseWorkspace", () => {
       expect(call[1].edgeIds ?? []).not.toContain("edge-nunneley");
     }
     expect(document.querySelector(".wf-marker--closed")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the offline plot when the basemap style cannot load", async () => {
+    vi.spyOn(exerciseApiClient, "getSession").mockResolvedValue(
+      session({
+        objective: "protect-critical-services",
+        version: 2,
+        allowedActions: ["select-objective", "generate-plan"],
+      }),
+    );
+    window.sessionStorage.setItem(SESSION_STORAGE_KEY, session().id);
+    renderWorkspace();
+
+    await waitFor(() =>
+      expect(mapLibreTestState.instances.length).toBeGreaterThan(0),
+    );
+    const map = mapLibreTestState.instances[0];
+    expect(map.options.style).toBe(BASEMAP_STYLE_URL);
+    expect(map.setStyleCalls).toHaveLength(0);
+
+    map.emit("error");
+
+    // Tiles are a convenience: losing them swaps in the flat plot rather than
+    // leaving the operator with a blank workspace.
+    expect(map.setStyleCalls).toEqual([INLINE_MAP_STYLE]);
   });
 
   it("adopts the authoritative session when the server rejects a stale version", async () => {
