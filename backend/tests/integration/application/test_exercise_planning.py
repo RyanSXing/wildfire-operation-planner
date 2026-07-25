@@ -52,4 +52,6 @@ async def test_checkpoint_three_override_persists_json_evidence(db_session: Asyn
     stored = await repository.get_plan(selected.id, override.id)
     assert stored is not None
     assert stored.output_data["operatorOverride"]["beforePlanId"] == str(plan.id)
-    assert stored.output_data["explanation"]["changes"]
+    assert "operator.override-changed-plan" in {
+        item["code"] for item in stored.output_data["explanation"]["changes"]
+    }
