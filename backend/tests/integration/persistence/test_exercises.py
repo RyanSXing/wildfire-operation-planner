@@ -168,6 +168,99 @@ async def test_plan_run_is_not_updated_by_repository(
 
 
 @pytest.mark.asyncio
+async def test_plan_runs_keep_insertion_order_within_one_transaction(
+    db_session: AsyncSession,
+) -> None:
+    session = await create_session(ExerciseRepository(db_session))
+    first = ExercisePlanRunModel(
+        id=UUID(int=3),
+        session_id=session.id,
+        checkpoint_key="initial",
+        input_hash="b" * 64,
+        input_data={"position": "first"},
+        output_data={},
+        versions={},
+    )
+    second = ExercisePlanRunModel(
+        id=UUID(int=1),
+        session_id=session.id,
+        checkpoint_key="initial",
+        input_hash="c" * 64,
+        input_data={"position": "second"},
+        output_data={},
+        versions={},
+    )
+    third = ExercisePlanRunModel(
+        id=UUID(int=2),
+        session_id=session.id,
+        checkpoint_key="initial",
+        input_hash="d" * 64,
+        input_data={"position": "third"},
+        output_data={},
+        versions={},
+    )
+    db_session.add_all([first, second, third])
+    await db_session.flush()
+
+    repository = ExerciseRepository(db_session)
+
+    assert tuple(item.id for item in await repository.list_plans(session.id)) == (
+        first.id,
+        second.id,
+        third.id,
+    )
+    assert await repository.latest_plan(session.id, "initial") == third
+
+
+@pytest.mark.asyncio
+async def test_events_are_ordered_by_resulting_session_version(
+    db_session: AsyncSession,
+) -> None:
+    session = await create_session(ExerciseRepository(db_session))
+    events = [
+        ExerciseEventModel(
+            id=UUID(int=1),
+            session_id=session.id,
+            event_type="session.changed",
+            actor_callsign="EMBER-101",
+            expected_session_version=2,
+            resulting_session_version=3,
+            before_state={},
+            after_state={},
+            inputs={},
+        ),
+        ExerciseEventModel(
+            id=UUID(int=3),
+            session_id=session.id,
+            event_type="session.changed",
+            actor_callsign="EMBER-101",
+            expected_session_version=0,
+            resulting_session_version=1,
+            before_state={},
+            after_state={},
+            inputs={},
+        ),
+        ExerciseEventModel(
+            id=UUID(int=2),
+            session_id=session.id,
+            event_type="session.changed",
+            actor_callsign="EMBER-101",
+            expected_session_version=1,
+            resulting_session_version=2,
+            before_state={},
+            after_state={},
+            inputs={},
+        ),
+    ]
+    db_session.add_all(events)
+    await db_session.flush()
+
+    listed = await ExerciseRepository(db_session).list_events(session.id)
+
+    assert tuple(item.resulting_session_version for item in listed) == (1, 2, 3)
+
+
+@pytest.mark.asyncio
 async def test_repository_leaves_transaction_ownership_to_caller(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -190,6 +283,9 @@ async def test_repository_leaves_transaction_ownership_to_caller(
 async def test_lock_session_serializes_concurrent_commands() -> None:
     engine = create_engine(Settings())
     created_id: UUID | None = None
+    first_task: asyncio.Task[int] | None = None
+    second_task: asyncio.Task[int] | None = None
+    release_first = asyncio.Event()
     try:
         async with engine.begin() as connection:
             async with AsyncSession(bind=connection, expire_on_commit=False) as session:
@@ -197,7 +293,6 @@ async def test_lock_session_serializes_concurrent_commands() -> None:
         assert created_id is not None
 
         first_has_lock = asyncio.Event()
-        release_first = asyncio.Event()
         second_attempted_lock = asyncio.Event()
 
         async def increment_first() -> int:
@@ -229,9 +324,9 @@ async def test_lock_session_serializes_concurrent_commands() -> None:
                     return observed_version
 
         first_task = asyncio.create_task(increment_first())
-        await first_has_lock.wait()
+        await asyncio.wait_for(first_has_lock.wait(), timeout=1)
         second_task = asyncio.create_task(increment_second())
-        await second_attempted_lock.wait()
+        await asyncio.wait_for(second_attempted_lock.wait(), timeout=1)
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(asyncio.shield(second_task), timeout=0.1)
         release_first.set()
@@ -239,6 +334,14 @@ async def test_lock_session_serializes_concurrent_commands() -> None:
         assert await first_task == 2
         assert await second_task == 2
     finally:
+        release_first.set()
+        for task in (first_task, second_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(
+            *(task for task in (first_task, second_task) if task is not None),
+            return_exceptions=True,
+        )
         if created_id is not None:
             async with engine.begin() as connection:
                 await connection.execute(

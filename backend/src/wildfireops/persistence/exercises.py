@@ -12,7 +12,11 @@ from wildfireops.persistence.exercise_models import (
 
 
 class ExerciseRepository:
-    """Session-bound adapter; the caller owns commit and rollback."""
+    """Session-bound adapter; the caller owns commit and rollback.
+
+    Plan and event history is append-only through this adapter. Administrative
+    deletion of a session cascades to its history at the database level.
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -83,8 +87,7 @@ class ExerciseRepository:
                 ExercisePlanRunModel.checkpoint_key == checkpoint_key,
             )
             .order_by(
-                ExercisePlanRunModel.created_at.desc(),
-                ExercisePlanRunModel.id.desc(),
+                ExercisePlanRunModel.insertion_order.desc(),
             )
             .limit(1)
         )
@@ -96,7 +99,7 @@ class ExerciseRepository:
         rows = await self._session.scalars(
             select(ExercisePlanRunModel)
             .where(ExercisePlanRunModel.session_id == session_id)
-            .order_by(ExercisePlanRunModel.created_at, ExercisePlanRunModel.id)
+            .order_by(ExercisePlanRunModel.insertion_order)
         )
         return tuple(rows)
 
@@ -137,6 +140,6 @@ class ExerciseRepository:
         rows = await self._session.scalars(
             select(ExerciseEventModel)
             .where(ExerciseEventModel.session_id == session_id)
-            .order_by(ExerciseEventModel.occurred_at, ExerciseEventModel.id)
+            .order_by(ExerciseEventModel.resulting_session_version)
         )
         return tuple(rows)

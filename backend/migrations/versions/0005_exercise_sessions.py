@@ -74,6 +74,12 @@ def upgrade() -> None:
     op.create_table(
         "exercise_plan_runs",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
+        sa.Column(
+            "insertion_order",
+            sa.BigInteger(),
+            sa.Identity(),
+            nullable=False,
+        ),
         sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("checkpoint_key", sa.String(length=80), nullable=False),
         sa.Column("input_hash", sa.String(length=64), nullable=False),
@@ -103,7 +109,7 @@ def upgrade() -> None:
     op.create_index(
         "ix_exercise_plan_runs_session_checkpoint",
         "exercise_plan_runs",
-        ["session_id", "checkpoint_key", "created_at"],
+        ["session_id", "checkpoint_key", "insertion_order"],
     )
     op.create_table(
         "exercise_events",

@@ -2,9 +2,12 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Identity,
+    Index,
     Integer,
     String,
     Text,
@@ -16,6 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from wildfireops.persistence.base import Base
+from wildfireops.persistence.decision_models import IdempotencyKeyModel  # noqa: F401
 
 
 class ExerciseSessionModel(Base):
@@ -30,6 +34,7 @@ class ExerciseSessionModel(Base):
             "checkpoint_index BETWEEN 0 AND 2",
             name="ck_exercise_sessions_checkpoint",
         ),
+        Index("ix_exercise_sessions_expiry", "status", "expires_at"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -73,11 +78,18 @@ class ExercisePlanRunModel(Base):
     __tablename__ = "exercise_plan_runs"
     __table_args__ = (
         UniqueConstraint("idempotency_key_id", name="uq_exercise_plan_idempotency"),
+        Index(
+            "ix_exercise_plan_runs_session_checkpoint",
+            "session_id",
+            "checkpoint_key",
+            "insertion_order",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4
     )
+    insertion_order: Mapped[int] = mapped_column(BigInteger, Identity(), nullable=False)
     session_id: Mapped[UUID] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
         ForeignKey("exercise_sessions.id", ondelete="CASCADE"),
@@ -105,6 +117,7 @@ class ExerciseEventModel(Base):
             "resulting_session_version",
             name="uq_exercise_event_session_version",
         ),
+        Index("ix_exercise_events_session_time", "session_id", "occurred_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(
