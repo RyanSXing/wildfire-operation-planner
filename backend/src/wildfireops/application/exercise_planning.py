@@ -544,8 +544,11 @@ class ExercisePlanningService:
         explanation = cast(Mapping[str, object], output["explanation"])
         changes = explanation["changes"]
         assert isinstance(changes, list)
+        prior_output = _json_for_storage(current.output_data)
+        current_output = _json_for_storage(output)
+        assert isinstance(prior_output, Mapping) and isinstance(current_output, Mapping)
         changed = any(
-            current.output_data.get(key) != output.get(key)
+            prior_output.get(key) != current_output.get(key)
             for key in (
                 "assignments",
                 "coveredTaskIds",
@@ -745,10 +748,24 @@ class ExercisePlanningService:
                 except ValueError as error:
                     raise RuntimeError("exercise replay response is invalid") from error
                 plans = await self._repository.list_plans(session_id)
+                attempted_index = next(
+                    (index for index, item in enumerate(plans) if item.id == stored.id),
+                    None,
+                )
+                if attempted_index is None:
+                    raise RuntimeError("exercise replay integrity is invalid")
+                expected = next(
+                    (
+                        item
+                        for item in reversed(plans[:attempted_index])
+                        if item.output_data.get("status") in {"FEASIBLE", "OPTIMAL"}
+                    ),
+                    None,
+                )
                 if (
-                    visible is None
-                    or visible.output_data.get("status") not in {"FEASIBLE", "OPTIMAL"}
-                    or visible.id not in [item.id for item in plans[: plans.index(stored)]]
+                    expected is None
+                    or visible is None
+                    or visible.id != expected.id
                     or snapshot.get("latestPlan") != visible.output_data
                 ):
                     raise RuntimeError("exercise replay response is invalid")
