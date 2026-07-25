@@ -198,6 +198,30 @@ class ExerciseRepository:
         )
         return None if model is None else _event(model)
 
+    async def get_creation_event(
+        self,
+        *,
+        exercise_id: str,
+        definition_version: str,
+        definition_digest: str,
+        event_id: UUID,
+    ) -> ExerciseEvent | None:
+        model = await self._session.scalar(
+            select(ExerciseEventModel)
+            .join(
+                ExerciseSessionModel,
+                ExerciseEventModel.session_id == ExerciseSessionModel.id,
+            )
+            .where(
+                ExerciseEventModel.id == event_id,
+                ExerciseEventModel.event_type == "exercise.session-created",
+                ExerciseSessionModel.exercise_id == exercise_id,
+                ExerciseSessionModel.definition_version == definition_version,
+                ExerciseSessionModel.definition_digest == definition_digest,
+            )
+        )
+        return None if model is None else _event(model)
+
     async def list_events(self, session_id: UUID) -> tuple[ExerciseEvent, ...]:
         rows = await self._session.scalars(
             select(ExerciseEventModel)

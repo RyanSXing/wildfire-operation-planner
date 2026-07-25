@@ -1,5 +1,5 @@
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -119,6 +119,14 @@ class ExerciseRepositoryProtocol(Protocol):
     async def get_event(
         self, session_id: UUID, event_id: UUID
     ) -> ExerciseEvent | None: ...
+    async def get_creation_event(
+        self,
+        *,
+        exercise_id: str,
+        definition_version: str,
+        definition_digest: str,
+        event_id: UUID,
+    ) -> ExerciseEvent | None: ...
     async def get_plan(
         self, session_id: UUID, plan_id: UUID
     ) -> ExercisePlanRun | None: ...
@@ -178,6 +186,19 @@ class ExerciseIdempotencyConflict(ExerciseError):
     code = "exercise_idempotency_conflict"
 
 
+def _require_definition(
+    session: ExerciseSession,
+    definition: ExerciseDefinition,
+    definition_digest: str,
+) -> None:
+    if (
+        session.exercise_id != definition.exercise_id
+        or session.definition_version != definition.version
+        or session.definition_digest != definition_digest
+    ):
+        raise ExerciseSessionNotFound("exercise session was not found")
+
+
 class ExerciseSessionService:
     def __init__(
         self,
@@ -199,11 +220,15 @@ class ExerciseSessionService:
         return self._definition.exercise_id
 
     async def project(self, session: ExerciseSession) -> dict[str, object]:
-        self._require_definition(session)
+        _require_definition(session, self._definition, self._definition_digest)
         if session.response_projection is not None:
             return _copy_json_object(session.response_projection)
         return await session_projection(
-            self._definition, self._repository, session, self._clock()
+            self._definition,
+            self._definition_digest,
+            self._repository,
+            session,
+            self._clock(),
         )
 
     async def create(self, *, idempotency_key: str) -> ExerciseSession:
@@ -219,13 +244,17 @@ class ExerciseSessionService:
                 raise ExerciseIdempotencyConflict(
                     "idempotency key was already used with a different request"
                 )
-            if claim.response_type != "exercise_session" or claim.response_id is None:
+            if claim.response_type != "exercise_event" or claim.response_id is None:
                 raise RuntimeError("exercise idempotency response is incomplete")
-            session = await self._repository.get_session(claim.response_id)
-            if session is None:
-                raise ExerciseSessionNotFound("exercise session was not found")
-            self._require_definition(session)
-            return session
+            event = await self._repository.get_creation_event(
+                exercise_id=self.exercise_id,
+                definition_version=self._definition.version,
+                definition_digest=self._definition_digest,
+                event_id=claim.response_id,
+            )
+            if event is None:
+                raise RuntimeError("exercise idempotency event does not exist")
+            return self._replay_session(event)
         session = await self._repository.create_session(
             exercise_id=self.exercise_id,
             definition_version=self._definition.version,
@@ -233,7 +262,8 @@ class ExerciseSessionService:
             callsign=self._callsign(),
             expires_at=self._clock() + timedelta(hours=24),
         )
-        await self._repository.append_event(
+        snapshot = await self._response_snapshot(session)
+        event = await self._repository.append_event(
             session_id=session.id,
             event_type="exercise.session-created",
             actor_callsign=session.callsign,
@@ -242,12 +272,13 @@ class ExerciseSessionService:
             resulting_session_version=1,
             before_state={},
             after_state=_session_state(session),
-            inputs={},
+            inputs=_event_inputs({}, snapshot),
             note=None,
         )
         await self._repository.complete_idempotency(
-            claim_id=claim.id, response_type="exercise_session", response_id=session.id
+            claim_id=claim.id, response_type="exercise_event", response_id=event.id
         )
+        session.response_projection = freeze_json_object(snapshot)
         return session
 
     async def select_objective(
@@ -320,8 +351,10 @@ class ExerciseSessionService:
         consequences = dict(session.consequences)
         if session.checkpoint_index == 1:
             assignments = latest.output_data.get("assignments", [])
-            if not isinstance(assignments, list):
-                assignments = []
+            if not isinstance(assignments, Sequence) or isinstance(
+                assignments, (str, bytes, bytearray, Mapping)
+            ):
+                assignments = ()
             consequences["corridorCleared"] = any(
                 item.get("taskId") == "clear-primary-corridor"
                 for item in assignments
@@ -428,27 +461,28 @@ class ExerciseSessionService:
         return _copy_json_object(
             freeze_json_object(
                 await session_projection(
-                    self._definition, self._repository, session, self._clock()
+                    self._definition,
+                    self._definition_digest,
+                    self._repository,
+                    session,
+                    self._clock(),
                 )
             )
         )
 
     def _replay_session(self, event: ExerciseEvent) -> ExerciseSession:
         session = _session_from_state(event.after_state)
-        self._require_definition(session)
+        _require_definition(session, self._definition, self._definition_digest)
         snapshot = event.inputs.get(_RESPONSE_SNAPSHOT)
         if not isinstance(snapshot, Mapping):
             raise RuntimeError("exercise replay response is missing")
+        snapshot_session = _session_from_state(
+            {key: snapshot.get(key) for key in _STATE_KEYS}
+        )
+        if _session_state(snapshot_session) != _session_state(session):
+            raise RuntimeError("exercise replay response is invalid")
         session.response_projection = freeze_json_object(snapshot)
         return session
-
-    def _require_definition(self, session: ExerciseSession) -> None:
-        if (
-            session.exercise_id != self.exercise_id
-            or session.definition_version != self._definition.version
-            or session.definition_digest != self._definition_digest
-        ):
-            raise ExerciseSessionNotFound("exercise session was not found")
 
     async def lock_command(
         self,
@@ -482,12 +516,12 @@ class ExerciseSessionService:
             current = await self._repository.get_session(session_id)
             if current is None:
                 raise ExerciseSessionNotFound("exercise session was not found")
-            self._require_definition(current)
+            _require_definition(current, self._definition, self._definition_digest)
             return current, claim, event
         session = await self._repository.lock_session(session_id)
         if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
-        self._require_definition(session)
+        _require_definition(session, self._definition, self._definition_digest)
         if self._clock() >= session.expires_at:
             raise ExerciseSessionExpired("exercise session has expired")
         if session.status != "active":
@@ -538,16 +572,20 @@ class ExerciseQueryService:
         session = await self._repository.get_session(session_id)
         if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
-        self._require_definition(session)
+        _require_definition(session, self._definition, self._definition_digest)
         return await session_projection(
-            self._definition, self._repository, session, self._clock()
+            self._definition,
+            self._definition_digest,
+            self._repository,
+            session,
+            self._clock(),
         )
 
     async def audit(self, session_id: UUID) -> tuple[ExerciseEvent, ...]:
         session = await self._repository.get_session(session_id)
         if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
-        self._require_definition(session)
+        _require_definition(session, self._definition, self._definition_digest)
         return tuple(
             _public_event(item)
             for item in await self._repository.list_events(session_id)
@@ -557,7 +595,7 @@ class ExerciseQueryService:
         session = await self._repository.get_session(session_id)
         if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
-        self._require_definition(session)
+        _require_definition(session, self._definition, self._definition_digest)
         if session.status != "completed":
             raise ExerciseTransitionInvalid("debrief requires a completed exercise")
         plans = await self._repository.list_plans(session.id)
@@ -578,14 +616,6 @@ class ExerciseQueryService:
                 for item in events
             ],
         }
-
-    def _require_definition(self, session: ExerciseSession) -> None:
-        if (
-            session.exercise_id != self._definition.exercise_id
-            or session.definition_version != self._definition.version
-            or session.definition_digest != self._definition_digest
-        ):
-            raise ExerciseSessionNotFound("exercise session was not found")
 
 
 def _idempotency_key(value: str) -> str:
@@ -610,8 +640,10 @@ def _event_inputs(
     }
 
 
-def _public_inputs(inputs: Mapping[str, object]) -> dict[str, object]:
-    return {key: value for key, value in inputs.items() if key != _RESPONSE_SNAPSHOT}
+def _public_inputs(inputs: Mapping[str, object]) -> Mapping[str, object]:
+    return freeze_json_object(
+        {key: value for key, value in inputs.items() if key != _RESPONSE_SNAPSHOT}
+    )
 
 
 def _public_event(event: ExerciseEvent) -> ExerciseEvent:
@@ -642,6 +674,18 @@ def _copy_json_value(value: object) -> object:
         return tuple(_copy_json_value(item) for item in value)
     if isinstance(value, list):
         return [_copy_json_value(item) for item in value]
+    return value
+
+
+def _mutable_json_object(value: Mapping[str, object]) -> dict[str, object]:
+    return {key: _mutable_json_value(item) for key, item in value.items()}
+
+
+def _mutable_json_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _mutable_json_object(value)
+    if isinstance(value, tuple):
+        return [_mutable_json_value(item) for item in value]
     return value
 
 
@@ -718,9 +762,7 @@ def _session_from_state(state: Mapping[str, object]) -> ExerciseSession:
             raise ValueError
         if status not in {"active", "completed", "expired"}:
             raise ValueError
-        if not isinstance(consequences, dict) or not all(
-            isinstance(key, str) for key in consequences
-        ):
+        if not isinstance(consequences, Mapping):
             raise ValueError
         if not isinstance(expires_at, str):
             raise ValueError
@@ -738,7 +780,7 @@ def _session_from_state(state: Mapping[str, object]) -> ExerciseSession:
             objective=cast(ObjectivePreset | None, objective),
             status=cast(SessionStatus, status),
             version=version,
-            consequences=dict(consequences),
+            consequences=_mutable_json_object(freeze_json_object(consequences)),
             expires_at=parsed_expiry.astimezone(UTC),
         )
     except (KeyError, TypeError, ValueError, AttributeError) as error:
@@ -747,10 +789,12 @@ def _session_from_state(state: Mapping[str, object]) -> ExerciseSession:
 
 async def session_projection(
     definition: ExerciseDefinition,
+    definition_digest: str,
     repository: ExerciseRepositoryProtocol,
     session: ExerciseSession,
     now: datetime,
 ) -> dict[str, object]:
+    _require_definition(session, definition, definition_digest)
     projected = ExerciseSession(
         id=session.id,
         exercise_id=session.exercise_id,

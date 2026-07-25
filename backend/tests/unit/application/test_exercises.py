@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -19,6 +20,7 @@ from wildfireops.application.exercises import (
     _session_from_state,
 )
 from wildfireops.domain.scenario_versions import IdempotencyClaim
+from wildfireops.domain.observations import freeze_json_object
 from wildfireops.replay.exercise import ExerciseDefinition
 
 
@@ -155,8 +157,28 @@ class FakeExerciseRepository:
             None,
         )
 
+    async def get_creation_event(
+        self,
+        *,
+        exercise_id: str,
+        definition_version: str,
+        definition_digest: str,
+        event_id: UUID,
+    ) -> ExerciseEvent | None:
+        event = next((item for item in self.events if item.id == event_id), None)
+        if event is None or event.event_type != "exercise.session-created":
+            return None
+        session = self.sessions.get(event.session_id)
+        if session is None or (
+            session.exercise_id,
+            session.definition_version,
+            session.definition_digest,
+        ) != (exercise_id, definition_version, definition_digest):
+            return None
+        return event
+
     async def get_plan(self, session_id: UUID, plan_id: UUID) -> ExercisePlanRun | None:
-        return next(
+        plan = next(
             (
                 item
                 for item in self.plans
@@ -164,11 +186,12 @@ class FakeExerciseRepository:
             ),
             None,
         )
+        return None if plan is None else _frozen_plan(plan)
 
     async def latest_plan(
         self, session_id: UUID, checkpoint_key: str
     ) -> ExercisePlanRun | None:
-        return next(
+        plan = next(
             (
                 item
                 for item in reversed(self.plans)
@@ -177,23 +200,47 @@ class FakeExerciseRepository:
             ),
             None,
         )
+        return None if plan is None else _frozen_plan(plan)
 
     async def latest_plan_for_session(self, session_id: UUID) -> ExercisePlanRun | None:
-        return next(
+        plan = next(
             (item for item in reversed(self.plans) if item.session_id == session_id),
             None,
         )
+        return None if plan is None else _frozen_plan(plan)
 
     async def list_plans(self, session_id: UUID) -> tuple[ExercisePlanRun, ...]:
-        return tuple(item for item in self.plans if item.session_id == session_id)
+        return tuple(
+            _frozen_plan(item) for item in self.plans if item.session_id == session_id
+        )
 
     async def list_events(self, session_id: UUID) -> tuple[ExerciseEvent, ...]:
         return tuple(item for item in self.events if item.session_id == session_id)
 
     async def append_event(self, **values: object) -> ExerciseEvent:
-        event = ExerciseEvent(id=uuid4(), occurred_at=NOW, **values)  # type: ignore[arg-type]
+        event = ExerciseEvent(  # type: ignore[arg-type]
+            id=uuid4(),
+            occurred_at=NOW,
+            before_state=freeze_json_object(values.pop("before_state")),
+            after_state=freeze_json_object(values.pop("after_state")),
+            inputs=freeze_json_object(values.pop("inputs")),
+            **values,
+        )
         self.events.append(event)
         return event
+
+
+def _frozen_plan(plan: ExercisePlanRun) -> ExercisePlanRun:
+    return ExercisePlanRun(
+        id=plan.id,
+        session_id=plan.session_id,
+        checkpoint_key=plan.checkpoint_key,
+        input_hash=plan.input_hash,
+        input_data=freeze_json_object(plan.input_data),
+        output_data=freeze_json_object(plan.output_data),
+        versions=freeze_json_object(plan.versions),
+        created_at=plan.created_at,
+    )
 
 
 def service(
@@ -278,6 +325,61 @@ async def test_replay_projects_original_response_after_later_changes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_replay_projects_original_response_after_later_changes_and_expiry() -> (
+    None
+):
+    repository = FakeExerciseRepository()
+    commands = service(repository)
+    created = await commands.create(idempotency_key="create")
+    original = await commands.project(created)
+    await commands.select_objective(
+        created.id,
+        "fastest-response",
+        expected_version=1,
+        idempotency_key="objective",
+    )
+    created.checkpoint_index = 1
+    created.version = 3
+
+    replay = await service(repository, now=NOW + timedelta(hours=25)).create(
+        idempotency_key="create"
+    )
+
+    assert await commands.project(replay) == original
+
+
+@pytest.mark.asyncio
+async def test_forged_same_session_snapshot_is_rejected() -> None:
+    repository = FakeExerciseRepository()
+    commands = service(repository)
+    session = await commands.create(idempotency_key="create")
+    await commands.select_objective(
+        session.id, "fastest-response", expected_version=1, idempotency_key="objective"
+    )
+    event = repository.events[-1]
+    repository.events[-1] = replace(
+        event,
+        inputs=freeze_json_object(
+            {
+                **event.inputs,
+                "_responseProjection": {
+                    **event.inputs["_responseProjection"],
+                    "version": 999,
+                },
+            }
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="exercise replay response is invalid"):
+        await commands.select_objective(
+            session.id,
+            "fastest-response",
+            expected_version=1,
+            idempotency_key="objective",
+        )
+
+
+@pytest.mark.asyncio
 async def test_mismatched_definition_session_is_unavailable_to_commands_and_queries() -> (
     None
 ):
@@ -313,6 +415,24 @@ async def test_audit_hides_private_replay_snapshot() -> None:
     events = await query(repository).audit(session.id)
 
     assert events[-1].inputs == {"objective": "fastest-response"}
+    with pytest.raises(TypeError):
+        events[-1].inputs["changed"] = True  # type: ignore[index]
+
+    await repository.append_event(
+        session_id=session.id,
+        event_type="exercise.test",
+        actor_callsign=session.callsign,
+        display_name=None,
+        expected_session_version=2,
+        resulting_session_version=3,
+        before_state={},
+        after_state={},
+        inputs={"public": {"nested": ["value"]}},
+        note=None,
+    )
+    nested = (await query(repository).audit(session.id))[-1].inputs["public"]
+    with pytest.raises(TypeError):
+        nested["changed"] = True  # type: ignore[index]
 
 
 @pytest.mark.asyncio

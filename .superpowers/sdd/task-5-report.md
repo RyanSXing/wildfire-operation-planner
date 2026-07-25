@@ -73,3 +73,32 @@ uv run pytest tests/unit tests/architecture -q
 
 Results: focused suite `34 passed`; backend unit/architecture `682 passed`
 (the same three multiprocessing fork warnings).
+
+## Final replay follow-up
+
+RED: froze fake persisted event/plan JSON to match PostgreSQL and added failing
+creation replay, frozen-corridor, forged-snapshot, public-audit immutability,
+and real-Postgres command regressions.
+
+GREEN:
+
+- Frozen stored consequences now decode into an isolated mutable session dict.
+- Creation claims point to a definition-bound creation event and replay its
+  immutable full projection; replay snapshots are structurally matched to the
+  event state.
+- `session_projection` enforces the common definition/digest guard, corridor
+  assignment handling accepts frozen JSON sequences, and audit inputs remain
+  deep frozen after private snapshot removal.
+
+Final commands:
+
+```bash
+cd backend
+WILDFIREOPS_DATABASE_URL='postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test' uv run pytest tests/unit/application/test_exercises.py tests/integration/persistence/test_exercises.py -q
+uv run ruff check src/wildfireops/application/exercises.py src/wildfireops/persistence/exercises.py tests/unit/application/test_exercises.py tests/integration/persistence/test_exercises.py
+uv run mypy src/wildfireops/application/exercises.py src/wildfireops/persistence/exercises.py
+uv run pytest tests/unit tests/architecture -q
+```
+
+Results: focused suite `38 passed`; backend unit/architecture `684 passed`
+(the same three multiprocessing fork warnings).

@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from wildfireops.application.exercises import ExerciseSession
+from wildfireops.application.exercises import ExerciseSession, ExerciseSessionService
 from wildfireops.config import Settings
 from wildfireops.db import create_engine
 from wildfireops.persistence.decision_models import IdempotencyKeyModel
@@ -18,6 +18,7 @@ from wildfireops.persistence.exercise_models import (
     ExerciseSessionModel,
 )
 from wildfireops.persistence.exercises import ExerciseRepository
+from tests.unit.application.test_exercises import definition
 
 
 def session_values(
@@ -40,6 +41,18 @@ async def create_session(
     callsign: str = "EMBER-101",
 ) -> ExerciseSession:
     return await repository.create_session(**session_values(callsign=callsign))
+
+
+def command_service(
+    repository: ExerciseRepository, *, now: datetime
+) -> ExerciseSessionService:
+    return ExerciseSessionService(
+        definition=definition(),
+        definition_digest="a" * 64,
+        repository=repository,
+        clock=lambda: now,
+        callsign=lambda: "EMBER-101",
+    )
 
 
 async def append_event(
@@ -80,6 +93,61 @@ async def test_plan_runs_are_isolated_by_session(db_session: AsyncSession) -> No
 
     assert await repository.list_plans(first.id)
     assert await repository.list_plans(second.id) == ()
+
+
+@pytest.mark.asyncio
+async def test_postgres_create_replay_uses_original_projection(
+    db_session: AsyncSession,
+) -> None:
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
+    repository = ExerciseRepository(db_session)
+    commands = command_service(repository, now=now)
+    created = await commands.create(idempotency_key="create")
+    original = await commands.project(created)
+    await commands.select_objective(
+        created.id,
+        "fastest-response",
+        expected_version=1,
+        idempotency_key="objective",
+    )
+
+    replay = await command_service(repository, now=now + timedelta(hours=25)).create(
+        idempotency_key="create"
+    )
+
+    assert await commands.project(replay) == original
+
+
+@pytest.mark.asyncio
+async def test_postgres_corridor_assignment_survives_frozen_json(
+    db_session: AsyncSession,
+) -> None:
+    now = datetime(2026, 7, 24, 12, tzinfo=UTC)
+    repository = ExerciseRepository(db_session)
+    commands = command_service(repository, now=now)
+    session = await commands.create(idempotency_key="create")
+    session.objective = "fastest-response"
+    session.checkpoint_index = 1
+    session.version = 2
+    await repository.save_session(session)
+    await repository.store_plan(
+        session_id=session.id,
+        checkpoint_key="cascade",
+        input_hash="b" * 64,
+        input_data={"objective": "fastest-response"},
+        output_data={
+            "status": "OPTIMAL",
+            "assignments": [{"taskId": "clear-primary-corridor"}],
+        },
+        versions={},
+        idempotency_key_id=None,
+    )
+
+    advanced = await commands.advance(
+        session.id, expected_version=2, idempotency_key="advance"
+    )
+
+    assert advanced.consequences == {"corridorCleared": True}
 
 
 @pytest.mark.asyncio
