@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from wildfireops.application.commands import CommandServiceProvider
 from wildfireops.config import Settings
+from wildfireops.decision.task_optimizer import TaskOptimizationResult
 from wildfireops.db import create_engine, create_session_factory
 from wildfireops.geospatial.clustering import ClusteringConfig
 from wildfireops.ingestion.worker import build_exposure_config, build_risk_config
@@ -316,6 +317,90 @@ async def test_park_fire_completed_sandbox_is_autocommit_read_only(
     assert response.json()["input"]["sandboxControls"]["windPreset"] == "historical-calm"
     assert before == after
     assert not any(statement.strip().upper() in {"BEGIN", "COMMIT"} for statement in statements)
+
+
+@pytest.mark.asyncio
+async def test_park_fire_sandbox_unknown_mismatch_and_coercion_are_read_only(
+    exercise_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unknown(request: object) -> TaskOptimizationResult:
+        tasks = getattr(request, "tasks")
+        resources = getattr(request, "resources")
+        return TaskOptimizationResult(
+            "UNKNOWN",
+            (),
+            tuple(item.task_id for item in tasks),
+            tuple(item.resource_id for item in resources),
+            0,
+            0,
+            0,
+            ("solver-unknown",),
+            0,
+            "task-allocation-v1",
+        )
+
+    body = {
+        "checkpointKey": "initial-allocation",
+        "objective": "fastest-response",
+        "windPreset": "historical-calm",
+    }
+    async with AsyncClient(
+        transport=ASGITransport(app=exercise_app), base_url="http://test"
+    ) as client:
+        completed = await _completed_session(client)
+        session_id = completed["id"]
+        async with exercise_app.state.engine.connect() as connection:
+            before = (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM exercise_plan_runs "
+                        "UNION ALL SELECT count(*) FROM exercise_events "
+                        "UNION ALL SELECT count(*) FROM idempotency_keys"
+                    )
+                )
+            ).scalars().all()
+        monkeypatch.setattr(
+            "wildfireops.application.exercise_planning.solve_task_plan", unknown
+        )
+        unknown_response = await client.post(
+            f"/api/exercise-sessions/{session_id}/sandbox-plans",
+            json={**body, "expectedVersion": completed["version"]},
+        )
+        coerced = await client.post(
+            f"/api/exercise-sessions/{session_id}/sandbox-plans",
+            json={**body, "expectedVersion": True},
+        )
+        definition = exercise_app.state.exercise_definition.model_copy(
+            update={"version": "mismatch"}
+        )
+        exercise_app.state.command_service_provider = CommandServiceProvider(
+            session_factory=lambda: exercise_app.state.session_factory(),
+            graphs=lambda: exercise_app.state.graphs,
+            settings=exercise_app.state.settings,
+            exercise_definition=definition,
+            clock=lambda: exercise_app.state.clock(),
+            callsign=lambda: "EMBER-GOLDEN",
+        )
+        mismatch = await client.post(
+            f"/api/exercise-sessions/{session_id}/sandbox-plans",
+            json={**body, "expectedVersion": completed["version"]},
+        )
+        async with exercise_app.state.engine.connect() as connection:
+            after = (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM exercise_plan_runs "
+                        "UNION ALL SELECT count(*) FROM exercise_events "
+                        "UNION ALL SELECT count(*) FROM idempotency_keys"
+                    )
+                )
+            ).scalars().all()
+
+    assert unknown_response.status_code == 200, unknown_response.text
+    assert unknown_response.json()["output"]["status"] == "UNKNOWN"
+    assert coerced.status_code == 422, coerced.text
+    assert mismatch.status_code == 404, mismatch.text
+    assert before == after
 
 
 async def _plan(client: AsyncClient, session: dict[str, Any], key: str) -> dict[str, Any]:
