@@ -22,6 +22,7 @@ from wildfireops.api.schemas.exercises import (
     ExercisePlanResponse,
     ExerciseSessionResponse,
     OverrideRequest,
+    SandboxOptionsResponse,
     SandboxPlanRequest,
     SandboxPlanResponse,
     SelectObjectiveRequest,
@@ -282,6 +283,7 @@ def _metadata_response(value: Mapping[str, object]) -> ExerciseMetadataResponse:
         safety_statement=_text(value, "safetyStatement"),
         assets=tuple(_json_object(item) for item in _json_sequence(value["assets"])),
         resources=tuple(_json_object(item) for item in _json_sequence(value["resources"])),
+        sandbox=SandboxOptionsResponse.model_validate(_json_object(value["sandbox"])),
     )
 
 

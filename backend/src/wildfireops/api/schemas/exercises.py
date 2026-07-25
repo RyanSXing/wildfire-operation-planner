@@ -74,6 +74,25 @@ class ExerciseSessionResponse(ApiModel):
     latest_plan: dict[str, JsonValue] | None
 
 
+class SandboxWindPresetResponse(ApiModel):
+    key: str
+    disruption: dict[str, JsonValue]
+
+
+class SandboxPriorityPresetResponse(ApiModel):
+    key: Literal["standard", "elevated", "urgent"]
+    multiplier: int
+
+
+class SandboxOptionsResponse(ApiModel):
+    """The bounded inputs `POST /sandbox-plans` accepts for this exercise."""
+
+    checkpoint_keys: tuple[str, ...]
+    closure_edge_ids: tuple[str, ...]
+    wind_presets: tuple[SandboxWindPresetResponse, ...]
+    priority_presets: tuple[SandboxPriorityPresetResponse, ...]
+
+
 class ExerciseMetadataResponse(ApiModel):
     exercise_id: str
     version: str
@@ -84,6 +103,7 @@ class ExerciseMetadataResponse(ApiModel):
     safety_statement: str
     assets: tuple[dict[str, JsonValue], ...]
     resources: tuple[dict[str, JsonValue], ...]
+    sandbox: SandboxOptionsResponse
 
 
 class ExercisePlanResponse(ApiModel):

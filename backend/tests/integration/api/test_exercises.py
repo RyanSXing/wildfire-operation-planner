@@ -894,3 +894,100 @@ async def test_audit_is_session_scoped_and_version_ordered(
     assert audit.status_code == 200, audit.text
     assert [item["resultingSessionVersion"] for item in audit.json()["items"]] == [1, 2]
     assert [item["sessionId"] for item in other.json()["items"]] == [second["id"]]
+
+
+def _install_definition(app: FastAPI, exercise: ExerciseDefinition) -> None:
+    app.state.exercise_definition = exercise
+    app.state.command_service_provider = CommandServiceProvider(
+        session_factory=lambda: app.state.session_factory(),
+        graphs=lambda: app.state.graphs,
+        settings=app.state.settings,
+        exercise_definition=exercise,
+        clock=lambda: app.state.clock(),
+        callsign=lambda: "EMBER-101",
+    )
+
+
+@pytest.mark.asyncio
+async def test_metadata_publishes_the_sandbox_options(
+    exercise_app: FastAPI,
+) -> None:
+    _install_definition(exercise_app, _sandbox_definition())
+
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        response = await client.get("/api/exercises/park-fire-decision")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["sandbox"] == {
+        "checkpointKeys": ["cascade"],
+        "closureEdgeIds": ["edge-32"],
+        "windPresets": [
+            {
+                "key": "strong-northeast",
+                "disruption": {
+                    "windSpeedMps": 12.0,
+                    "windDirectionDegrees": 45.0,
+                    "closedEdgeIds": [],
+                    "provenance": "exercise",
+                },
+            }
+        ],
+        "priorityPresets": [
+            {"key": "standard", "multiplier": 1},
+            {"key": "elevated", "multiplier": 2},
+            {"key": "urgent", "multiplier": 3},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_every_advertised_sandbox_option_is_accepted(
+    exercise_app: FastAPI,
+) -> None:
+    """Metadata and the sandbox validator must not be able to drift apart.
+
+    A client that builds its form from the advertised options should never be
+    rejected for using one, so every request below is assembled from the
+    metadata response rather than from literals.
+    """
+    _install_definition(exercise_app, _sandbox_definition())
+
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        metadata = (await client.get("/api/exercises/park-fire-decision")).json()
+        options = metadata["sandbox"]
+        completed = await _complete(client)
+        session_id = str(completed["id"])
+        before_counts = await _sandbox_counts(exercise_app, session_id)
+
+        checkpoint_key = options["checkpointKeys"][0]
+        debrief = (await client.get(f"/api/exercise-sessions/{session_id}/debrief")).json()
+        task_ids = sorted(
+            {
+                entry["taskId"]
+                for plan in debrief["plans"]
+                if plan["checkpointKey"] == checkpoint_key
+                for entry in plan["outputData"]["taskCoverage"]
+            }
+        )
+        assert task_ids, "the sandbox checkpoint must have planned tasks to re-rank"
+
+        for objective in metadata["objectives"]:
+            for preset in options["priorityPresets"]:
+                response = await client.post(
+                    f"/api/exercise-sessions/{session_id}/sandbox-plans",
+                    json={
+                        "expectedVersion": completed["version"],
+                        "checkpointKey": checkpoint_key,
+                        "objective": objective,
+                        "closedEdgeIds": options["closureEdgeIds"],
+                        "windPreset": options["windPresets"][0]["key"],
+                        "unavailableResourceIds": [],
+                        "taskPriorityPresets": {task_ids[0]: preset["key"]},
+                        "lockedAssignments": [],
+                    },
+                )
+                assert response.status_code == 200, response.text
+                assert response.json()["sandbox"] is True
+
+        # Nothing the sandbox does may reach the recorded exercise.
+        assert await _sandbox_counts(exercise_app, session_id) == before_counts

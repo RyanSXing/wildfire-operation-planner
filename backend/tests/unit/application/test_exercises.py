@@ -884,3 +884,94 @@ def test_stored_session_state_rejects_missing_unknown_and_coerced_values(
 ) -> None:
     with pytest.raises(RuntimeError, match="stored exercise state is invalid"):
         _session_from_state(state)
+
+
+def _sandbox_definition() -> ExerciseDefinition:
+    value = definition().model_dump(
+        mode="json", by_alias=True, fallback=dict, warnings=False
+    )
+    assert isinstance(value, dict)
+    value["sandbox"] = {
+        # Deliberately out of exercise order, alphabetically unsorted, and with
+        # multipliers that do not sort alphabetically, so the projection has to
+        # impose its own ordering rather than inherit the file's.
+        "checkpointKeys": ["field-report", "initial"],
+        "closureEdgeIds": ["edge-32", "edge-70"],
+        "windPresets": {
+            "strong-shift": {"windSpeedMps": 6.7, "windDirectionDegrees": 135},
+            "historical-calm": {"windSpeedMps": 2.1, "windDirectionDegrees": 210},
+        },
+        "priorityMultipliers": {"urgent": 3, "standard": 1, "elevated": 2},
+    }
+    return ExerciseDefinition.model_validate(value)
+
+
+def _sandbox_query(definition_value: ExerciseDefinition) -> ExerciseQueryService:
+    return ExerciseQueryService(
+        definition=definition_value,
+        definition_digest="a" * 64,
+        repository=FakeExerciseRepository(),
+        clock=lambda: NOW,
+    )
+
+
+@pytest.mark.asyncio
+async def test_metadata_publishes_the_bounded_sandbox_options() -> None:
+    metadata = await _sandbox_query(_sandbox_definition()).metadata(
+        "park-fire-decision"
+    )
+
+    assert metadata["sandbox"] == {
+        "checkpointKeys": ["initial", "field-report"],
+        "closureEdgeIds": ["edge-32", "edge-70"],
+        "windPresets": [
+            {
+                "key": "historical-calm",
+                "disruption": {
+                    "windSpeedMps": 2.1,
+                    "windDirectionDegrees": 210.0,
+                    "closedEdgeIds": [],
+                    "provenance": "exercise",
+                },
+            },
+            {
+                "key": "strong-shift",
+                "disruption": {
+                    "windSpeedMps": 6.7,
+                    "windDirectionDegrees": 135.0,
+                    "closedEdgeIds": [],
+                    "provenance": "exercise",
+                },
+            },
+        ],
+        "priorityPresets": [
+            {"key": "standard", "multiplier": 1},
+            {"key": "elevated", "multiplier": 2},
+            {"key": "urgent", "multiplier": 3},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_sandbox_checkpoint_keys_follow_the_exercise_order() -> None:
+    metadata = await _sandbox_query(_sandbox_definition()).metadata(
+        "park-fire-decision"
+    )
+    sandbox = metadata["sandbox"]
+    assert isinstance(sandbox, dict)
+
+    ordered = [checkpoint.checkpoint_key for checkpoint in definition().checkpoints]
+    keys = sandbox["checkpointKeys"]
+    assert isinstance(keys, list)
+    assert keys == [key for key in ordered if key in set(keys)]
+
+
+@pytest.mark.asyncio
+async def test_metadata_sandbox_omits_checkpoints_the_sandbox_excludes() -> None:
+    metadata = await _sandbox_query(definition()).metadata("park-fire-decision")
+    sandbox = metadata["sandbox"]
+    assert isinstance(sandbox, dict)
+
+    assert sandbox["checkpointKeys"] == ["initial"]
+    assert sandbox["windPresets"] == []
+    assert sandbox["closureEdgeIds"] == []

@@ -635,6 +635,7 @@ class ExerciseQueryService:
                 item.model_dump(mode="json", by_alias=True)
                 for item in self._definition.resources
             ],
+            "sandbox": _sandbox_projection(self._definition),
         }
 
     async def session(self, session_id: UUID) -> dict[str, object]:
@@ -680,6 +681,42 @@ class ExerciseQueryService:
                 "events": tuple(_event_envelope(_public_event(item)) for item in events),
             }
         )
+
+
+def _sandbox_projection(definition: ExerciseDefinition) -> dict[str, object]:
+    """The bounded options `POST /sandbox-plans` will accept.
+
+    Clients must not have to hardcode preset names to build the sandbox form.
+    Ordering is deterministic and meaningful rather than incidental: checkpoints
+    follow the order the exercise runs them, and priority presets ascend by
+    multiplier, so a caller can render them without re-sorting.
+    """
+    sandbox = definition.sandbox
+    checkpoint_keys = tuple(
+        checkpoint.checkpoint_key
+        for checkpoint in definition.checkpoints
+        if checkpoint.checkpoint_key in sandbox.checkpoint_keys
+    )
+    return {
+        "checkpointKeys": list(checkpoint_keys),
+        "closureEdgeIds": list(sandbox.closure_edge_ids),
+        "windPresets": [
+            {
+                "key": key,
+                "disruption": sandbox.wind_presets[key].model_dump(
+                    mode="json", by_alias=True
+                ),
+            }
+            for key in sorted(sandbox.wind_presets)
+        ],
+        "priorityPresets": [
+            {"key": key, "multiplier": sandbox.priority_multipliers[key]}
+            for key in sorted(
+                sandbox.priority_multipliers,
+                key=lambda name: (sandbox.priority_multipliers[name], name),
+            )
+        ],
+    }
 
 
 def _idempotency_key(value: str) -> str:
