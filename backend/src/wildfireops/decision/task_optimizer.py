@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import cache
 from math import ceil, isfinite
 
 from ortools.sat.python import cp_model
@@ -11,7 +12,8 @@ from wildfireops.geospatial.road_graph import RouteResult, RouteStatus
 
 
 TASK_ALGORITHM_VERSION = "task-allocation-v1"
-_DETERMINISTIC_SEARCH_BUDGET = 1.0
+_INT64_MAX = 2**63 - 1
+_CP_SAT_RANGE_ERROR = "CP-SAT integer range exceeded"
 _SOLUTION_STATUSES = frozenset({"OPTIMAL"})
 _PUBLIC_STATUSES = frozenset({"INFEASIBLE", "OPTIMAL"})
 
@@ -35,24 +37,20 @@ class TaskDemand:
         ):
             if not value.strip():
                 raise ValueError(f"{field} must not be blank")
-        if (
-            isinstance(self.required_capacity, bool)
-            or not isinstance(self.required_capacity, int)
-            or self.required_capacity <= 0
-        ):
-            raise ValueError("required_capacity must be a positive integer")
-        if (
-            isinstance(self.deadline_minutes, bool)
-            or not isinstance(self.deadline_minutes, int)
-            or self.deadline_minutes <= 0
-        ):
-            raise ValueError("deadline_minutes must be a positive integer")
-        if (
-            isinstance(self.uncovered_penalty, bool)
-            or not isinstance(self.uncovered_penalty, int)
-            or self.uncovered_penalty < 0
-        ):
-            raise ValueError("uncovered_penalty must be a nonnegative integer")
+        _require_int64(
+            self.required_capacity,
+            "required_capacity must be a positive integer",
+            minimum=1,
+        )
+        _require_int64(
+            self.deadline_minutes,
+            "deadline_minutes must be a positive integer",
+            minimum=1,
+        )
+        _require_int64(
+            self.uncovered_penalty,
+            "uncovered_penalty must be a nonnegative integer",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +115,26 @@ def solve_task_plan(request: TaskOptimizationRequest) -> TaskOptimizationResult:
         )
     }
     _validate_locked_assignments(locks, tasks_by_id, eligible, resources_by_id)
+    travel_costs = {
+        pair: _require_int64(
+            request.travel_weight * ceil(route.route.travel_minutes),
+            _CP_SAT_RANGE_ERROR,
+        )
+        for pair, route in eligible.items()
+    }
+    for task in tasks:
+        _require_int64(
+            sum(
+                resources_by_id[resource_id].capacity
+                for resource_id, task_id in eligible
+                if task_id == task.task_id
+            ),
+            _CP_SAT_RANGE_ERROR,
+        )
+    _require_int64(
+        sum(travel_costs.values()) + sum(task.uncovered_penalty for task in tasks),
+        _CP_SAT_RANGE_ERROR,
+    )
     model = cp_model.CpModel()
     assigned = {
         pair: model.new_bool_var(f"assigned[{pair[0]},{pair[1]}]")
@@ -153,10 +171,6 @@ def solve_task_plan(request: TaskOptimizationRequest) -> TaskOptimizationResult:
             )
     for lock in locks:
         model.add(assigned[(lock.resource_id, lock.task_id)] == 1)
-    travel_costs = {
-        pair: request.travel_weight * ceil(route.route.travel_minutes)
-        for pair, route in eligible.items()
-    }
     model.minimize(
         sum(travel_costs[pair] * variable for pair, variable in assigned.items())
         + sum(
@@ -165,8 +179,8 @@ def solve_task_plan(request: TaskOptimizationRequest) -> TaskOptimizationResult:
         )
     )
     solver = cp_model.CpSolver()
-    solver.parameters.max_deterministic_time = _DETERMINISTIC_SEARCH_BUDGET
-    solver.parameters.max_time_in_seconds = request.max_solver_seconds
+    # Compatibility name: max_solver_seconds is the deterministic CP-SAT budget.
+    solver.parameters.max_deterministic_time = request.max_solver_seconds
     solver.parameters.num_search_workers = 1
     solver.parameters.random_seed = 0
     raw_status = solver.status_name(solver.solve(model))
@@ -235,17 +249,19 @@ def _canonicalize(
     tuple[TaskCandidateRoute, ...],
     tuple[LockedTaskAssignment, ...],
 ]:
-    if (
-        isinstance(request.travel_weight, bool)
-        or not isinstance(request.travel_weight, int)
-        or request.travel_weight < 0
-    ):
-        raise ValueError("travel_weight must be a nonnegative integer")
+    _require_int64(
+        request.travel_weight,
+        "travel_weight must be a nonnegative integer",
+    )
     if (
         isinstance(request.max_solver_seconds, bool)
         or not isinstance(request.max_solver_seconds, int | float)
         or not isfinite(request.max_solver_seconds)
         or request.max_solver_seconds <= 0
+        or (
+            isinstance(request.max_solver_seconds, int)
+            and request.max_solver_seconds > _INT64_MAX
+        )
     ):
         raise ValueError("max_solver_seconds must be finite and positive")
     resources = tuple(sorted(request.resources, key=lambda item: item.resource_id))
@@ -272,24 +288,29 @@ def _canonicalize(
     resource_ids = {item.resource_id for item in resources}
     task_ids = {item.task_id for item in tasks}
     for resource in resources:
-        if (
-            isinstance(resource.capacity, bool)
-            or not isinstance(resource.capacity, int)
-            or resource.capacity <= 0
-        ):
-            raise ValueError("resource capacity must be a positive integer")
+        _require_int64(
+            resource.capacity,
+            "resource capacity must be a positive integer",
+            minimum=1,
+        )
     for route in routes:
         if route.resource_id not in resource_ids:
             raise ValueError(f"unknown route resource: {route.resource_id}")
         if route.task_id not in task_ids:
             raise ValueError(f"unknown route task: {route.task_id}")
-        if route.route.status is RouteStatus.REACHABLE and (
-            isinstance(route.route.travel_minutes, bool)
-            or not isinstance(route.route.travel_minutes, int | float)
-            or not isfinite(route.route.travel_minutes)
-            or route.route.travel_minutes < 0
-        ):
-            raise ValueError("route travel_minutes must be finite and nonnegative")
+        if route.route.status is RouteStatus.REACHABLE:
+            travel_minutes = route.route.travel_minutes
+            if (
+                isinstance(travel_minutes, bool)
+                or not isinstance(travel_minutes, int | float)
+                or (isinstance(travel_minutes, float) and not isfinite(travel_minutes))
+                or travel_minutes < 0
+            ):
+                raise ValueError("route travel_minutes must be finite and nonnegative")
+            _require_int64(
+                ceil(travel_minutes),
+                "route travel_minutes must be finite and nonnegative",
+            )
     for lock in locks:
         if lock.resource_id not in resource_ids or lock.task_id not in task_ids:
             raise ValueError(
@@ -304,30 +325,84 @@ def _validate_locked_assignments(
     eligible: dict[tuple[str, str], TaskCandidateRoute],
     resources: dict[str, ResourceUnit],
 ) -> None:
-    locked_resources: set[str] = set()
+    locked_resources: dict[str, str] = {}
     locked_task_ids: set[str] = set()
     for lock in locks:
         if lock.resource_id in locked_resources:
             raise ValueError(
                 f"conflicting locked assignments for resource: {lock.resource_id}"
             )
-        locked_resources.add(lock.resource_id)
+        locked_resources[lock.resource_id] = lock.task_id
         if (lock.resource_id, lock.task_id) not in eligible:
             raise ValueError(
                 f"locked assignment is not eligible: "
                 f"{lock.resource_id} -> {lock.task_id}"
             )
         locked_task_ids.add(lock.task_id)
-    for task_id in sorted(locked_task_ids):
-        eligible_capacity = sum(
-            resources[resource_id].capacity
-            for resource_id, candidate_task_id in eligible
-            if candidate_task_id == task_id
+    task_ids = tuple(sorted(locked_task_ids))
+    deficits = tuple(
+        max(
+            0,
+            tasks[task_id].required_capacity
+            - sum(
+                resources[resource_id].capacity
+                for resource_id, locked_task_id in locked_resources.items()
+                if locked_task_id == task_id
+            ),
         )
-        if eligible_capacity < tasks[task_id].required_capacity:
+        for task_id in task_ids
+    )
+    free_resources = tuple(
+        resource_id
+        for resource_id in sorted(resources)
+        if resource_id not in locked_resources
+    )
+    for task_id, deficit in zip(task_ids, deficits, strict=True):
+        if deficit > sum(
+            resources[resource_id].capacity
+            for resource_id in free_resources
+            if (resource_id, task_id) in eligible
+        ):
             raise ValueError(
                 f"locked task has insufficient eligible capacity: {task_id}"
             )
+
+    @cache
+    def can_complete(
+        index: int,
+        remaining: tuple[int, ...],
+    ) -> bool:
+        if not any(remaining):
+            return True
+        if index == len(free_resources):
+            return False
+        if can_complete(index + 1, remaining):
+            return True
+        resource_id = free_resources[index]
+        for task_index, task_id in enumerate(task_ids):
+            if remaining[task_index] and (resource_id, task_id) in eligible:
+                updated = list(remaining)
+                updated[task_index] = max(
+                    0,
+                    updated[task_index] - resources[resource_id].capacity,
+                )
+                if can_complete(index + 1, tuple(updated)):
+                    return True
+        return False
+
+    if not can_complete(0, deficits):
+        raise ValueError("locked assignments cannot jointly satisfy required capacity")
+
+
+def _require_int64(value: object, message: str, *, minimum: int = 0) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < minimum
+        or value > _INT64_MAX
+    ):
+        raise ValueError(message)
+    return value
 
 
 def _eligible(

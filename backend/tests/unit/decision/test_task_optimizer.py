@@ -402,6 +402,71 @@ def test_locked_task_with_insufficient_eligible_capacity_fails_before_solving() 
         solve_task_plan(request)
 
 
+def test_locked_tasks_reject_joint_contention_for_one_free_resource() -> None:
+    request = TaskOptimizationRequest(
+        resources=(
+            resource("locked-a"),
+            resource("locked-b"),
+            resource("shared"),
+        ),
+        tasks=(task("task-a", capacity=2), task("task-b", capacity=2)),
+        routes=(
+            candidate("locked-a", "task-a", 1),
+            candidate("locked-b", "task-b", 1),
+            candidate("shared", "task-a", 1),
+            candidate("shared", "task-b", 1),
+        ),
+        locked_assignments=(
+            LockedTaskAssignment("locked-a", "task-a"),
+            LockedTaskAssignment("locked-b", "task-b"),
+        ),
+        travel_weight=1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="locked assignments cannot jointly satisfy required capacity",
+    ):
+        solve_task_plan(request)
+
+
+def test_locked_tasks_can_use_overlapping_free_resources_when_jointly_feasible() -> (
+    None
+):
+    result = solve_task_plan(
+        TaskOptimizationRequest(
+            resources=(
+                resource("locked-a"),
+                resource("locked-b"),
+                resource("a-only"),
+                resource("shared"),
+            ),
+            tasks=(task("task-a", capacity=2), task("task-b", capacity=2)),
+            routes=(
+                candidate("locked-a", "task-a", 1),
+                candidate("locked-b", "task-b", 1),
+                candidate("a-only", "task-a", 1),
+                candidate("shared", "task-a", 1),
+                candidate("shared", "task-b", 1),
+            ),
+            locked_assignments=(
+                LockedTaskAssignment("locked-a", "task-a"),
+                LockedTaskAssignment("locked-b", "task-b"),
+            ),
+            travel_weight=1,
+        )
+    )
+
+    assert result.status == "OPTIMAL"
+    assert result.uncovered_task_ids == ()
+    assert {(item.resource_id, item.task_id) for item in result.assignments} == {
+        ("a-only", "task-a"),
+        ("locked-a", "task-a"),
+        ("locked-b", "task-b"),
+        ("shared", "task-b"),
+    }
+
+
 def test_multiple_resources_may_be_locked_to_one_capacity_task() -> None:
     result = solve_task_plan(
         TaskOptimizationRequest(
@@ -611,8 +676,108 @@ def test_solver_uses_fixed_deterministic_search_budget(
     monkeypatch.setattr(task_optimizer_module.cp_model, "CpSolver", UnknownSolver)
     solve_task_plan(TaskOptimizationRequest((), (), (), (), 1, 2))
 
-    assert UnknownSolver.instance.parameters.max_deterministic_time == 1.0
-    assert UnknownSolver.instance.parameters.max_time_in_seconds == 2
+    assert UnknownSolver.instance.parameters.max_deterministic_time == 2
+    assert not hasattr(UnknownSolver.instance.parameters, "max_time_in_seconds")
+
+
+@pytest.mark.parametrize(
+    ("required_capacity", "deadline_minutes", "uncovered_penalty", "message"),
+    (
+        (10**100, 30, 200, "required_capacity must be a positive integer"),
+        (1, 10**100, 200, "deadline_minutes must be a positive integer"),
+        (1, 30, 10**100, "uncovered_penalty must be a nonnegative integer"),
+    ),
+)
+def test_task_demand_rejects_integers_outside_signed_int64(
+    required_capacity: object,
+    deadline_minutes: object,
+    uncovered_penalty: object,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        TaskDemand(
+            "protect-1",
+            "park-fire",
+            "asset-a",
+            "protect",
+            required_capacity,  # type: ignore[arg-type]
+            deadline_minutes,  # type: ignore[arg-type]
+            uncovered_penalty,  # type: ignore[arg-type]
+        )
+
+
+def test_request_rejects_resource_capacity_outside_signed_int64() -> None:
+    request = TaskOptimizationRequest(
+        (resource("engine-1", capacity=10**100),),
+        (),
+        (),
+        (),
+        1,
+    )
+
+    with pytest.raises(ValueError, match="resource capacity must be a positive integer"):
+        solve_task_plan(request)
+
+
+def test_request_rejects_travel_weight_outside_signed_int64() -> None:
+    request = TaskOptimizationRequest((), (), (), (), 10**100)
+
+    with pytest.raises(ValueError, match="travel_weight must be a nonnegative integer"):
+        solve_task_plan(request)
+
+
+def test_request_rejects_deterministic_budget_outside_signed_int64() -> None:
+    request = TaskOptimizationRequest((), (), (), (), 1, 10**100)
+
+    with pytest.raises(
+        ValueError,
+        match="max_solver_seconds must be finite and positive",
+    ):
+        solve_task_plan(request)
+
+
+def test_request_rejects_overflowing_travel_cost() -> None:
+    request = TaskOptimizationRequest(
+        (resource("engine-1"),),
+        (task("protect-1"),),
+        (candidate("engine-1", "protect-1", 2),),
+        (),
+        2**63 - 1,
+    )
+
+    with pytest.raises(ValueError, match="CP-SAT integer range exceeded"):
+        solve_task_plan(request)
+
+
+def test_request_rejects_overflowing_task_capacity_sum() -> None:
+    maximum = 2**63 - 1
+    request = TaskOptimizationRequest(
+        (resource("engine-a", capacity=maximum), resource("engine-b")),
+        (task("protect-1"),),
+        (
+            candidate("engine-a", "protect-1", 1),
+            candidate("engine-b", "protect-1", 1),
+        ),
+        (),
+        1,
+    )
+
+    with pytest.raises(ValueError, match="CP-SAT integer range exceeded"):
+        solve_task_plan(request)
+
+
+def test_request_rejects_overflowing_objective_upper_bound() -> None:
+    maximum = 2**63 - 1
+    request = TaskOptimizationRequest(
+        (resource("engine-1"),),
+        (task("protect-1", penalty=maximum),),
+        (candidate("engine-1", "protect-1", 1),),
+        (),
+        1,
+    )
+
+    with pytest.raises(ValueError, match="CP-SAT integer range exceeded"):
+        solve_task_plan(request)
 
 
 def test_unknown_solver_status_does_not_read_variable_values(
