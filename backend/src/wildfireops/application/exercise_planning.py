@@ -1,0 +1,668 @@
+"""Deterministic, session-scoped exercise plan materialization."""
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
+from datetime import datetime
+from hashlib import sha256
+import json
+from typing import cast
+from uuid import UUID
+
+from wildfireops.application.exercises import (
+    ExerciseCommandInvalid,
+    ExerciseEvent,
+    ExercisePlanRun,
+    ExerciseRepositoryProtocol,
+    ExerciseSession,
+    ExerciseSessionService,
+    ExerciseTransitionInvalid,
+    ExerciseVersionConflict,
+    _copy_json_object,
+    _event_inputs,
+    _require_definition,
+    _session_from_state,
+    _session_state,
+    _validate_replay_snapshot,
+    session_projection,
+)
+from wildfireops.decision.task_explanations import (
+    explain_task_plan,
+    serialize_task_explanation,
+)
+from wildfireops.decision.task_optimizer import (
+    TASK_ALGORITHM_VERSION,
+    LockedTaskAssignment,
+    TaskCandidateRoute,
+    TaskDemand,
+    TaskOptimizationRequest,
+    TaskOptimizationResult,
+    solve_task_plan,
+)
+from wildfireops.domain.observations import freeze_json_object
+from wildfireops.domain.operations import ResourceUnit
+from wildfireops.geospatial.road_graph import (
+    RoadGraph,
+    RouteResult,
+    RouteStatus,
+    compute_route,
+    nearest_road_node,
+)
+from wildfireops.replay.exercise import (
+    ExerciseDefinition,
+    ExerciseTask,
+    ObjectivePreset,
+    ObjectiveWeights,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class MaterializedCheckpoint:
+    checkpoint_key: str
+    objective: ObjectivePreset
+    tasks: tuple[TaskDemand, ...]
+    resources: tuple[ResourceUnit, ...]
+    closed_edge_ids: tuple[str, ...]
+    asset_positions: Mapping[str, tuple[float, float]]
+    asset_sources: Mapping[str, Mapping[str, str]]
+    wind: dict[str, float] | None
+    source_versions: Mapping[str, object]
+
+
+def uncovered_penalty(task: ExerciseTask, weights: ObjectiveWeights) -> int:
+    return (
+        weights.base_priority_weight * task.base_priority
+        + weights.critical_service_weight * int(task.critical_service)
+        + weights.population_weight
+        * (task.affected_population // weights.population_divisor)
+    )
+
+
+def planning_input_hash(payload: Mapping[str, object]) -> str:
+    return sha256(
+        json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+
+
+def materialize_checkpoint(
+    definition: ExerciseDefinition,
+    *,
+    checkpoint_index: int,
+    objective: ObjectivePreset,
+    consequences: Mapping[str, object],
+) -> MaterializedCheckpoint:
+    checkpoint = definition.checkpoints[checkpoint_index]
+    weights = definition.objectives[objective]
+    assets = {item.asset_id: item for item in definition.assets}
+    task_assets = {item.asset_id for item in checkpoint.tasks}
+    closed = () if checkpoint.disruption is None else checkpoint.disruption.closed_edge_ids
+    if checkpoint_index == 2 and consequences.get("corridorCleared") is True:
+        prior = definition.checkpoints[1].disruption
+        prior_closed = () if prior is None else prior.closed_edge_ids
+        closed = tuple(edge_id for edge_id in closed if edge_id not in prior_closed)
+    return MaterializedCheckpoint(
+        checkpoint_key=checkpoint.checkpoint_key,
+        objective=objective,
+        tasks=tuple(
+            TaskDemand(
+                item.task_id,
+                item.incident_key,
+                item.asset_id,
+                item.required_capability,
+                item.required_capacity,
+                item.deadline_minutes,
+                uncovered_penalty(item, weights),
+            )
+            for item in sorted(checkpoint.tasks, key=lambda item: item.task_id)
+        ),
+        resources=tuple(
+            ResourceUnit(
+                item.resource_id,
+                item.capabilities,
+                item.capacity,
+                item.available,
+                item.position.longitude,
+                item.position.latitude,
+            )
+            for item in sorted(definition.resources, key=lambda item: item.resource_id)
+        ),
+        closed_edge_ids=tuple(sorted(closed)),
+        asset_positions={
+            asset_id: (assets[asset_id].position.longitude, assets[asset_id].position.latitude)
+            for asset_id in sorted(task_assets)
+        },
+        asset_sources={
+            asset_id: {
+                "sourceName": assets[asset_id].source_name,
+                "sourceVersion": assets[asset_id].source_version,
+                "sourceRecordId": assets[asset_id].source_record_id,
+                "citationUrl": assets[asset_id].citation_url,
+                "provenance": assets[asset_id].provenance,
+            }
+            for asset_id in sorted(task_assets)
+        },
+        wind=(
+            None
+            if checkpoint.disruption is None
+            else {
+                "speedMps": checkpoint.disruption.wind_speed_mps,
+                "directionDegrees": checkpoint.disruption.wind_direction_degrees,
+            }
+        ),
+        source_versions={
+            "exercise": definition.version,
+            "graph": definition.graph_version,
+            "replayPackage": definition.replay_package_id,
+            "historicalWeatherIdentity": checkpoint.historical_weather_identity,
+        },
+    )
+
+
+def candidate_routes(
+    graph: RoadGraph,
+    resources: tuple[ResourceUnit, ...],
+    tasks: tuple[TaskDemand, ...],
+    asset_positions: Mapping[str, tuple[float, float]],
+    closed_edge_ids: tuple[str, ...],
+) -> tuple[TaskCandidateRoute, ...]:
+    return tuple(
+        TaskCandidateRoute(
+            resource.resource_id,
+            task.task_id,
+            compute_route(
+                graph,
+                nearest_road_node(graph, resource.longitude, resource.latitude),
+                nearest_road_node(graph, *asset_positions[task.asset_id]),
+                closed_edge_ids,
+            ),
+        )
+        for resource in resources
+        for task in tasks
+    )
+
+
+def serialize_planning_input(
+    checkpoint: MaterializedCheckpoint,
+    routes: tuple[TaskCandidateRoute, ...],
+    locked_assignments: tuple[LockedTaskAssignment, ...] = (),
+) -> dict[str, object]:
+    return {
+        "checkpointKey": checkpoint.checkpoint_key,
+        "objective": checkpoint.objective,
+        "closedEdgeIds": list(checkpoint.closed_edge_ids),
+        "wind": checkpoint.wind,
+        "resources": [
+            {
+                "resourceId": item.resource_id,
+                "capabilities": sorted(item.capabilities),
+                "capacity": item.capacity,
+                "available": item.available,
+                "longitude": item.longitude,
+                "latitude": item.latitude,
+            }
+            for item in checkpoint.resources
+        ],
+        "tasks": [
+            {
+                "taskId": item.task_id,
+                "incidentId": item.incident_id,
+                "assetId": item.asset_id,
+                "requiredCapability": item.required_capability,
+                "requiredCapacity": item.required_capacity,
+                "deadlineMinutes": item.deadline_minutes,
+                "penalty": item.uncovered_penalty,
+                "position": list(checkpoint.asset_positions[item.asset_id]),
+                "assetSource": dict(checkpoint.asset_sources[item.asset_id]),
+            }
+            for item in checkpoint.tasks
+        ],
+        "routes": [
+            {
+                "resourceId": item.resource_id,
+                "taskId": item.task_id,
+                "status": item.route.status.value,
+                "edgeIds": list(item.route.edge_ids),
+                "distanceMeters": item.route.distance_meters,
+                "travelMinutes": item.route.travel_minutes,
+                "graphVersion": item.route.graph_version,
+                "closureHash": item.route.closure_hash,
+            }
+            for item in routes
+        ],
+        "lockedAssignments": [
+            {"resourceId": item.resource_id, "taskId": item.task_id}
+            for item in sorted(
+                locked_assignments, key=lambda item: (item.resource_id, item.task_id)
+            )
+        ],
+        "sourceVersions": dict(checkpoint.source_versions),
+    }
+
+
+def serialize_task_result(
+    result: TaskOptimizationResult,
+    routes: tuple[TaskCandidateRoute, ...],
+) -> dict[str, object]:
+    route_by_pair = {(item.resource_id, item.task_id): item.route for item in routes}
+    return {
+        "status": result.status,
+        "assignments": [
+            {
+                "resourceId": item.resource_id,
+                "taskId": item.task_id,
+                "incidentId": item.incident_id,
+                "assetId": item.asset_id,
+                "capacity": item.capacity,
+                "travelMinutes": item.travel_minutes,
+                "route": _serialize_route(route_by_pair[item.resource_id, item.task_id]),
+            }
+            for item in result.assignments
+        ],
+        "uncoveredTaskIds": list(result.uncovered_task_ids),
+        "unassignedResourceIds": list(result.unassigned_resource_ids),
+        "objectiveComponents": {
+            "travelCost": result.travel_cost,
+            "uncoveredTaskPenalty": result.uncovered_task_penalty,
+            "objectiveValue": result.objective_value,
+        },
+        "bindingConstraints": list(result.binding_constraints),
+        "runtimeMilliseconds": result.runtime_milliseconds,
+        "algorithmVersion": result.algorithm_version,
+    }
+
+
+def _serialize_route(route: RouteResult) -> dict[str, object]:
+    return {
+        "status": route.status.value,
+        "edgeIds": list(route.edge_ids),
+        "distanceMeters": route.distance_meters,
+        "travelMinutes": route.travel_minutes,
+    }
+
+
+class ExercisePlanningService:
+    def __init__(
+        self,
+        *,
+        definition: ExerciseDefinition,
+        definition_digest: str,
+        graph: RoadGraph,
+        repository: ExerciseRepositoryProtocol,
+        session_service: ExerciseSessionService,
+        clock: Callable[[], datetime],
+    ) -> None:
+        if graph.graph_version != definition.graph_version:
+            raise ValueError("road graph version does not match exercise definition")
+        self._definition = definition
+        self._definition_digest = definition_digest
+        self._graph = graph
+        self._repository = repository
+        self._session_service = session_service
+        self._clock = clock
+
+    async def generate_plan(
+        self,
+        session_id: UUID,
+        *,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> tuple[ExercisePlanRun, dict[str, object]]:
+        session, claim, replayed = await self._session_service.lock_command(
+            session_id, expected_version, idempotency_key, "generate-plan", {}
+        )
+        _require_definition(session, self._definition, self._definition_digest)
+        if replayed is not None:
+            return await self._replay(session_id, replayed)
+        if session.objective is None:
+            raise ExerciseTransitionInvalid("select an objective before planning")
+        checkpoint = materialize_checkpoint(
+            self._definition,
+            checkpoint_index=session.checkpoint_index,
+            objective=session.objective,
+            consequences=session.consequences,
+        )
+        routes = candidate_routes(
+            self._graph,
+            checkpoint.resources,
+            checkpoint.tasks,
+            checkpoint.asset_positions,
+            checkpoint.closed_edge_ids,
+        )
+        payload = serialize_planning_input(checkpoint, routes)
+        result = solve_task_plan(
+            TaskOptimizationRequest(
+                checkpoint.resources,
+                checkpoint.tasks,
+                routes,
+                (),
+                self._definition.objectives[session.objective].travel_weight,
+                max_solver_seconds=2,
+            )
+        )
+        previous = await self._repository.latest_plan_for_session(session.id)
+        output = serialize_task_result(result, routes)
+        output["explanation"] = serialize_task_explanation(
+            explain_task_plan(
+                None
+                if previous is None
+                else {
+                    **dict(previous.input_data),
+                    "assignments": previous.output_data.get("assignments", []),
+                },
+                {**payload, "assignments": output["assignments"]},
+            )
+        )
+        return await self._store_plan(
+            session,
+            claim.id,
+            expected_version,
+            "exercise.plan-generated",
+            payload,
+            output,
+            checkpoint.checkpoint_key,
+            {"inputHash": planning_input_hash(payload)},
+        )
+
+    async def apply_override(
+        self,
+        session_id: UUID,
+        *,
+        resource_id: str,
+        task_id: str,
+        expected_version: int,
+        idempotency_key: str,
+    ) -> tuple[ExercisePlanRun, dict[str, object]]:
+        session, claim, replayed = await self._session_service.lock_command(
+            session_id,
+            expected_version,
+            idempotency_key,
+            "apply-override",
+            {"resourceId": resource_id, "taskId": task_id},
+        )
+        _require_definition(session, self._definition, self._definition_digest)
+        if replayed is not None:
+            return await self._replay(session_id, replayed)
+        if session.checkpoint_index != 2:
+            raise ExerciseTransitionInvalid("override requires checkpoint three")
+        if task_id != "shelter-capacity-transport":
+            raise ExerciseCommandInvalid("guided override must target shelter transport")
+        resource = next(
+            (
+                item
+                for item in self._definition.resources
+                if item.resource_id == resource_id
+            ),
+            None,
+        )
+        if resource is None or resource.resource_type != "evacuation-bus":
+            raise ExerciseCommandInvalid(
+                "override fails capability, capacity, route, deadline, or uniqueness"
+            )
+        if session.objective is None:
+            raise ExerciseTransitionInvalid("select an objective before overriding")
+        current = await self._repository.latest_plan(session.id, "field-report")
+        if current is None:
+            raise ExerciseTransitionInvalid("generate checkpoint-three plan first")
+        if current.output_data.get("operatorOverride"):
+            raise ExerciseTransitionInvalid("checkpoint-three override is already applied")
+        if current.output_data.get("status") not in {"FEASIBLE", "OPTIMAL"}:
+            raise ExerciseTransitionInvalid("generate checkpoint-three plan first")
+        if (
+            current.input_data.get("objective") != session.objective
+            or current.versions.get("definitionDigest") != self._definition_digest
+            or current.versions.get("exercise") != self._definition.version
+            or current.versions.get("graph") != self._definition.graph_version
+            or current.versions.get("taskAlgorithm") != TASK_ALGORITHM_VERSION
+        ):
+            raise ExerciseVersionConflict("checkpoint planning input changed")
+        checkpoint = materialize_checkpoint(
+            self._definition,
+            checkpoint_index=session.checkpoint_index,
+            objective=session.objective,
+            consequences=session.consequences,
+        )
+        routes = candidate_routes(
+            self._graph,
+            checkpoint.resources,
+            checkpoint.tasks,
+            checkpoint.asset_positions,
+            checkpoint.closed_edge_ids,
+        )
+        base_payload = serialize_planning_input(checkpoint, routes)
+        if planning_input_hash(base_payload) != current.input_hash:
+            raise ExerciseVersionConflict("checkpoint planning input changed")
+        locked = (LockedTaskAssignment(resource_id, task_id),)
+        payload = serialize_planning_input(checkpoint, routes, locked)
+        try:
+            request = replace(
+                _request_from_input(
+                    current.input_data,
+                    self._definition.objectives[session.objective].travel_weight,
+                ),
+                locked_assignments=locked,
+            )
+            result = solve_task_plan(request)
+        except ValueError as error:
+            raise ExerciseCommandInvalid(
+                "override fails capability, capacity, route, deadline, or uniqueness"
+            ) from error
+        if not any(
+            item.resource_id == resource_id and item.task_id == task_id
+            for item in result.assignments
+        ):
+            raise ExerciseCommandInvalid(
+                "override fails capability, capacity, route, deadline, or uniqueness"
+            )
+        output = serialize_task_result(result, routes)
+        output["explanation"] = serialize_task_explanation(
+            explain_task_plan(
+                {
+                    **dict(current.input_data),
+                    "assignments": current.output_data.get("assignments", []),
+                },
+                {**payload, "assignments": output["assignments"]},
+            )
+        )
+        output["operatorOverride"] = {
+            "resourceId": resource_id,
+            "taskId": task_id,
+            "beforePlanId": str(current.id),
+        }
+        return await self._store_plan(
+            session,
+            claim.id,
+            expected_version,
+            "exercise.override-applied",
+            payload,
+            output,
+            checkpoint.checkpoint_key,
+            {
+                "beforePlanId": str(current.id),
+                "resourceId": resource_id,
+                "taskId": task_id,
+            },
+        )
+
+    async def _store_plan(
+        self,
+        session: ExerciseSession,
+        claim_id: UUID,
+        expected_version: int,
+        event_type: str,
+        payload: dict[str, object],
+        output: dict[str, object],
+        checkpoint_key: str,
+        event_inputs: Mapping[str, object],
+    ) -> tuple[ExercisePlanRun, dict[str, object]]:
+        stored = await self._repository.store_plan(
+            session_id=session.id,
+            checkpoint_key=checkpoint_key,
+            input_hash=planning_input_hash(payload),
+            input_data=payload,
+            output_data=output,
+            versions={
+                "exercise": self._definition.version,
+                "definitionDigest": self._definition_digest,
+                "graph": self._definition.graph_version,
+                "taskAlgorithm": TASK_ALGORITHM_VERSION,
+            },
+            idempotency_key_id=claim_id,
+        )
+        before = _session_state(session)
+        session.version += 1
+        if event_type == "exercise.override-applied":
+            session.consequences["lastPlanId"] = str(stored.id)
+        await self._repository.save_session(session)
+        projection = await session_projection(
+            self._definition,
+            self._definition_digest,
+            self._repository,
+            session,
+            self._clock(),
+        )
+        event = await self._repository.append_event(
+            session_id=session.id,
+            event_type=event_type,
+            actor_callsign=session.callsign,
+            display_name=session.display_name,
+            expected_session_version=expected_version,
+            resulting_session_version=session.version,
+            before_state=before,
+            after_state=_session_state(session),
+            inputs=_event_inputs({**event_inputs, "planId": str(stored.id)}, projection),
+            note=None,
+        )
+        await self._repository.complete_idempotency(
+            claim_id=claim_id, response_type="exercise_event", response_id=event.id
+        )
+        snapshot = event.inputs.get("_responseProjection")
+        if not isinstance(snapshot, Mapping):
+            raise RuntimeError("exercise planning response snapshot is invalid")
+        session.response_projection = freeze_json_object(snapshot)
+        return stored, _copy_json_object(snapshot)
+
+    async def _replay(
+        self, session_id: UUID, event: ExerciseEvent
+    ) -> tuple[ExercisePlanRun, dict[str, object]]:
+        plan_id = event.inputs.get("planId")
+        if not isinstance(plan_id, str):
+            raise RuntimeError("plan replay is missing plan ID")
+        try:
+            stored = await self._repository.get_plan(session_id, UUID(plan_id))
+        except ValueError as error:
+            raise RuntimeError("plan replay is missing plan ID") from error
+        if stored is None:
+            raise RuntimeError("plan replay does not exist")
+        if (
+            stored.versions.get("exercise") != self._definition.version
+            or stored.versions.get("definitionDigest") != self._definition_digest
+            or stored.versions.get("graph") != self._definition.graph_version
+            or stored.versions.get("taskAlgorithm") != TASK_ALGORITHM_VERSION
+        ):
+            raise RuntimeError("plan replay does not match exercise definition")
+        replay_session = _session_from_state(event.after_state)
+        _require_definition(replay_session, self._definition, self._definition_digest)
+        snapshot = event.inputs.get("_responseProjection")
+        _validate_replay_snapshot(snapshot, replay_session, self._definition)
+        if not isinstance(snapshot, Mapping) or snapshot.get("latestPlan") != stored.output_data:
+            raise RuntimeError("exercise replay response is invalid")
+        return stored, _copy_json_object(snapshot)
+
+
+def _request_from_input(
+    payload: Mapping[str, object], travel_weight: int
+) -> TaskOptimizationRequest:
+    """Rebuild known planner values from canonical JSON, never class metadata."""
+    try:
+        resources = tuple(
+            ResourceUnit(
+                _string(row, "resourceId"),
+                frozenset(_strings(row, "capabilities")),
+                _integer(row, "capacity"),
+                _boolean(row, "available"),
+                _number(row, "longitude"),
+                _number(row, "latitude"),
+            )
+            for row in _rows(payload, "resources")
+        )
+        tasks = tuple(
+            TaskDemand(
+                _string(row, "taskId"),
+                _string(row, "incidentId"),
+                _string(row, "assetId"),
+                _string(row, "requiredCapability"),
+                _integer(row, "requiredCapacity"),
+                _integer(row, "deadlineMinutes"),
+                _integer(row, "penalty"),
+            )
+            for row in _rows(payload, "tasks")
+        )
+        routes = tuple(
+            TaskCandidateRoute(
+                _string(row, "resourceId"),
+                _string(row, "taskId"),
+                RouteResult(
+                    RouteStatus(_string(row, "status")),
+                    tuple(_strings(row, "edgeIds")),
+                    _number(row, "distanceMeters"),
+                    _number(row, "travelMinutes"),
+                    _string(row, "graphVersion"),
+                    _string(row, "closureHash"),
+                ),
+            )
+            for row in _rows(payload, "routes")
+        )
+        locks = tuple(
+            LockedTaskAssignment(_string(row, "resourceId"), _string(row, "taskId"))
+            for row in _rows(payload, "lockedAssignments")
+        )
+    except (TypeError, ValueError) as error:
+        raise ExerciseVersionConflict("stored planning input is invalid") from error
+    return TaskOptimizationRequest(resources, tasks, routes, locks, travel_weight, 2)
+
+
+def _rows(payload: Mapping[str, object], field: str) -> tuple[Mapping[str, object], ...]:
+    value = payload.get(field)
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        raise TypeError(field)
+    if not all(isinstance(item, Mapping) for item in value):
+        raise TypeError(field)
+    return tuple(cast(Mapping[str, object], item) for item in value)
+
+
+def _string(row: Mapping[str, object], field: str) -> str:
+    value = row.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise TypeError(field)
+    return value
+
+
+def _strings(row: Mapping[str, object], field: str) -> tuple[str, ...]:
+    value = row.get(field)
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        raise TypeError(field)
+    if not all(isinstance(item, str) and item.strip() for item in value):
+        raise TypeError(field)
+    return tuple(cast(str, item) for item in value)
+
+
+def _integer(row: Mapping[str, object], field: str) -> int:
+    value = row.get(field)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(field)
+    return value
+
+
+def _number(row: Mapping[str, object], field: str) -> float:
+    value = row.get(field)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(field)
+    return float(value)
+
+
+def _boolean(row: Mapping[str, object], field: str) -> bool:
+    value = row.get(field)
+    if not isinstance(value, bool):
+        raise TypeError(field)
+    return value
