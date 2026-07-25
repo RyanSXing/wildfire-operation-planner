@@ -1,6 +1,9 @@
 import json
-from datetime import datetime
+import re
+from collections.abc import Mapping
+from datetime import datetime, timedelta
 from hashlib import sha256
+from types import MappingProxyType
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -17,6 +20,9 @@ type ObjectivePreset = Literal[
 type ProvenanceKind = Literal["historical", "exercise"]
 
 
+_OSM_RECORD_ID = re.compile(r"(?:node|way|relation)/[1-9][0-9]*$")
+
+
 class ExerciseModel(BaseModel):
     model_config = ConfigDict(
         alias_generator=lambda value: "".join(
@@ -27,6 +33,10 @@ class ExerciseModel(BaseModel):
         frozen=True,
         extra="forbid",
     )
+
+    def model_post_init(self, __context: object) -> None:
+        for field in type(self).model_fields:
+            object.__setattr__(self, field, _freeze(getattr(self, field)))
 
 
 class Point(ExerciseModel):
@@ -88,15 +98,23 @@ class ExerciseIncident(ExerciseModel):
     incident_key: str = Field(min_length=1)
     name: str = Field(min_length=1)
     provenance: ProvenanceKind
-    detection_source_record_ids: tuple[str, ...] = ()
+    detection_identities: tuple[str, ...] = ()
     simulated_position: Point | None = None
 
     @model_validator(mode="after")
     def validate_geometry_source(self) -> "ExerciseIncident":
-        if self.provenance == "historical" and not self.detection_source_record_ids:
-            raise ValueError("historical incident requires detection source record IDs")
-        if self.provenance == "exercise" and self.simulated_position is None:
-            raise ValueError("exercise incident requires simulated position")
+        if self.provenance == "historical":
+            if not self.detection_identities:
+                raise ValueError("historical incident requires detection identities")
+            if self.simulated_position is not None:
+                raise ValueError("historical incident must not define simulated position")
+        else:
+            if self.detection_identities:
+                raise ValueError(
+                    "exercise incident must not define historical detection identities"
+                )
+            if self.simulated_position is None:
+                raise ValueError("exercise incident requires simulated position")
         return self
 
 
@@ -120,7 +138,7 @@ class ExerciseCheckpoint(ExerciseModel):
     situation_summary: str = Field(min_length=1)
     decision_prompt: str = Field(min_length=1)
     reference_at: datetime
-    historical_weather_source_record_id: str = Field(min_length=1)
+    historical_weather_identity: str = Field(min_length=1)
     incidents: tuple[ExerciseIncident, ...]
     tasks: tuple[ExerciseTask, ...]
     disruption: ExerciseDisruption | None = None
@@ -138,8 +156,8 @@ class ObjectiveWeights(ExerciseModel):
 class SandboxControls(ExerciseModel):
     checkpoint_keys: frozenset[str] = Field(min_length=1)
     closure_edge_ids: frozenset[str]
-    wind_presets: dict[str, ExerciseDisruption]
-    priority_multipliers: dict[
+    wind_presets: Mapping[str, ExerciseDisruption]
+    priority_multipliers: Mapping[
         Literal["standard", "elevated", "urgent"],
         int,
     ]
@@ -152,7 +170,7 @@ class ExerciseDefinition(ExerciseModel):
     description: str = Field(min_length=1)
     replay_package_id: str = Field(min_length=1)
     graph_version: str = Field(min_length=1)
-    objectives: dict[ObjectivePreset, ObjectiveWeights]
+    objectives: Mapping[ObjectivePreset, ObjectiveWeights]
     assets: tuple[ExerciseAsset, ...]
     resources: tuple[ExerciseResource, ...]
     checkpoints: tuple[ExerciseCheckpoint, ...] = Field(min_length=3, max_length=3)
@@ -183,11 +201,7 @@ def load_exercise_definition(
 
 def exercise_definition_digest(definition: ExerciseDefinition) -> str:
     payload = json.dumps(
-        definition.model_dump(
-            mode="json",
-            by_alias=True,
-            exclude_none=True,
-        ),
+        _canonicalize(definition),
         sort_keys=True,
         separators=(",", ":"),
         allow_nan=False,
@@ -222,6 +236,10 @@ def _validate_definition_references(
         )
     asset_ids = [item.asset_id for item in definition.assets]
     _unique(asset_ids, "assetId")
+    _unique(
+        [f"{item.source_name}:{item.source_record_id}" for item in definition.assets],
+        "asset source identity",
+    )
     west, south, east, north = loader.manifest.region
     for asset in definition.assets:
         if not (
@@ -231,14 +249,15 @@ def _validate_definition_references(
             raise ReplayPackageCorrupt(
                 f"exercise.json: asset is outside replay bounds: {asset.asset_id}"
             )
+        _validate_asset_reference(asset, loader)
     observations = tuple(loader.iter_until(loader.manifest.end_at))
-    detection_ids = {
-        item.source_record_id
+    detection_observed_at = {
+        item.identity: item.observed_at
         for item in observations
         if isinstance(item, NormalizedObservation)
     }
-    weather_ids = {
-        item.source_record_id
+    weather_observed_at = {
+        item.identity: item.observed_at
         for item in observations
         if isinstance(item, WeatherObservation)
     }
@@ -287,6 +306,13 @@ def _validate_definition_references(
             "exercise.json: sandbox wind presets cannot define road closures"
         )
     times = [item.reference_at for item in definition.checkpoints]
+    for value in times:
+        if value.utcoffset() != timedelta(0):
+            raise ReplayPackageCorrupt("exercise.json: checkpoint referenceAt must be UTC")
+        if value < loader.manifest.start_at or value > loader.manifest.end_at:
+            raise ReplayPackageCorrupt(
+                "exercise.json: checkpoint referenceAt is outside replay window"
+            )
     if times != sorted(times) or len(set(times)) != len(times):
         raise ReplayPackageCorrupt(
             "exercise.json: checkpoints must be strictly time ordered"
@@ -298,18 +324,34 @@ def _validate_definition_references(
         _unique(incident_keys, f"{checkpoint.checkpoint_key}.incidentKey")
         _unique(task_ids, f"{checkpoint.checkpoint_key}.taskId")
         _unique(report_ids, f"{checkpoint.checkpoint_key}.reportId")
-        if checkpoint.historical_weather_source_record_id not in weather_ids:
+        weather_at = weather_observed_at.get(checkpoint.historical_weather_identity)
+        if weather_at is None:
             raise ReplayPackageCorrupt(
-                "exercise.json: unknown weather source record ID: "
-                f"{checkpoint.historical_weather_source_record_id}"
+                "exercise.json: unknown historical weather identity: "
+                f"{checkpoint.historical_weather_identity}"
+            )
+        if weather_at > checkpoint.reference_at:
+            raise ReplayPackageCorrupt(
+                "exercise.json: historical weather identity is after checkpoint: "
+                f"{checkpoint.historical_weather_identity}"
             )
         for incident in checkpoint.incidents:
             unknown = sorted(
-                set(incident.detection_source_record_ids) - detection_ids
+                set(incident.detection_identities) - detection_observed_at.keys()
             )
             if unknown:
                 raise ReplayPackageCorrupt(
-                    f"exercise.json: unknown detection source record ID: {unknown[0]}"
+                    f"exercise.json: unknown historical detection identity: {unknown[0]}"
+                )
+            future = sorted(
+                identity
+                for identity in incident.detection_identities
+                if detection_observed_at[identity] > checkpoint.reference_at
+            )
+            if future:
+                raise ReplayPackageCorrupt(
+                    "exercise.json: historical detection identity is after checkpoint: "
+                    f"{future[0]}"
                 )
         for task in checkpoint.tasks:
             if task.incident_key not in incident_keys:
@@ -334,6 +376,125 @@ def _validate_definition_references(
                     f"exercise.json: field report task does not exist: "
                     f"{report.task_id}"
                 )
+
+
+def _validate_asset_reference(
+    asset: ExerciseAsset,
+    loader: ReplayLoader,
+) -> None:
+    if asset.source_name == "openstreetmap" or _OSM_RECORD_ID.fullmatch(
+        asset.source_record_id
+    ):
+        if asset.source_name != "openstreetmap":
+            raise ReplayPackageCorrupt(
+                "exercise.json: external asset sourceName must be openstreetmap: "
+                f"{asset.asset_id}"
+            )
+        _validate_openstreetmap_asset(asset)
+        return
+    assert loader.static_data is not None
+    static_asset = next(
+        (
+            item
+            for item in loader.static_data.assets
+            if item.asset_id == asset.source_record_id
+        ),
+        None,
+    )
+    if static_asset is None or static_asset.asset_kind != "community":
+        raise ReplayPackageCorrupt(
+            f"exercise.json: unknown verified static asset: {asset.asset_id}"
+        )
+    coordinates = static_asset.geometry_geojson["coordinates"]
+    if not isinstance(coordinates, tuple) or len(coordinates) != 2:
+        raise ReplayPackageCorrupt(
+            f"exercise.json: invalid verified static asset geometry: {asset.asset_id}"
+        )
+    expected_citation = loader.static_data.source_citations.get(
+        static_asset.source_name
+    )
+    if (
+        asset.asset_id != static_asset.asset_id
+        or asset.asset_kind != static_asset.asset_kind
+        or asset.name != static_asset.name
+        or asset.position.longitude != coordinates[0]
+        or asset.position.latitude != coordinates[1]
+        or asset.source_name != static_asset.source_name
+        or asset.source_version != static_asset.source_version
+        or asset.citation_url != expected_citation
+    ):
+        raise ReplayPackageCorrupt(
+            f"exercise.json: asset does not match verified static asset: {asset.asset_id}"
+        )
+
+
+def _validate_openstreetmap_asset(asset: ExerciseAsset) -> None:
+    if not _OSM_RECORD_ID.fullmatch(asset.source_record_id):
+        raise ReplayPackageCorrupt(
+            "exercise.json: external asset sourceRecordId must be node, way, or "
+            f"relation: {asset.asset_id}"
+        )
+    expected_citation = f"https://www.openstreetmap.org/{asset.source_record_id}"
+    if asset.citation_url != expected_citation:
+        raise ReplayPackageCorrupt(
+            "exercise.json: external asset citationUrl does not match sourceRecordId: "
+            f"{asset.asset_id}"
+        )
+    try:
+        source_version = datetime.fromisoformat(asset.source_version)
+    except ValueError:
+        raise ReplayPackageCorrupt(
+            "exercise.json: external asset sourceVersion must be a UTC timestamp: "
+            f"{asset.asset_id}"
+        ) from None
+    if source_version.utcoffset() != timedelta(0):
+        raise ReplayPackageCorrupt(
+            "exercise.json: external asset sourceVersion must be a UTC timestamp: "
+            f"{asset.asset_id}"
+        )
+    if not asset.name.strip():
+        raise ReplayPackageCorrupt(
+            f"exercise.json: external asset name must be nonblank: {asset.asset_id}"
+        )
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, tuple):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, list):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, frozenset):
+        return frozenset(_freeze(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze(item) for item in value)
+    return value
+
+
+def _canonicalize(value: object) -> object:
+    if isinstance(value, BaseModel):
+        return {
+            field.alias or name: _canonicalize(item)
+            for name, field in type(value).model_fields.items()
+            if (item := getattr(value, name)) is not None
+        }
+    if isinstance(value, Mapping):
+        return {
+            key: _canonicalize(item)
+            for key, item in sorted(value.items(), key=lambda item: item[0])
+        }
+    if isinstance(value, tuple) or isinstance(value, list):
+        return [_canonicalize(item) for item in value]
+    if isinstance(value, frozenset) or isinstance(value, set):
+        values = [_canonicalize(item) for item in value]
+        return sorted(
+            values,
+            key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
+        )
+    if isinstance(value, datetime):
+        return value.isoformat().replace("+00:00", "Z")
+    return value
 
 
 def _unique(values: list[str], field: str) -> None:

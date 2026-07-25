@@ -30,6 +30,11 @@ sandbox, audit data, and a committed golden fixture.
 - Public hosting, authentication, secure session credentials, cleanup jobs, and retention policy are outside this plan.
 - Do not add dependencies; use the installed standard library, Pydantic, SQLAlchemy, OR-Tools, pytest, and Hypothesis.
 - Use exact historical source identities and source citations in committed fixtures; never invent a real facility name or coordinate.
+- Exercise observation references use composite normalized identities
+  (`source_name:source_record_id`): `detectionIdentities` and
+  `historicalWeatherIdentity`. Exercise assets either exactly mirror a verified
+  static community or pin a validated OpenStreetMap `node|way|relation` record
+  in the manifest-hashed definition; they do not alter Live Monitor fixtures.
 
 ---
 
@@ -233,15 +238,23 @@ class ExerciseIncident(ExerciseModel):
     incident_key: str = Field(min_length=1)
     name: str = Field(min_length=1)
     provenance: ProvenanceKind
-    detection_source_record_ids: tuple[str, ...] = ()
+    detection_identities: tuple[str, ...] = ()
     simulated_position: Point | None = None
 
     @model_validator(mode="after")
     def validate_geometry_source(self) -> "ExerciseIncident":
-        if self.provenance == "historical" and not self.detection_source_record_ids:
-            raise ValueError("historical incident requires detection source record IDs")
-        if self.provenance == "exercise" and self.simulated_position is None:
-            raise ValueError("exercise incident requires simulated position")
+        if self.provenance == "historical":
+            if not self.detection_identities:
+                raise ValueError("historical incident requires detection identities")
+            if self.simulated_position is not None:
+                raise ValueError("historical incident must not define simulated position")
+        else:
+            if self.detection_identities:
+                raise ValueError(
+                    "exercise incident must not define historical detection identities"
+                )
+            if self.simulated_position is None:
+                raise ValueError("exercise incident requires simulated position")
         return self
 
 
@@ -265,7 +278,7 @@ class ExerciseCheckpoint(ExerciseModel):
     situation_summary: str = Field(min_length=1)
     decision_prompt: str = Field(min_length=1)
     reference_at: datetime
-    historical_weather_source_record_id: str = Field(min_length=1)
+    historical_weather_identity: str = Field(min_length=1)
     incidents: tuple[ExerciseIncident, ...]
     tasks: tuple[ExerciseTask, ...]
     disruption: ExerciseDisruption | None = None
@@ -447,18 +460,18 @@ def _validate_definition_references(
         _unique(incident_keys, f"{checkpoint.checkpoint_key}.incidentKey")
         _unique(task_ids, f"{checkpoint.checkpoint_key}.taskId")
         _unique(report_ids, f"{checkpoint.checkpoint_key}.reportId")
-        if checkpoint.historical_weather_source_record_id not in weather_ids:
+        if checkpoint.historical_weather_identity not in weather_ids:
             raise ReplayPackageCorrupt(
-                "exercise.json: unknown weather source record ID: "
-                f"{checkpoint.historical_weather_source_record_id}"
+                "exercise.json: unknown historical weather identity: "
+                f"{checkpoint.historical_weather_identity}"
             )
         for incident in checkpoint.incidents:
             unknown = sorted(
-                set(incident.detection_source_record_ids) - detection_ids
+                set(incident.detection_identities) - detection_ids
             )
             if unknown:
                 raise ReplayPackageCorrupt(
-                    f"exercise.json: unknown detection source record ID: {unknown[0]}"
+                    f"exercise.json: unknown historical detection identity: {unknown[0]}"
                 )
         for task in checkpoint.tasks:
             if task.incident_key not in incident_keys:
@@ -2882,8 +2895,8 @@ def materialize_checkpoint(
             "exercise": definition.version,
             "graph": definition.graph_version,
             "replayPackage": definition.replay_package_id,
-            "historicalWeatherRecord": (
-                checkpoint.historical_weather_source_record_id
+            "historicalWeatherIdentity": (
+                checkpoint.historical_weather_identity
             ),
         },
     )

@@ -1,8 +1,11 @@
 import json
+import os
 from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
 from shutil import copytree
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -136,7 +139,59 @@ def test_loads_immutable_exercise_definition(exercise_package: Path) -> None:
     assert definition is not None
     assert definition.exercise_id == "park-fire-exercise"
     assert len(definition.checkpoints) == 3
-    assert exercise_definition_digest(definition) == exercise_definition_digest(definition)
+    assert (
+        exercise_definition_digest(definition)
+        == "a53e243acbd3dbd3875eb4b7afa1cdac5b65492ec858c849d9656eb48ced44bd"
+    )
+
+
+def test_definition_nested_collections_are_immutable(
+    exercise_package: Path,
+) -> None:
+    definition = load_exercise_definition(ReplayLoader(exercise_package))
+
+    assert definition is not None
+    with pytest.raises(TypeError):
+        definition.objectives["fastest-response"] = definition.objectives[
+            "fastest-response"
+        ]
+    with pytest.raises(TypeError):
+        definition.sandbox.wind_presets["baseline"] = definition.sandbox.wind_presets[
+            "baseline"
+        ]
+    with pytest.raises(TypeError):
+        definition.sandbox.priority_multipliers["standard"] = 2
+
+
+def test_definition_digest_is_stable_across_hash_seeds(
+    exercise_package: Path,
+) -> None:
+    rewrite_exercise(
+        exercise_package,
+        lambda body: body["resources"][0].update(
+            capabilities=["water", "medical", "road"]
+        )
+        or body["sandbox"].update(closureEdgeIds=["edge-a", "edge-b"]),
+    )
+    script = (
+        "from pathlib import Path\n"
+        "from wildfireops.replay.exercise import exercise_definition_digest, "
+        "load_exercise_definition\n"
+        "from wildfireops.replay.loader import ReplayLoader\n"
+        "print(exercise_definition_digest(load_exercise_definition("
+        "ReplayLoader(Path(__import__('sys').argv[1])))))\n"
+    )
+
+    digests = {
+        subprocess.check_output(
+            [sys.executable, "-c", script, str(exercise_package)],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            text=True,
+        ).strip()
+        for seed in ("1", "2", "3")
+    }
+
+    assert len(digests) == 1
 
 
 @pytest.mark.parametrize(
@@ -173,6 +228,194 @@ def test_definition_rejects_invalid_contract(
         load_exercise_definition(ReplayLoader(exercise_package))
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda body: body["assets"][0].update(name="Different Community"),
+            "does not match verified static asset",
+        ),
+        (
+            lambda body: body["assets"][0].update(
+                citationUrl="https://example.invalid/"
+            ),
+            "does not match verified static asset",
+        ),
+        (
+            lambda body: body["assets"][0].update(
+                position={"longitude": -121.61, "latitude": 39.8}
+            ),
+            "does not match verified static asset",
+        ),
+        (
+            lambda body: body["assets"][0].update(sourceRecordId="unknown"),
+            "unknown verified static asset",
+        ),
+    ],
+)
+def test_definition_rejects_invalid_static_asset_reference(
+    exercise_package: Path,
+    mutation: Callable[[dict[str, Any]], None],
+    message: str,
+) -> None:
+    rewrite_exercise(exercise_package, mutation)
+
+    with pytest.raises(ReplayPackageCorrupt, match=message):
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda body: _external_asset(body).update(sourceName="OpenStreetMap"),
+            "sourceName must be openstreetmap",
+        ),
+        (
+            lambda body: _external_asset(body).update(sourceRecordId="node:1"),
+            "sourceRecordId must be node, way, or relation",
+        ),
+        (
+            lambda body: _external_asset(body).update(
+                citationUrl="https://www.openstreetmap.org/node/999"
+            ),
+            "citationUrl does not match sourceRecordId",
+        ),
+        (
+            lambda body: _external_asset(body).update(sourceVersion="not-a-timestamp"),
+            "sourceVersion must be a UTC timestamp",
+        ),
+        (
+            lambda body: _external_asset(body).update(name="   "),
+            "name must be nonblank",
+        ),
+    ],
+)
+def test_definition_rejects_invalid_external_asset_reference(
+    exercise_package: Path,
+    mutation: Callable[[dict[str, Any]], None],
+    message: str,
+) -> None:
+    rewrite_exercise(
+        exercise_package,
+        lambda body: _replace_asset_with_external(body) or mutation(body),
+    )
+
+    with pytest.raises(ReplayPackageCorrupt, match=message):
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+
+def test_loads_valid_external_openstreetmap_asset(exercise_package: Path) -> None:
+    rewrite_exercise(exercise_package, _replace_asset_with_external)
+
+    assert load_exercise_definition(ReplayLoader(exercise_package)) is not None
+
+
+def test_definition_rejects_duplicate_asset_source_identity(
+    exercise_package: Path,
+) -> None:
+    rewrite_exercise(
+        exercise_package,
+        lambda body: body["assets"].append(
+            {**body["assets"][0], "assetId": "community-duplicate"}
+        ),
+    )
+
+    with pytest.raises(ReplayPackageCorrupt, match="duplicate asset source identity"):
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda body: body["checkpoints"][0].update(
+                referenceAt="2024-07-24T18:12:00"
+            ),
+            "checkpoint referenceAt must be UTC",
+        ),
+        (
+            lambda body: body["checkpoints"][0].update(
+                referenceAt="2024-07-24T14:12:00-04:00"
+            ),
+            "checkpoint referenceAt must be UTC",
+        ),
+        (
+            lambda body: body["checkpoints"][2].update(
+                referenceAt="2024-07-24T18:31:00Z"
+            ),
+            "checkpoint referenceAt is outside replay window",
+        ),
+        (
+            lambda body: body["checkpoints"][0].update(
+                referenceAt="2024-07-24T18:11:00Z"
+            ),
+            "historical detection identity is after checkpoint",
+        ),
+        (
+            lambda body: _exercise_incident(body).update(
+                provenance="exercise",
+                detectionIdentities=[],
+                simulatedPosition={"longitude": -121.5, "latitude": 39.8},
+            )
+            or body["checkpoints"][0].update(referenceAt="2024-07-24T18:09:00Z"),
+            "historical weather identity is after checkpoint",
+        ),
+    ],
+)
+def test_definition_rejects_invalid_checkpoint_time_or_history(
+    exercise_package: Path,
+    mutation: Callable[[dict[str, Any]], None],
+    message: str,
+) -> None:
+    rewrite_exercise(exercise_package, mutation)
+
+    with pytest.raises(ReplayPackageCorrupt, match=message):
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+
+def test_definition_accepts_replay_end_checkpoint_boundary(
+    exercise_package: Path,
+) -> None:
+    rewrite_exercise(
+        exercise_package,
+        lambda body: body["checkpoints"][2].update(
+            referenceAt="2024-07-24T18:30:00Z"
+        ),
+    )
+
+    assert load_exercise_definition(ReplayLoader(exercise_package)) is not None
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda body: _exercise_incident(body).update(
+                simulatedPosition={"longitude": -121.5, "latitude": 39.8}
+            ),
+            "historical incident must not define simulated position",
+        ),
+        (
+            lambda body: _exercise_incident(body).update(
+                provenance="exercise",
+                simulatedPosition={"longitude": -121.5, "latitude": 39.8},
+            ),
+            "exercise incident must not define historical detection identities",
+        ),
+    ],
+)
+def test_definition_rejects_mixed_incident_provenance(
+    exercise_package: Path,
+    mutation: Callable[[dict[str, Any]], None],
+    message: str,
+) -> None:
+    rewrite_exercise(exercise_package, mutation)
+
+    with pytest.raises(ReplayPackageCorrupt, match=message):
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+
 def rewrite_exercise(
     package: Path,
     mutation: Callable[[dict[str, Any]], None],
@@ -186,13 +429,36 @@ def rewrite_exercise(
     _write_manifest(package, manifest)
 
 
+def _external_asset(body: dict[str, Any]) -> dict[str, Any]:
+    return body["assets"][0]
+
+
+def _exercise_incident(body: dict[str, Any]) -> dict[str, Any]:
+    return body["checkpoints"][0]["incidents"][0]
+
+
+def _replace_asset_with_external(body: dict[str, Any]) -> None:
+    body["assets"][0] = {
+        "assetId": "osm-hospital",
+        "assetKind": "hospital",
+        "name": "Example Hospital",
+        "position": {"longitude": -121.6, "latitude": 39.8},
+        "sourceName": "openstreetmap",
+        "sourceVersion": "2024-07-24T18:00:00Z",
+        "sourceRecordId": "node/123",
+        "citationUrl": "https://www.openstreetmap.org/node/123",
+    }
+    for checkpoint in body["checkpoints"]:
+        checkpoint["tasks"][0]["assetId"] = "osm-hospital"
+
+
 def _exercise_body(manifest: dict[str, Any]) -> dict[str, Any]:
     checkpoints = []
     for index, reference_at in enumerate(
         (
-            "2024-07-24T18:11:00Z",
             "2024-07-24T18:12:00Z",
             "2024-07-24T18:13:00Z",
+            "2024-07-24T18:14:00Z",
         ),
         start=1,
     ):
@@ -204,13 +470,13 @@ def _exercise_body(manifest: dict[str, Any]) -> dict[str, Any]:
                 "situationSummary": "A wildfire threatens the community.",
                 "decisionPrompt": "Assign the available engine.",
                 "referenceAt": reference_at,
-                "historicalWeatherSourceRecordId": "weather-1",
+                "historicalWeatherIdentity": "nws:weather-1",
                 "incidents": [
                     {
                         "incidentKey": "park-fire",
                         "name": "Park Fire",
                         "provenance": "historical",
-                        "detectionSourceRecordIds": ["detection-1812"],
+                        "detectionIdentities": ["nasa_firms:detection-1812"],
                     }
                 ],
                 "tasks": [
