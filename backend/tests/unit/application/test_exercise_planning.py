@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import networkx as nx
 import pytest
+from pyproj import Geod
 
 from wildfireops.application.exercises import (
     ExerciseCommandInvalid,
@@ -20,7 +21,7 @@ from wildfireops.decision.task_optimizer import (
 )
 from wildfireops.domain.observations import freeze_json_object
 from wildfireops.domain.scenario_versions import IdempotencyClaim
-from wildfireops.geospatial.road_graph import RoadGraph
+from wildfireops.geospatial.road_graph import RoadGraph, nearest_road_node
 from wildfireops.replay.exercise import ExerciseDefinition, _canonicalize
 
 
@@ -801,12 +802,12 @@ def test_runtime_validation_rejects_unknown_sandbox_closure_edge() -> None:
     )
 
     payload = _definition_payload()
-    payload["sandbox"]["closureEdgeIds"] = ["unknown-edge"]
+    payload["sandbox"]["closureEdgeIds"] = ["edge-32", "unknown-edge"]
 
     with pytest.raises(
         ExerciseRuntimeInvalid,
         match=(
-            r"^exercise\.json: sandbox\.closureEdgeIds\[0\]: "
+            r"^exercise\.json: sandbox\.closureEdgeIds\[1\]: "
             r"unknown closure edge: unknown-edge$"
         ),
     ):
@@ -836,34 +837,42 @@ def test_runtime_validation_rejects_position_outside_graph_envelope(
     with pytest.raises(
         ExerciseRuntimeInvalid,
         match=(
-            rf"^exercise\.json: {re.escape(expected_path)}: "
+            rf"^exercise\.json: {re.escape(expected_path)} "
+            r"\(longitude=3\.0, latitude=0\.0\): "
             r"outside pinned road graph envelope$"
         ),
     ):
         validate_exercise_runtime(ExerciseDefinition.model_validate(payload), graph())
 
 
-def test_runtime_validation_rejects_in_envelope_position_farther_than_one_kilometer() -> (
-    None
-):
+def test_runtime_validation_uses_router_selected_node_for_snap_distance() -> None:
     from wildfireops.application.exercise_planning import (
         ExerciseRuntimeInvalid,
         validate_exercise_runtime,
     )
 
-    payload = _runtime_payload()
-    payload["assets"][0]["position"] = {"longitude": 1, "latitude": 0.01}
+    payload = _anisotropic_runtime_payload()
+    roads = _anisotropic_graph()
+    selected = nearest_road_node(roads, 1.0, 80.0)
+    assert selected == "park"
+    geod = Geod(ellps="WGS84")
+    assert abs(geod.inv(1.0, 80.0, *roads.node_position(selected))[2]) > 1_000
+    assert (
+        abs(geod.inv(1.0, 80.0, *roads.node_position("geodesic-near"))[2]) < 1_000
+    )
 
     with pytest.raises(
         ExerciseRuntimeInvalid,
         match=(
-            r"^exercise\.json: assets\[0\]\.position: nearest road node is "
-            r"farther than 1000 meters$"
+            r"^exercise\.json: assets\[0\]\.position "
+            r"\(longitude=1\.0, latitude=80\.0\): selected road node='park' "
+            r"\(longitude=1\.0, latitude=80\.01\) is 1116\.6 meters away; "
+            r"exceeds 1000 meters$"
         ),
     ):
         validate_exercise_runtime(
             ExerciseDefinition.model_validate(payload),
-            _graph_with_node_envelope(),
+            roads,
         )
 
 
@@ -912,6 +921,30 @@ def _graph_with_node_envelope() -> RoadGraph:
     )
     value.add_edge(
         "park", "north", edge_id="edge-north", travel_minutes=5.0, distance_meters=500
+    )
+    return RoadGraph.from_graph(value)
+
+
+def _anisotropic_runtime_payload() -> dict[str, object]:
+    payload = _runtime_payload()
+    for asset in payload["assets"]:
+        asset["position"]["latitude"] = 80
+    for resource in payload["resources"]:
+        resource["position"]["latitude"] = 80
+    return payload
+
+
+def _anisotropic_graph() -> RoadGraph:
+    value = nx.MultiDiGraph()
+    value.add_node("depot", x=0.0, y=80.0)
+    value.add_node("park", x=1.0, y=80.01)
+    value.add_node("spot", x=2.0, y=80.0)
+    value.add_node("geodesic-near", x=1.02, y=80.0)
+    value.add_edge(
+        "depot", "park", edge_id="edge-01", travel_minutes=5.0, distance_meters=500
+    )
+    value.add_edge(
+        "park", "spot", edge_id="edge-32", travel_minutes=5.0, distance_meters=500
     )
     return RoadGraph.from_graph(value)
 

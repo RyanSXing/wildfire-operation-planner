@@ -174,23 +174,36 @@ def _validate_snappable(
         or not south <= position.latitude <= north
     ):
         raise ExerciseRuntimeInvalid(
-            f"exercise.json: {path}: outside pinned road graph envelope"
+            f"exercise.json: {path} {_position_identity(position)}: "
+            "outside pinned road graph envelope"
         )
     try:
-        nearest_road_node(graph, position.longitude, position.latitude)
+        node = nearest_road_node(graph, position.longitude, position.latitude)
+        node_longitude, node_latitude = graph.node_position(node)
     except (RoadGraphInvalid, ValueError) as error:
         raise ExerciseRuntimeInvalid(
-            f"exercise.json: {path}: cannot snap to road graph"
+            f"exercise.json: {path} {_position_identity(position)}: "
+            "cannot snap to road graph"
         ) from error
-    distance = min(
-        abs(_WGS84.inv(position.longitude, position.latitude, longitude, latitude)[2])
-        for longitude, latitude in graph.node_coordinates
+    distance = abs(
+        _WGS84.inv(
+            position.longitude,
+            position.latitude,
+            node_longitude,
+            node_latitude,
+        )[2]
     )
     if distance > _MAX_EXERCISE_SNAP_METERS:
         raise ExerciseRuntimeInvalid(
-            f"exercise.json: {path}: nearest road node is farther than "
-            f"{_MAX_EXERCISE_SNAP_METERS} meters"
+            f"exercise.json: {path} {_position_identity(position)}: "
+            f"selected road node={node!r} "
+            f"(longitude={node_longitude}, latitude={node_latitude}) is "
+            f"{distance:.1f} meters away; exceeds {_MAX_EXERCISE_SNAP_METERS} meters"
         )
+
+
+def _position_identity(position: Point) -> str:
+    return f"(longitude={position.longitude}, latitude={position.latitude})"
 
 
 def _node_envelope(

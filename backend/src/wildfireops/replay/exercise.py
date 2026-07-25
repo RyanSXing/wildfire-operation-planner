@@ -158,12 +158,18 @@ class ObjectiveWeights(ExerciseModel):
 
 class SandboxControls(ExerciseModel):
     checkpoint_keys: frozenset[str] = Field(min_length=1)
-    closure_edge_ids: frozenset[str]
+    closure_edge_ids: tuple[str, ...]
     wind_presets: Mapping[str, ExerciseDisruption]
     priority_multipliers: Mapping[
         Literal["standard", "elevated", "urgent"],
         int,
     ]
+
+    @model_validator(mode="after")
+    def validate_unique_closure_edges(self) -> "SandboxControls":
+        if len(set(self.closure_edge_ids)) != len(self.closure_edge_ids):
+            raise ValueError("closure_edge_ids must be unique")
+        return self
 
 
 class ExerciseDefinition(ExerciseModel):

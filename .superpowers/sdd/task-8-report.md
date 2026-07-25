@@ -138,3 +138,40 @@ Final hashes:
 exercise.json: f98966af9cce464e132d899ae1bcc952a421a0845390667a8852fbd7a773c5e0
 exercise_golden_outputs.json: 0af70036f55718a2ccfe3d9ec256439ed162cf620d6c5bca32dec01df48fee47
 ```
+
+## Final reviewer corrections
+
+Snap-distance validation now measures the WGS84 distance to the exact node
+chosen by `nearest_road_node`, rather than independently choosing a geodesic
+nearest node. The public `RoadGraph.node_position` accessor rejects unknown or
+non-finite nodes. Position failures include the authored longitude/latitude;
+distance failures additionally identify the selected node, its coordinates, and
+the measured distance.
+
+`sandbox.closureEdgeIds` is now an ordered tuple, rejects duplicate values while
+loading the definition, and retains authored indices in diagnostics. The
+anisotropic latitude-80 test proves a degree-nearest selected node beyond 1 km
+is rejected even when another graph node is geodesically nearer than 1 km.
+
+```text
+cd backend && uv run pytest tests/unit/replay/test_exercise.py tests/unit/application/test_exercise_planning.py tests/unit/geospatial/test_road_graph.py -q
+92 passed
+
+cd backend && uv run pytest tests/unit/replay/test_park_fire_package.py tests/integration/replay/test_park_fire_exercise_golden.py -q
+4 passed
+
+cd backend && WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test uv run pytest tests/integration/replay -q
+25 passed
+
+cd backend && WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test uv run pytest tests/unit tests/architecture -q
+728 passed, 3 existing macOS fork warnings
+
+cd backend && uv run ruff check [touched files]
+All checks passed
+
+cd backend && uv run mypy src/wildfireops/replay/exercise.py src/wildfireops/geospatial/road_graph.py src/wildfireops/application/exercise_planning.py
+Success: no issues found in 3 source files
+```
+
+The serialized fixture bytes and its golden output are unchanged, so no manifest
+regeneration was required.

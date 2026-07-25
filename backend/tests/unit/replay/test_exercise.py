@@ -194,6 +194,18 @@ def test_definition_digest_is_stable_across_hash_seeds(
     assert len(digests) == 1
 
 
+def test_sandbox_closures_preserve_authored_order(exercise_package: Path) -> None:
+    rewrite_exercise(
+        exercise_package,
+        lambda body: body["sandbox"].update(closureEdgeIds=["edge-b", "edge-a"]),
+    )
+
+    definition = load_exercise_definition(ReplayLoader(exercise_package))
+
+    assert definition is not None
+    assert definition.sandbox.closure_edge_ids == ("edge-b", "edge-a")
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
@@ -214,6 +226,10 @@ def test_definition_digest_is_stable_across_hash_seeds(
                 requiredCapability="aircraft"
             ),
             "no resource supports capability: aircraft",
+        ),
+        (
+            lambda body: body["sandbox"].update(closureEdgeIds=["edge-a", "edge-a"]),
+            "closure_edge_ids must be unique",
         ),
     ],
 )

@@ -185,6 +185,15 @@ class RoadGraph:
             )
         )
 
+    def node_position(self, node: Hashable) -> tuple[float, float]:
+        """Return a known node's finite longitude/latitude pair."""
+        if node not in self._graph:
+            raise RoadGraphInvalid(f"unknown road node: {node!r}")
+        coordinates = _node_coordinates(self._graph.nodes[node])
+        if coordinates is None:
+            raise RoadGraphInvalid(f"road node has no finite coordinates: {node!r}")
+        return coordinates
+
 
 def _road_edge_catalog(graph: nx.MultiDiGraph) -> tuple[RoadEdge, ...]:
     return tuple(
