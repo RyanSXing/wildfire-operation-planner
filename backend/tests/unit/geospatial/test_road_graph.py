@@ -208,6 +208,7 @@ def test_road_edge_catalog_is_stable_geographic_and_read_only() -> None:
             distance_meters=450.0,
         ),
     )
+    assert roads.node_coordinates == ((-121.7, 39.7), (-121.6, 39.8))
     with pytest.raises(FrozenInstanceError):
         setattr(roads.road_edges[0], "label", "Changed")
     assert roads.graph_version == version

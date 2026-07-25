@@ -167,6 +167,24 @@ class RoadGraph:
     def road_edges(self) -> tuple[RoadEdge, ...]:
         return self._road_edges
 
+    @property
+    def node_coordinates(self) -> tuple[tuple[float, float], ...]:
+        """Finite node coordinates in deterministic order for graph validation."""
+        return tuple(
+            sorted(
+                {
+                    (float(data["x"]), float(data["y"]))
+                    for _, data in self._graph.nodes(data=True)
+                    if isinstance(data.get("x"), int | float)
+                    and not isinstance(data.get("x"), bool)
+                    and isinstance(data.get("y"), int | float)
+                    and not isinstance(data.get("y"), bool)
+                    and isfinite(float(data["x"]))
+                    and isfinite(float(data["y"]))
+                }
+            )
+        )
+
 
 def _road_edge_catalog(graph: nx.MultiDiGraph) -> tuple[RoadEdge, ...]:
     return tuple(

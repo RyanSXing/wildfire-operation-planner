@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+import re
 from uuid import UUID, uuid4
 
 import networkx as nx
@@ -19,7 +20,7 @@ from wildfireops.decision.task_optimizer import (
 )
 from wildfireops.domain.observations import freeze_json_object
 from wildfireops.domain.scenario_versions import IdempotencyClaim
-from wildfireops.geospatial.road_graph import RoadGraph, RoadGraphInvalid
+from wildfireops.geospatial.road_graph import RoadGraph
 from wildfireops.replay.exercise import ExerciseDefinition, _canonicalize
 
 
@@ -783,25 +784,87 @@ def test_runtime_validation_rejects_unknown_closure_edge() -> None:
     payload = _definition_payload()
     payload["checkpoints"][1]["disruption"]["closedEdgeIds"] = ["unknown-edge"]
 
-    with pytest.raises(ExerciseRuntimeInvalid, match="unknown closure edge: unknown-edge"):
+    with pytest.raises(
+        ExerciseRuntimeInvalid,
+        match=(
+            r"^exercise\.json: checkpoints\[1\]\.disruption\.closedEdgeIds\[0\]: "
+            r"unknown closure edge: unknown-edge$"
+        ),
+    ):
         validate_exercise_runtime(ExerciseDefinition.model_validate(payload), graph())
 
 
-def test_runtime_validation_rejects_an_unsnappable_asset(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from wildfireops.application import exercise_planning
+def test_runtime_validation_rejects_unknown_sandbox_closure_edge() -> None:
+    from wildfireops.application.exercise_planning import (
+        ExerciseRuntimeInvalid,
+        validate_exercise_runtime,
+    )
 
-    def unsnappable(*_args: object) -> object:
-        raise RoadGraphInvalid("road graph has no finite coordinate nodes")
-
-    monkeypatch.setattr(exercise_planning, "nearest_road_node", unsnappable)
+    payload = _definition_payload()
+    payload["sandbox"]["closureEdgeIds"] = ["unknown-edge"]
 
     with pytest.raises(
-        exercise_planning.ExerciseRuntimeInvalid,
-        match="cannot snap asset: park-asset",
+        ExerciseRuntimeInvalid,
+        match=(
+            r"^exercise\.json: sandbox\.closureEdgeIds\[0\]: "
+            r"unknown closure edge: unknown-edge$"
+        ),
     ):
-        exercise_planning.validate_exercise_runtime(_runtime_definition(), graph())
+        validate_exercise_runtime(ExerciseDefinition.model_validate(payload), graph())
+
+
+@pytest.mark.parametrize(
+    ("collection", "index", "expected_path"),
+    [
+        ("assets", 0, "assets[0].position"),
+        ("resources", 0, "resources[0].position"),
+    ],
+)
+def test_runtime_validation_rejects_position_outside_graph_envelope(
+    collection: str,
+    index: int,
+    expected_path: str,
+) -> None:
+    from wildfireops.application.exercise_planning import (
+        ExerciseRuntimeInvalid,
+        validate_exercise_runtime,
+    )
+
+    payload = _runtime_payload()
+    payload[collection][index]["position"] = {"longitude": 3, "latitude": 0}
+
+    with pytest.raises(
+        ExerciseRuntimeInvalid,
+        match=(
+            rf"^exercise\.json: {re.escape(expected_path)}: "
+            r"outside pinned road graph envelope$"
+        ),
+    ):
+        validate_exercise_runtime(ExerciseDefinition.model_validate(payload), graph())
+
+
+def test_runtime_validation_rejects_in_envelope_position_farther_than_one_kilometer() -> (
+    None
+):
+    from wildfireops.application.exercise_planning import (
+        ExerciseRuntimeInvalid,
+        validate_exercise_runtime,
+    )
+
+    payload = _runtime_payload()
+    payload["assets"][0]["position"] = {"longitude": 1, "latitude": 0.01}
+
+    with pytest.raises(
+        ExerciseRuntimeInvalid,
+        match=(
+            r"^exercise\.json: assets\[0\]\.position: nearest road node is "
+            r"farther than 1000 meters$"
+        ),
+    ):
+        validate_exercise_runtime(
+            ExerciseDefinition.model_validate(payload),
+            _graph_with_node_envelope(),
+        )
 
 
 def test_runtime_validation_rejects_an_infeasible_shelter_override() -> None:
@@ -810,21 +873,47 @@ def test_runtime_validation_rejects_an_infeasible_shelter_override() -> None:
         validate_exercise_runtime,
     )
 
-    payload = _canonicalize(_runtime_definition())
-    assert isinstance(payload, dict)
+    payload = _runtime_payload()
     payload["resources"][1]["capabilities"] = ["not-transport"]
 
     with pytest.raises(
         ExerciseRuntimeInvalid,
-        match="shelter override is unavailable: fastest-response, corridorCleared=False",
+        match=(
+            r"^exercise\.json: checkpoints\[2\]\.tasks\[2\]\.taskId="
+            r"shelter-capacity-transport, resources\[1\]\.resourceId=bus-1: "
+            r"shelter override is unavailable for fastest-response, corridorCleared=False$"
+        ),
     ):
         validate_exercise_runtime(ExerciseDefinition.model_validate(payload), graph())
 
 
 def _runtime_definition() -> ExerciseDefinition:
+    payload = _runtime_payload()
+    return ExerciseDefinition.model_validate(payload)
+
+
+def _runtime_payload() -> dict[str, object]:
     payload = _definition_payload()
     payload["checkpoints"][2]["disruption"]["closedEdgeIds"] = []
-    return ExerciseDefinition.model_validate(payload)
+    return payload
+
+
+def _graph_with_node_envelope() -> RoadGraph:
+    value = nx.MultiDiGraph()
+    value.add_node("depot", x=0.0, y=0.0)
+    value.add_node("park", x=1.0, y=0.0)
+    value.add_node("spot", x=2.0, y=0.0)
+    value.add_node("north", x=1.0, y=0.02)
+    value.add_edge(
+        "depot", "park", edge_id="edge-01", travel_minutes=5.0, distance_meters=500
+    )
+    value.add_edge(
+        "park", "spot", edge_id="edge-32", travel_minutes=5.0, distance_meters=500
+    )
+    value.add_edge(
+        "park", "north", edge_id="edge-north", travel_minutes=5.0, distance_meters=500
+    )
+    return RoadGraph.from_graph(value)
 
 
 def _definition_payload() -> dict[str, object]:

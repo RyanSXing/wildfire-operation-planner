@@ -105,6 +105,7 @@ async def test_park_fire_exercise_matches_golden_semantics(
         value["finalOverride"]["operatorOverride"] == {
             "resourceId": "exercise-bus-1",
             "taskId": "shelter-capacity-transport",
+            "beforePlanId": "field",
         }
         for value in actual.values()
     )
@@ -125,6 +126,13 @@ async def test_park_fire_exercise_matches_golden_semantics(
         CLOSED_EDGE_ID not in assignment["route"]["edgeIds"]
         for value in actual.values()
         for assignment in value["cascadingDisruption"]["assignments"]
+    )
+    assert all(
+        value["completedSession"]["status"] == "completed" for value in actual.values()
+    )
+    assert all(
+        value["audit"][-1]["eventType"] == "exercise.plan-approved"
+        for value in actual.values()
     )
     assert actual == json.loads(PACKAGE.joinpath("exercise_golden_outputs.json").read_text())
 
@@ -162,13 +170,32 @@ async def _journey(client: AsyncClient, objective: str) -> dict[str, object]:
         ),
         201,
     )
+    aliases = {
+        initial["plan"]["id"]: "initial",
+        cascade["plan"]["id"]: "cascade",
+        final["plan"]["id"]: "field",
+        override["plan"]["id"]: "override",
+    }
+    approved = await _request(
+        client.post(
+            f"/api/exercise-sessions/{final_session['id']}/decisions",
+            headers={"Idempotency-Key": f"{objective}-approve"},
+            json={
+                "expectedVersion": override["session"]["version"],
+                "displayName": "Golden Operator",
+                "note": "Approve the validated shelter transport override.",
+            },
+        ),
+        201,
+    )
     audit = await _request(client.get(f"/api/exercise-sessions/{session['id']}/audit"), 200)
     return {
-        "initialAllocation": _plan_semantics(initial["plan"]),
-        "cascadingDisruption": _plan_semantics(cascade["plan"]),
-        "shelterFieldReport": _plan_semantics(final["plan"]),
-        "finalOverride": _plan_semantics(override["plan"]),
-        "audit": [_audit_semantics(item) for item in audit["items"]],
+        "initialAllocation": _plan_semantics(initial["plan"], aliases),
+        "cascadingDisruption": _plan_semantics(cascade["plan"], aliases),
+        "shelterFieldReport": _plan_semantics(final["plan"], aliases),
+        "finalOverride": _plan_semantics(override["plan"], aliases),
+        "completedSession": _session_semantics(approved, aliases),
+        "audit": [_audit_semantics(item, aliases) for item in audit["items"]],
     }
 
 
@@ -202,8 +229,11 @@ async def _request(request: Any, status: int) -> dict[str, Any]:
     return body
 
 
-def _plan_semantics(plan: dict[str, Any]) -> dict[str, object]:
-    output = plan["outputData"]
+def _plan_semantics(
+    plan: dict[str, Any], aliases: dict[str, str]
+) -> dict[str, object]:
+    output = _normalize_links(plan["outputData"], aliases)
+    assert isinstance(output, dict)
     return {
         "inputHash": plan["inputHash"],
         "versions": output["versions"],
@@ -228,40 +258,67 @@ def _plan_semantics(plan: dict[str, Any]) -> dict[str, object]:
         "operatorOverride": (
             None
             if output.get("operatorOverride") is None
-            else {
-                "resourceId": output["operatorOverride"]["resourceId"],
-                "taskId": output["operatorOverride"]["taskId"],
-            }
+            else output["operatorOverride"]
         ),
     }
 
 
-def _audit_semantics(event: dict[str, Any]) -> dict[str, object]:
-    inputs = dict(event["inputs"])
-    inputs.pop("_responseProjection", None)
-    inputs.pop("planId", None)
-    inputs.pop("visiblePlanId", None)
-    inputs.pop("beforePlanId", None)
-    inputs.pop("acceptedPlanId", None)
+def _audit_semantics(
+    event: dict[str, Any], aliases: dict[str, str]
+) -> dict[str, object]:
     return {
         "eventType": event["eventType"],
         "actorCallsign": event["actorCallsign"],
         "displayName": event["displayName"],
         "expectedSessionVersion": event["expectedSessionVersion"],
         "resultingSessionVersion": event["resultingSessionVersion"],
-        "beforeState": _session_semantics(event["beforeState"]),
-        "afterState": _session_semantics(event["afterState"]),
-        "inputs": inputs,
+        "beforeState": _session_semantics(event["beforeState"], aliases),
+        "afterState": _session_semantics(event["afterState"], aliases),
+        "inputs": _normalize_links(event["inputs"], aliases),
         "note": event["note"],
     }
 
 
-def _session_semantics(state: dict[str, Any]) -> dict[str, object]:
+def _session_semantics(
+    state: dict[str, Any], aliases: dict[str, str]
+) -> dict[str, object]:
     result = dict(state)
     result.pop("id", None)
     result.pop("callsign", None)
-    if "consequences" in result:
-        consequences = dict(result["consequences"])
-        consequences.pop("lastPlanId", None)
-        result["consequences"] = consequences
-    return result
+    return _normalize_links(result, aliases)
+
+
+def _normalize_links(value: object, aliases: dict[str, str]) -> object:
+    if isinstance(value, dict):
+        return {
+            key: (
+                _link_alias(item, aliases)
+                if key
+                in {
+                    "planId",
+                    "acceptedPlanId",
+                    "beforePlanId",
+                    "visiblePlanId",
+                    "lastPlanId",
+                }
+                else _normalize_links(item, aliases)
+            )
+            for key, item in value.items()
+            if key != "_responseProjection"
+        }
+    if isinstance(value, list):
+        return [_normalize_links(item, aliases) for item in value]
+    return value
+
+
+def _link_alias(value: object, aliases: dict[str, str]) -> str | None:
+    if value is None:
+        return None
+    assert isinstance(value, str), "plan linkage must be a UUID string"
+    assert value in aliases, f"unknown plan linkage UUID: {value}"
+    return aliases[value]
+
+
+def test_link_normalization_rejects_unknown_uuid() -> None:
+    with pytest.raises(AssertionError, match="unknown plan linkage UUID"):
+        _normalize_links({"planId": "missing"}, {})

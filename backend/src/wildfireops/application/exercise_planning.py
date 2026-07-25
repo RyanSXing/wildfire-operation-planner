@@ -8,6 +8,8 @@ import json
 from typing import cast
 from uuid import UUID
 
+from pyproj import Geod
+
 from wildfireops.application.exercises import (
     ExerciseCommandInvalid,
     ExerciseEvent,
@@ -76,48 +78,126 @@ class ExerciseRuntimeInvalid(ValueError):
     """Raised when a loaded exercise cannot be safely planned on its graph."""
 
 
+_MAX_EXERCISE_SNAP_METERS = 1_000
+_WGS84 = Geod(ellps="WGS84")
+
+
 def validate_exercise_runtime(
     definition: ExerciseDefinition,
     graph: RoadGraph,
 ) -> None:
     """Validate graph-dependent exercise assumptions before serving the exercise."""
-    for asset in definition.assets:
-        _validate_snappable(graph, asset.asset_id, "asset", asset.position)
-    for resource in definition.resources:
-        _validate_snappable(graph, resource.resource_id, "resource", resource.position)
-    closures = {
-        edge_id
-        for checkpoint in definition.checkpoints
-        if checkpoint.disruption is not None
-        for edge_id in checkpoint.disruption.closed_edge_ids
-    } | set(definition.sandbox.closure_edge_ids)
-    unknown = sorted(closures - graph.edge_ids)
-    if unknown:
-        raise ExerciseRuntimeInvalid(f"unknown closure edge: {unknown[0]}")
+    coordinates = graph.node_coordinates
+    if not coordinates:
+        raise ExerciseRuntimeInvalid("exercise.json: road graph has no finite nodes")
+    envelope = _node_envelope(coordinates)
+    for index, asset in enumerate(definition.assets):
+        _validate_snappable(
+            graph, asset.position, envelope, f"assets[{index}].position"
+        )
+    for index, resource in enumerate(definition.resources):
+        _validate_snappable(
+            graph,
+            resource.position,
+            envelope,
+            f"resources[{index}].position",
+        )
+    for checkpoint_index, checkpoint in enumerate(definition.checkpoints):
+        if checkpoint.disruption is None:
+            continue
+        for edge_index, edge_id in enumerate(checkpoint.disruption.closed_edge_ids):
+            if edge_id not in graph.edge_ids:
+                raise ExerciseRuntimeInvalid(
+                    "exercise.json: "
+                    f"checkpoints[{checkpoint_index}].disruption.closedEdgeIds["
+                    f"{edge_index}]: unknown closure edge: {edge_id}"
+                )
+    for edge_index, edge_id in enumerate(definition.sandbox.closure_edge_ids):
+        if edge_id not in graph.edge_ids:
+            raise ExerciseRuntimeInvalid(
+                "exercise.json: sandbox.closureEdgeIds["
+                f"{edge_index}]: unknown closure edge: {edge_id}"
+            )
+    checkpoint = definition.checkpoints[2]
+    shelter_tasks = tuple(
+        (index, item)
+        for index, item in enumerate(checkpoint.tasks)
+        if item.task_id == "shelter-capacity-transport"
+    )
+    if not shelter_tasks:
+        raise ExerciseRuntimeInvalid(
+            "exercise.json: checkpoints[2].tasks: missing shelter-capacity-transport"
+        )
+    task_index, task = shelter_tasks[0]
+    buses = tuple(
+        (index, item)
+        for index, item in enumerate(definition.resources)
+        if item.resource_type == "evacuation-bus"
+    )
+    if not buses:
+        raise ExerciseRuntimeInvalid(
+            "exercise.json: "
+            f"checkpoints[2].tasks[{task_index}].taskId={task.task_id}, "
+            "resources: no evacuation-bus resource"
+        )
     for objective in definition.objectives:
         for corridor_cleared in (False, True):
-            if not _has_valid_shelter_override(
-                definition,
-                graph,
-                objective,
-                corridor_cleared,
+            if not any(
+                _has_valid_shelter_override(
+                    definition,
+                    graph,
+                    objective,
+                    corridor_cleared,
+                    resource_id=resource.resource_id,
+                )
+                for _, resource in buses
             ):
+                resource_index, resource = buses[0]
                 raise ExerciseRuntimeInvalid(
-                    "shelter override is unavailable: "
+                    "exercise.json: "
+                    f"checkpoints[2].tasks[{task_index}].taskId={task.task_id}, "
+                    f"resources[{resource_index}].resourceId={resource.resource_id}: "
+                    "shelter override is unavailable for "
                     f"{objective}, corridorCleared={corridor_cleared}"
                 )
 
 
 def _validate_snappable(
     graph: RoadGraph,
-    identifier: str,
-    kind: str,
     position: Point,
+    envelope: tuple[float, float, float, float],
+    path: str,
 ) -> None:
+    west, south, east, north = envelope
+    if (
+        not west <= position.longitude <= east
+        or not south <= position.latitude <= north
+    ):
+        raise ExerciseRuntimeInvalid(
+            f"exercise.json: {path}: outside pinned road graph envelope"
+        )
     try:
         nearest_road_node(graph, position.longitude, position.latitude)
     except (RoadGraphInvalid, ValueError) as error:
-        raise ExerciseRuntimeInvalid(f"cannot snap {kind}: {identifier}") from error
+        raise ExerciseRuntimeInvalid(
+            f"exercise.json: {path}: cannot snap to road graph"
+        ) from error
+    distance = min(
+        abs(_WGS84.inv(position.longitude, position.latitude, longitude, latitude)[2])
+        for longitude, latitude in graph.node_coordinates
+    )
+    if distance > _MAX_EXERCISE_SNAP_METERS:
+        raise ExerciseRuntimeInvalid(
+            f"exercise.json: {path}: nearest road node is farther than "
+            f"{_MAX_EXERCISE_SNAP_METERS} meters"
+        )
+
+
+def _node_envelope(
+    coordinates: tuple[tuple[float, float], ...],
+) -> tuple[float, float, float, float]:
+    longitudes, latitudes = zip(*coordinates, strict=True)
+    return min(longitudes), min(latitudes), max(longitudes), max(latitudes)
 
 
 def _has_valid_shelter_override(
@@ -125,6 +205,7 @@ def _has_valid_shelter_override(
     graph: RoadGraph,
     objective: ObjectivePreset,
     corridor_cleared: bool,
+    resource_id: str,
 ) -> bool:
     checkpoint = materialize_checkpoint(
         definition,
@@ -139,29 +220,24 @@ def _has_valid_shelter_override(
         checkpoint.asset_positions,
         checkpoint.closed_edge_ids,
     )
-    for resource in definition.resources:
-        if resource.resource_type != "evacuation-bus":
-            continue
-        try:
-            result = solve_task_plan(
-                TaskOptimizationRequest(
-                    checkpoint.resources,
-                    checkpoint.tasks,
-                    routes,
-                    (LockedTaskAssignment(resource.resource_id, "shelter-capacity-transport"),),
-                    definition.objectives[objective].travel_weight,
-                    max_solver_seconds=2,
-                )
+    try:
+        result = solve_task_plan(
+            TaskOptimizationRequest(
+                checkpoint.resources,
+                checkpoint.tasks,
+                routes,
+                (LockedTaskAssignment(resource_id, "shelter-capacity-transport"),),
+                definition.objectives[objective].travel_weight,
+                max_solver_seconds=2,
             )
-        except ValueError:
-            continue
-        if result.status == "OPTIMAL" and any(
-            assignment.resource_id == resource.resource_id
-            and assignment.task_id == "shelter-capacity-transport"
-            for assignment in result.assignments
-        ):
-            return True
-    return False
+        )
+    except ValueError:
+        return False
+    return result.status == "OPTIMAL" and any(
+        assignment.resource_id == resource_id
+        and assignment.task_id == "shelter-capacity-transport"
+        for assignment in result.assignments
+    )
 
 
 def uncovered_penalty(task: ExerciseTask, weights: ObjectiveWeights) -> int:

@@ -99,3 +99,42 @@ Final hashes:
 exercise.json: f98966af9cce464e132d899ae1bcc952a421a0845390667a8852fbd7a773c5e0
 exercise_golden_outputs.json: 570db014d930a1a8c5b7704c92ab5a004d4b977e87fdf5287daf7035103fbe88
 ```
+
+## Final hardening
+
+Runtime validation now derives a deterministic public node-coordinate envelope
+from the pinned road graph. Every asset and resource must be inside that
+envelope and within 1,000 geodesic meters of a road node; the distance uses
+WGS84 geodesics rather than degree differences. Closure and locked-shelter-plan
+failures preserve their `exercise.json` origin and indexed source path.
+
+The complete HTTP journey now submits the final decision with the fixed display
+name `Golden Operator` and note `Approve the validated shelter transport
+override.`, and it pins the completed session and `exercise.plan-approved`
+audit event. UUID-backed plan references normalize to the deterministic aliases
+`initial`, `cascade`, `field`, and `override`; an unrecognized linkage UUID is a
+test failure.
+
+```text
+cd backend && uv run pytest tests/unit/geospatial/test_road_graph.py tests/unit/application/test_exercise_planning.py tests/integration/replay/test_park_fire_exercise_golden.py -q
+61 passed
+
+cd backend && WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test uv run pytest tests/integration/replay -q
+25 passed
+
+cd backend && WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test uv run pytest tests/unit tests/architecture -q
+726 passed, 3 existing macOS fork warnings
+
+cd backend && uv run ruff check src/wildfireops/application/exercise_planning.py src/wildfireops/geospatial/road_graph.py tests/unit/application/test_exercise_planning.py tests/unit/geospatial/test_road_graph.py tests/integration/replay/test_park_fire_exercise_golden.py
+All checks passed
+
+cd backend && uv run mypy src/wildfireops/application/exercise_planning.py src/wildfireops/geospatial/road_graph.py
+Success: no issues found in 2 source files
+```
+
+Final hashes:
+
+```text
+exercise.json: f98966af9cce464e132d899ae1bcc952a421a0845390667a8852fbd7a773c5e0
+exercise_golden_outputs.json: 0af70036f55718a2ccfe3d9ec256439ed162cf620d6c5bca32dec01df48fee47
+```
