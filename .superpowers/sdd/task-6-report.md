@@ -3,7 +3,9 @@
 ## Changed files
 
 - `backend/src/wildfireops/application/exercise_planning.py`
+- `backend/src/wildfireops/application/exercises.py`
 - `backend/tests/unit/application/test_exercise_planning.py`
+- `backend/tests/integration/application/test_exercise_planning.py`
 
 ## Implementation
 
@@ -109,3 +111,10 @@ ruff + mypy: passed
   actionable `visiblePlanId` against the persisted snapshot.
 - Focused application (42), full unit (701), architecture (3), Ruff/mypy, and
   designated PostGIS persistence (16) passed.
+
+## Planning PostgreSQL integration
+
+`tests/integration/application/test_exercise_planning.py` uses the real
+repository/session/event/plan path at `localhost:55432` to persist a
+checkpoint-three plan and shelter-bus override with nested explanation JSONB.
+It passed: `1 passed in 1.00s`.
