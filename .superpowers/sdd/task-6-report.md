@@ -74,3 +74,21 @@ uv run pytest tests/integration/persistence/test_exercises.py -q
 ```
 
 The non-PostGIS local default database limitation above is not a Task 6 defect.
+
+## Review hardening follow-up
+
+- Final checkpoint retries now preserve the latest actionable plan while failed
+  attempts remain in audit history; `UNKNOWN` and infeasible attempts require
+  regeneration and cannot enter override.
+- Planning rechecks canonical stored inputs before override, solves from fresh
+  materialization, freezes materialized evidence, and persists deterministic
+  coverage/candidate evidence.
+
+```text
+uv run pytest tests/unit -q
+701 passed, 3 existing fork warnings
+uv run pytest tests/architecture -q
+3 passed
+designated PostGIS persistence: 16 passed
+ruff + mypy: passed
+```
