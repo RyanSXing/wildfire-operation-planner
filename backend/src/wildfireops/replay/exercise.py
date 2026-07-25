@@ -21,6 +21,9 @@ type ProvenanceKind = Literal["historical", "exercise"]
 
 
 _OSM_RECORD_ID = re.compile(r"(?:node|way|relation)/[1-9][0-9]*$")
+_OSM_TIMESTAMP = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+)
 
 
 class ExerciseModel(BaseModel):
@@ -440,18 +443,18 @@ def _validate_openstreetmap_asset(asset: ExerciseAsset) -> None:
             "exercise.json: external asset citationUrl does not match sourceRecordId: "
             f"{asset.asset_id}"
         )
+    if _OSM_TIMESTAMP.fullmatch(asset.source_version) is None:
+        raise ReplayPackageCorrupt(
+            "exercise.json: external asset sourceVersion must be a UTC timestamp: "
+            f"{asset.asset_id}"
+        ) from None
     try:
-        source_version = datetime.fromisoformat(asset.source_version)
+        datetime.strptime(asset.source_version, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError:
         raise ReplayPackageCorrupt(
             "exercise.json: external asset sourceVersion must be a UTC timestamp: "
             f"{asset.asset_id}"
         ) from None
-    if source_version.utcoffset() != timedelta(0):
-        raise ReplayPackageCorrupt(
-            "exercise.json: external asset sourceVersion must be a UTC timestamp: "
-            f"{asset.asset_id}"
-        )
     if not asset.name.strip():
         raise ReplayPackageCorrupt(
             f"exercise.json: external asset name must be nonblank: {asset.asset_id}"

@@ -286,6 +286,12 @@ def test_definition_rejects_invalid_static_asset_reference(
             "sourceVersion must be a UTC timestamp",
         ),
         (
+            lambda body: _external_asset(body).update(
+                sourceVersion="2026-07-23T12:45:22+00:00"
+            ),
+            "sourceVersion must be a UTC timestamp",
+        ),
+        (
             lambda body: _external_asset(body).update(name="   "),
             "name must be nonblank",
         ),
@@ -374,6 +380,34 @@ def test_definition_rejects_invalid_checkpoint_time_or_history(
         load_exercise_definition(ReplayLoader(exercise_package))
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda body: _exercise_incident(body).update(
+                detectionIdentities=["nws:detection-1812"]
+            ),
+            "unknown historical detection identity: nws:detection-1812",
+        ),
+        (
+            lambda body: body["checkpoints"][0].update(
+                historicalWeatherIdentity="nasa_firms:weather-1"
+            ),
+            "unknown historical weather identity: nasa_firms:weather-1",
+        ),
+    ],
+)
+def test_definition_rejects_observation_identity_with_wrong_source_prefix(
+    exercise_package: Path,
+    mutation: Callable[[dict[str, Any]], None],
+    message: str,
+) -> None:
+    rewrite_exercise(exercise_package, mutation)
+
+    with pytest.raises(ReplayPackageCorrupt, match=message):
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+
 def test_definition_accepts_replay_end_checkpoint_boundary(
     exercise_package: Path,
 ) -> None:
@@ -439,17 +473,17 @@ def _exercise_incident(body: dict[str, Any]) -> dict[str, Any]:
 
 def _replace_asset_with_external(body: dict[str, Any]) -> None:
     body["assets"][0] = {
-        "assetId": "osm-hospital",
+        "assetId": "osm-way-546946902",
         "assetKind": "hospital",
-        "name": "Example Hospital",
-        "position": {"longitude": -121.6, "latitude": 39.8},
+        "name": "Enloe Medical Center",
+        "position": {"longitude": -121.8504052, "latitude": 39.7423938},
         "sourceName": "openstreetmap",
-        "sourceVersion": "2024-07-24T18:00:00Z",
-        "sourceRecordId": "node/123",
-        "citationUrl": "https://www.openstreetmap.org/node/123",
+        "sourceVersion": "2026-07-23T12:45:22Z",
+        "sourceRecordId": "way/546946902",
+        "citationUrl": "https://www.openstreetmap.org/way/546946902",
     }
     for checkpoint in body["checkpoints"]:
-        checkpoint["tasks"][0]["assetId"] = "osm-hospital"
+        checkpoint["tasks"][0]["assetId"] = "osm-way-546946902"
 
 
 def _exercise_body(manifest: dict[str, Any]) -> dict[str, Any]:
