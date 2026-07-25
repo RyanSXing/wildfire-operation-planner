@@ -170,6 +170,63 @@ async def test_plan_run_is_not_updated_by_repository(
 
 
 @pytest.mark.asyncio
+async def test_repository_rejects_non_object_json_columns(
+    db_session: AsyncSession,
+) -> None:
+    repository = ExerciseRepository(db_session)
+    session = await create_session(repository)
+    plan = await repository.store_plan(
+        session_id=session.id,
+        checkpoint_key="initial",
+        input_hash="b" * 64,
+        input_data={},
+        output_data={},
+        versions={},
+        idempotency_key_id=None,
+    )
+    await db_session.execute(
+        ExercisePlanRunModel.__table__.update()
+        .where(ExercisePlanRunModel.id == plan.id)
+        .values(input_data=[["not", "an object"]])
+    )
+    await db_session.flush()
+
+    with pytest.raises(
+        RuntimeError, match="stored exercise plan input_data is invalid"
+    ):
+        await repository.get_plan(session.id, plan.id)
+
+
+@pytest.mark.asyncio
+async def test_repository_deep_freezes_plan_json_and_isolates_consequences(
+    db_session: AsyncSession,
+) -> None:
+    repository = ExerciseRepository(db_session)
+    session_model = ExerciseSessionModel(
+        **session_values(), consequences={"nested": {"items": ["original"]}}
+    )
+    db_session.add(session_model)
+    await db_session.flush()
+    session = await repository.get_session(session_model.id)
+    assert session is not None
+    session.consequences["nested"]["items"].append("changed")  # type: ignore[index,union-attr]
+    plan = await repository.store_plan(
+        session_id=session.id,
+        checkpoint_key="initial",
+        input_hash="b" * 64,
+        input_data={"nested": {"items": ["original"]}},
+        output_data={},
+        versions={},
+        idempotency_key_id=None,
+    )
+
+    with pytest.raises(TypeError):
+        plan.input_data["nested"]["items"] = "changed"  # type: ignore[index]
+    await db_session.refresh(session_model)
+    assert session_model.consequences == {"nested": {"items": ["original"]}}
+
+
+@pytest.mark.asyncio
 async def test_plan_runs_keep_insertion_order_within_one_transaction(
     db_session: AsyncSession,
 ) -> None:

@@ -8,11 +8,14 @@ from wildfireops.application.exercises import (
     ExerciseEvent,
     ExerciseIdempotencyConflict,
     ExercisePlanRun,
+    ExerciseQueryService,
     ExerciseSession,
     ExerciseSessionExpired,
+    ExerciseSessionNotFound,
     ExerciseSessionService,
     ExerciseTransitionInvalid,
     ExerciseVersionConflict,
+    _request_hash,
     _session_from_state,
 )
 from wildfireops.domain.scenario_versions import IdempotencyClaim
@@ -142,11 +145,25 @@ class FakeExerciseRepository:
     async def save_session(self, session: ExerciseSession) -> None:
         self.sessions[session.id] = session
 
-    async def get_event(self, event_id: UUID) -> ExerciseEvent | None:
-        return next((item for item in self.events if item.id == event_id), None)
+    async def get_event(self, session_id: UUID, event_id: UUID) -> ExerciseEvent | None:
+        return next(
+            (
+                item
+                for item in self.events
+                if item.id == event_id and item.session_id == session_id
+            ),
+            None,
+        )
 
-    async def get_plan(self, plan_id: UUID) -> ExercisePlanRun | None:
-        return next((item for item in self.plans if item.id == plan_id), None)
+    async def get_plan(self, session_id: UUID, plan_id: UUID) -> ExercisePlanRun | None:
+        return next(
+            (
+                item
+                for item in self.plans
+                if item.id == plan_id and item.session_id == session_id
+            ),
+            None,
+        )
 
     async def latest_plan(
         self, session_id: UUID, checkpoint_key: str
@@ -191,6 +208,15 @@ def service(
     )
 
 
+def query(repository: FakeExerciseRepository) -> ExerciseQueryService:
+    return ExerciseQueryService(
+        definition=definition(),
+        definition_digest="a" * 64,
+        repository=repository,
+        clock=lambda: NOW,
+    )
+
+
 @pytest.mark.asyncio
 async def test_new_session_gets_callsign_and_24_hour_expiry() -> None:
     repository = FakeExerciseRepository()
@@ -218,6 +244,118 @@ async def test_identical_objective_command_replays_original_version() -> None:
 
     assert first.version == replay.version == 2
     assert len(repository.events) == 2
+
+
+@pytest.mark.asyncio
+async def test_replay_projects_original_response_after_later_changes() -> None:
+    repository = FakeExerciseRepository()
+    commands = service(repository)
+    session = await commands.create(idempotency_key="create")
+    selected = await commands.select_objective(
+        session.id, "fastest-response", expected_version=1, idempotency_key="objective"
+    )
+    original = await commands.project(selected)
+    repository.plans.append(
+        ExercisePlanRun(
+            uuid4(),
+            session.id,
+            "initial",
+            "a" * 64,
+            {"objective": "fastest-response"},
+            {"status": "OPTIMAL"},
+            {},
+            NOW,
+        )
+    )
+    selected.version = 3
+    selected.checkpoint_index = 1
+
+    replay = await commands.select_objective(
+        session.id, "fastest-response", expected_version=1, idempotency_key="objective"
+    )
+
+    assert await commands.project(replay) == original
+
+
+@pytest.mark.asyncio
+async def test_mismatched_definition_session_is_unavailable_to_commands_and_queries() -> (
+    None
+):
+    repository = FakeExerciseRepository()
+    session = await service(repository).create(idempotency_key="create")
+    session.definition_digest = "b" * 64
+
+    with pytest.raises(ExerciseSessionNotFound):
+        await service(repository).select_objective(
+            session.id,
+            "fastest-response",
+            expected_version=1,
+            idempotency_key="objective",
+        )
+    with pytest.raises(ExerciseSessionNotFound):
+        await query(repository).session(session.id)
+
+
+@pytest.mark.asyncio
+async def test_blank_idempotency_key_is_rejected() -> None:
+    with pytest.raises(ExerciseCommandInvalid):
+        await service(FakeExerciseRepository()).create(idempotency_key=" ")
+
+
+@pytest.mark.asyncio
+async def test_audit_hides_private_replay_snapshot() -> None:
+    repository = FakeExerciseRepository()
+    session = await service(repository).create(idempotency_key="create")
+    await service(repository).select_objective(
+        session.id, "fastest-response", expected_version=1, idempotency_key="objective"
+    )
+
+    events = await query(repository).audit(session.id)
+
+    assert events[-1].inputs == {"objective": "fastest-response"}
+
+
+@pytest.mark.asyncio
+async def test_forged_cross_session_event_claim_cannot_replay() -> None:
+    repository = FakeExerciseRepository()
+    commands = service(repository)
+    first = await commands.create(idempotency_key="first")
+    second = await commands.create(idempotency_key="second")
+    foreign = await repository.append_event(
+        session_id=second.id,
+        event_type="exercise.objective-selected",
+        actor_callsign=second.callsign,
+        display_name=None,
+        expected_session_version=1,
+        resulting_session_version=2,
+        before_state={},
+        after_state={},
+        inputs={},
+        note=None,
+    )
+    repository.claims[(f"exercise-session:{first.id}:select-objective", "forged")] = (
+        IdempotencyClaim(
+            uuid4(),
+            _request_hash(
+                {
+                    "sessionId": str(first.id),
+                    "expectedVersion": 1,
+                    "payload": {"objective": "fastest-response"},
+                }
+            ),
+            "exercise_event",
+            foreign.id,
+            False,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="exercise idempotency event does not exist"):
+        await commands.select_objective(
+            first.id,
+            "fastest-response",
+            expected_version=1,
+            idempotency_key="forged",
+        )
 
 
 @pytest.mark.asyncio

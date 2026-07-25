@@ -1,12 +1,13 @@
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Literal, Protocol, cast
 from uuid import UUID
 
 from wildfireops.domain.scenario_versions import IdempotencyClaim
+from wildfireops.domain.observations import freeze_json_object
 from wildfireops.replay.exercise import ExerciseDefinition, ObjectivePreset
 
 
@@ -35,6 +36,7 @@ _STATE_KEYS = frozenset(
         "expiresAt",
     }
 )
+_RESPONSE_SNAPSHOT = "_responseProjection"
 
 
 @dataclass(slots=True)
@@ -51,6 +53,9 @@ class ExerciseSession:
     version: int
     consequences: dict[str, object]
     expires_at: datetime
+    response_projection: Mapping[str, object] | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,8 +116,12 @@ class ExerciseRepositoryProtocol(Protocol):
         versions: dict[str, object],
         idempotency_key_id: UUID | None,
     ) -> ExercisePlanRun: ...
-    async def get_event(self, event_id: UUID) -> ExerciseEvent | None: ...
-    async def get_plan(self, plan_id: UUID) -> ExercisePlanRun | None: ...
+    async def get_event(
+        self, session_id: UUID, event_id: UUID
+    ) -> ExerciseEvent | None: ...
+    async def get_plan(
+        self, session_id: UUID, plan_id: UUID
+    ) -> ExercisePlanRun | None: ...
     async def latest_plan(
         self, session_id: UUID, checkpoint_key: str
     ) -> ExercisePlanRun | None: ...
@@ -190,19 +199,33 @@ class ExerciseSessionService:
         return self._definition.exercise_id
 
     async def project(self, session: ExerciseSession) -> dict[str, object]:
+        self._require_definition(session)
+        if session.response_projection is not None:
+            return _copy_json_object(session.response_projection)
         return await session_projection(
             self._definition, self._repository, session, self._clock()
         )
 
     async def create(self, *, idempotency_key: str) -> ExerciseSession:
+        key = _idempotency_key(idempotency_key)
+        request_hash = _request_hash({})
         claim = await self._repository.claim_idempotency(
             scope=f"exercise:{self.exercise_id}:session-create",
-            key=idempotency_key,
-            request_hash=_request_hash({}),
+            key=key,
+            request_hash=request_hash,
         )
-        replayed = await self._replay_event(claim)
-        if replayed is not None:
-            return _session_from_state(replayed.after_state)
+        if not claim.created:
+            if claim.request_hash != request_hash:
+                raise ExerciseIdempotencyConflict(
+                    "idempotency key was already used with a different request"
+                )
+            if claim.response_type != "exercise_session" or claim.response_id is None:
+                raise RuntimeError("exercise idempotency response is incomplete")
+            session = await self._repository.get_session(claim.response_id)
+            if session is None:
+                raise ExerciseSessionNotFound("exercise session was not found")
+            self._require_definition(session)
+            return session
         session = await self._repository.create_session(
             exercise_id=self.exercise_id,
             definition_version=self._definition.version,
@@ -210,7 +233,7 @@ class ExerciseSessionService:
             callsign=self._callsign(),
             expires_at=self._clock() + timedelta(hours=24),
         )
-        event = await self._repository.append_event(
+        await self._repository.append_event(
             session_id=session.id,
             event_type="exercise.session-created",
             actor_callsign=session.callsign,
@@ -223,7 +246,7 @@ class ExerciseSessionService:
             note=None,
         )
         await self._repository.complete_idempotency(
-            claim_id=claim.id, response_type="exercise_event", response_id=event.id
+            claim_id=claim.id, response_type="exercise_session", response_id=session.id
         )
         return session
 
@@ -243,7 +266,7 @@ class ExerciseSessionService:
             {"objective": objective},
         )
         if replayed is not None:
-            return _session_from_state(replayed.after_state)
+            return self._replay_session(replayed)
         if objective not in self._definition.objectives:
             raise ExerciseCommandInvalid(f"unsupported objective: {objective}")
         latest = await self._repository.latest_plan_for_session(session.id)
@@ -255,6 +278,7 @@ class ExerciseSessionService:
         session.objective = objective
         session.version += 1
         await self._repository.save_session(session)
+        snapshot = await self._response_snapshot(session)
         event = await self._repository.append_event(
             session_id=session.id,
             event_type="exercise.objective-selected",
@@ -264,12 +288,13 @@ class ExerciseSessionService:
             resulting_session_version=session.version,
             before_state=before,
             after_state=_session_state(session),
-            inputs={"objective": objective},
+            inputs=_event_inputs({"objective": objective}, snapshot),
             note=None,
         )
         await self._repository.complete_idempotency(
             claim_id=claim.id, response_type="exercise_event", response_id=event.id
         )
+        session.response_projection = freeze_json_object(snapshot)
         return session
 
     async def advance(
@@ -279,7 +304,7 @@ class ExerciseSessionService:
             session_id, expected_version, idempotency_key, "advance", {}
         )
         if replayed is not None:
-            return _session_from_state(replayed.after_state)
+            return self._replay_session(replayed)
         if session.checkpoint_index >= 2:
             raise ExerciseTransitionInvalid("checkpoint three cannot advance")
         latest = await self._repository.latest_plan(
@@ -307,6 +332,7 @@ class ExerciseSessionService:
         session.consequences = consequences
         session.version += 1
         await self._repository.save_session(session)
+        snapshot = await self._response_snapshot(session)
         event = await self._repository.append_event(
             session_id=session.id,
             event_type="exercise.checkpoint-advanced",
@@ -316,12 +342,13 @@ class ExerciseSessionService:
             resulting_session_version=session.version,
             before_state=before,
             after_state=_session_state(session),
-            inputs={"acceptedPlanId": str(latest.id)},
+            inputs=_event_inputs({"acceptedPlanId": str(latest.id)}, snapshot),
             note=None,
         )
         await self._repository.complete_idempotency(
             claim_id=claim.id, response_type="exercise_event", response_id=event.id
         )
+        session.response_projection = freeze_json_object(snapshot)
         return session
 
     async def decide(
@@ -341,7 +368,7 @@ class ExerciseSessionService:
             {"displayName": display_name, "note": note},
         )
         if replayed is not None:
-            return _session_from_state(replayed.after_state)
+            return self._replay_session(replayed)
         if session.checkpoint_index != 2:
             raise ExerciseTransitionInvalid("final decision requires checkpoint three")
         normalized_note = note.strip()
@@ -366,6 +393,7 @@ class ExerciseSessionService:
         session.status = "completed"
         session.version += 1
         await self._repository.save_session(session)
+        snapshot = await self._response_snapshot(session)
         event = await self._repository.append_event(
             session_id=session.id,
             event_type="exercise.plan-approved",
@@ -375,23 +403,52 @@ class ExerciseSessionService:
             resulting_session_version=session.version,
             before_state=before,
             after_state=_session_state(session),
-            inputs={"planId": str(latest.id)},
+            inputs=_event_inputs({"planId": str(latest.id)}, snapshot),
             note=normalized_note,
         )
         await self._repository.complete_idempotency(
             claim_id=claim.id, response_type="exercise_event", response_id=event.id
         )
+        session.response_projection = freeze_json_object(snapshot)
         return session
 
-    async def _replay_event(self, claim: IdempotencyClaim) -> ExerciseEvent | None:
+    async def _replay_event(
+        self, session_id: UUID, claim: IdempotencyClaim
+    ) -> ExerciseEvent | None:
         if claim.created:
             return None
         if claim.response_type != "exercise_event" or claim.response_id is None:
             raise RuntimeError("exercise idempotency response is incomplete")
-        event = await self._repository.get_event(claim.response_id)
+        event = await self._repository.get_event(session_id, claim.response_id)
         if event is None:
             raise RuntimeError("exercise idempotency event does not exist")
         return event
+
+    async def _response_snapshot(self, session: ExerciseSession) -> dict[str, object]:
+        return _copy_json_object(
+            freeze_json_object(
+                await session_projection(
+                    self._definition, self._repository, session, self._clock()
+                )
+            )
+        )
+
+    def _replay_session(self, event: ExerciseEvent) -> ExerciseSession:
+        session = _session_from_state(event.after_state)
+        self._require_definition(session)
+        snapshot = event.inputs.get(_RESPONSE_SNAPSHOT)
+        if not isinstance(snapshot, Mapping):
+            raise RuntimeError("exercise replay response is missing")
+        session.response_projection = freeze_json_object(snapshot)
+        return session
+
+    def _require_definition(self, session: ExerciseSession) -> None:
+        if (
+            session.exercise_id != self.exercise_id
+            or session.definition_version != self._definition.version
+            or session.definition_digest != self._definition_digest
+        ):
+            raise ExerciseSessionNotFound("exercise session was not found")
 
     async def lock_command(
         self,
@@ -408,9 +465,10 @@ class ExerciseSessionService:
                 "payload": dict(payload),
             }
         )
+        key = _idempotency_key(idempotency_key)
         claim = await self._repository.claim_idempotency(
             scope=f"exercise-session:{session_id}:{command}",
-            key=idempotency_key,
+            key=key,
             request_hash=request_hash,
         )
         if not claim.created:
@@ -418,16 +476,18 @@ class ExerciseSessionService:
                 raise ExerciseIdempotencyConflict(
                     "idempotency key was already used with a different request"
                 )
-            event = await self._replay_event(claim)
+            event = await self._replay_event(session_id, claim)
             if event is None:
                 raise RuntimeError("exercise replay response is missing")
             current = await self._repository.get_session(session_id)
             if current is None:
                 raise ExerciseSessionNotFound("exercise session was not found")
+            self._require_definition(current)
             return current, claim, event
         session = await self._repository.lock_session(session_id)
         if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
+        self._require_definition(session)
         if self._clock() >= session.expires_at:
             raise ExerciseSessionExpired("exercise session has expired")
         if session.status != "active":
@@ -444,10 +504,12 @@ class ExerciseQueryService:
         self,
         *,
         definition: ExerciseDefinition,
+        definition_digest: str,
         repository: ExerciseRepositoryProtocol,
         clock: Callable[[], datetime],
     ) -> None:
         self._definition = definition
+        self._definition_digest = definition_digest
         self._repository = repository
         self._clock = clock
 
@@ -476,19 +538,26 @@ class ExerciseQueryService:
         session = await self._repository.get_session(session_id)
         if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
+        self._require_definition(session)
         return await session_projection(
             self._definition, self._repository, session, self._clock()
         )
 
     async def audit(self, session_id: UUID) -> tuple[ExerciseEvent, ...]:
-        if await self._repository.get_session(session_id) is None:
+        session = await self._repository.get_session(session_id)
+        if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
-        return await self._repository.list_events(session_id)
+        self._require_definition(session)
+        return tuple(
+            _public_event(item)
+            for item in await self._repository.list_events(session_id)
+        )
 
     async def debrief(self, session_id: UUID) -> dict[str, object]:
         session = await self._repository.get_session(session_id)
         if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
+        self._require_definition(session)
         if session.status != "completed":
             raise ExerciseTransitionInvalid("debrief requires a completed exercise")
         plans = await self._repository.list_plans(session.id)
@@ -502,13 +571,88 @@ class ExerciseQueryService:
             "events": [
                 {
                     "eventType": item.event_type,
-                    "inputs": dict(item.inputs),
+                    "inputs": _public_inputs(item.inputs),
                     "note": item.note,
                     "occurredAt": item.occurred_at.isoformat(),
                 }
                 for item in events
             ],
         }
+
+    def _require_definition(self, session: ExerciseSession) -> None:
+        if (
+            session.exercise_id != self._definition.exercise_id
+            or session.definition_version != self._definition.version
+            or session.definition_digest != self._definition_digest
+        ):
+            raise ExerciseSessionNotFound("exercise session was not found")
+
+
+def _idempotency_key(value: str) -> str:
+    if not isinstance(value, str):
+        raise ExerciseCommandInvalid(
+            "idempotency key must be between 1 and 255 characters"
+        )
+    key = value.strip()
+    if not key or len(key) > 255:
+        raise ExerciseCommandInvalid(
+            "idempotency key must be between 1 and 255 characters"
+        )
+    return key
+
+
+def _event_inputs(
+    inputs: Mapping[str, object], response_projection: Mapping[str, object]
+) -> dict[str, object]:
+    return {
+        **dict(inputs),
+        _RESPONSE_SNAPSHOT: _json_for_storage(response_projection),
+    }
+
+
+def _public_inputs(inputs: Mapping[str, object]) -> dict[str, object]:
+    return {key: value for key, value in inputs.items() if key != _RESPONSE_SNAPSHOT}
+
+
+def _public_event(event: ExerciseEvent) -> ExerciseEvent:
+    return ExerciseEvent(
+        id=event.id,
+        session_id=event.session_id,
+        event_type=event.event_type,
+        actor_callsign=event.actor_callsign,
+        display_name=event.display_name,
+        expected_session_version=event.expected_session_version,
+        resulting_session_version=event.resulting_session_version,
+        before_state=event.before_state,
+        after_state=event.after_state,
+        inputs=_public_inputs(event.inputs),
+        note=event.note,
+        occurred_at=event.occurred_at,
+    )
+
+
+def _copy_json_object(value: Mapping[str, object]) -> dict[str, object]:
+    return {key: _copy_json_value(item) for key, item in value.items()}
+
+
+def _copy_json_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _copy_json_object(value)
+    if isinstance(value, tuple):
+        return tuple(_copy_json_value(item) for item in value)
+    if isinstance(value, list):
+        return [_copy_json_value(item) for item in value]
+    return value
+
+
+def _json_for_storage(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _json_for_storage(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_json_for_storage(item) for item in value]
+    if isinstance(value, list):
+        return [_json_for_storage(item) for item in value]
+    return value
 
 
 def _request_hash(payload: Mapping[str, object]) -> str:
@@ -608,10 +752,18 @@ async def session_projection(
     now: datetime,
 ) -> dict[str, object]:
     projected = ExerciseSession(
-        **{
-            field: getattr(session, field)
-            for field in ExerciseSession.__dataclass_fields__
-        }
+        id=session.id,
+        exercise_id=session.exercise_id,
+        definition_version=session.definition_version,
+        definition_digest=session.definition_digest,
+        callsign=session.callsign,
+        display_name=session.display_name,
+        checkpoint_index=session.checkpoint_index,
+        objective=session.objective,
+        status=session.status,
+        version=session.version,
+        consequences=_copy_json_object(freeze_json_object(session.consequences)),
+        expires_at=session.expires_at,
     )
     if projected.status == "active" and now >= projected.expires_at:
         projected.status = "expired"
