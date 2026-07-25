@@ -85,11 +85,17 @@ async def test_park_fire_exercise_matches_golden_semantics(
     async with AsyncClient(
         transport=ASGITransport(app=exercise_app), base_url="http://test"
     ) as client:
+        health = await client.get("/api/health")
+        metadata = await client.get("/api/exercises/park-fire-decision")
         actual = {
             objective: await _journey(client, objective)
             for objective in OBJECTIVES
         }
 
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok", "service": "wildfireops-api"}
+    assert metadata.status_code == 200
+    assert metadata.json()["checkpointCount"] == 3
     assert len(
         {
             tuple(

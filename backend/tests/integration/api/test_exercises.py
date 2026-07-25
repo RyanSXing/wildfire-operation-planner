@@ -62,22 +62,6 @@ async def exercise_app() -> AsyncIterator[FastAPI]:
 
 
 @pytest.mark.asyncio
-async def test_configured_app_health_and_exercise_metadata(
-    exercise_app: FastAPI,
-) -> None:
-    async with AsyncClient(
-        transport=ASGITransport(app=exercise_app), base_url="http://test"
-    ) as client:
-        health = await client.get("/api/health")
-        metadata = await client.get("/api/exercises/park-fire-decision")
-
-    assert health.status_code == 200
-    assert health.json() == {"status": "ok", "service": "wildfireops-api"}
-    assert metadata.status_code == 200
-    assert metadata.json()["checkpointCount"] == 3
-
-
-@pytest.mark.asyncio
 async def test_create_and_read_exercise_session(exercise_app: FastAPI) -> None:
     async with AsyncClient(
         transport=ASGITransport(app=exercise_app), base_url="http://test"
