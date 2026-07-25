@@ -581,6 +581,9 @@ async def test_override_recalculates_uncovered_tasks_and_objective() -> None:
     assert components["objectiveValue"] == (
         components["travelCost"] + components["uncoveredTaskPenalty"]
     )
+    assert "operator.override-changed-plan" in {
+        item["code"] for item in plan.output_data["explanation"]["changes"]
+    }
 
 
 @pytest.mark.asyncio
