@@ -173,6 +173,28 @@ cd backend && uv run mypy src/wildfireops/replay/exercise.py src/wildfireops/geo
 Success: no issues found in 3 source files
 ```
 
+## Final graph-load diagnostic
+
+Road graph normalization now rejects finite WGS84-out-of-range node coordinates
+before constructing `RoadGraph`, including the stable node identity,
+`x/longitude` or `y/latitude`, invalid value, and allowed range. An empty
+runtime graph now reports `road graph has no valid WGS84 coordinate nodes`.
+The fixture and golden bytes remain unchanged; no manifest rewrite was needed.
+
+```text
+cd backend && uv run pytest tests/unit/geospatial/test_road_graph.py tests/unit/application/test_exercise_planning.py -q
+63 passed
+
+cd backend && uv run pytest tests/unit/replay/test_park_fire_package.py tests/integration/replay/test_park_fire_exercise_golden.py -q
+4 passed
+
+cd backend && uv run ruff check [touched files]
+All checks passed
+
+cd backend && uv run mypy src/wildfireops/geospatial/road_graph.py src/wildfireops/application/exercise_planning.py
+Success: no issues found in 2 source files
+```
+
 The serialized fixture bytes and its golden output are unchanged, so no manifest
 regeneration was required.
 

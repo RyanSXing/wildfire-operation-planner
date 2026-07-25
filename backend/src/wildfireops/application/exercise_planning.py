@@ -90,7 +90,9 @@ def validate_exercise_runtime(
     """Validate graph-dependent exercise assumptions before serving the exercise."""
     coordinates = graph.node_coordinates
     if not coordinates:
-        raise ExerciseRuntimeInvalid("exercise.json: road graph has no finite nodes")
+        raise ExerciseRuntimeInvalid(
+            "exercise.json: road graph has no valid WGS84 coordinate nodes"
+        )
     envelope = _node_envelope(coordinates)
     for index, asset in enumerate(definition.assets):
         _validate_snappable(

@@ -440,7 +440,7 @@ def _validated_multidigraph(graph: nx.Graph) -> nx.MultiDiGraph:
         raise RoadGraphInvalid("road graph must be directed")
     validated: nx.MultiDiGraph = nx.MultiDiGraph()
     for node, raw_data in graph.nodes(data=True):
-        validated.add_node(node, **_normalized_node_coordinates(raw_data))
+        validated.add_node(node, **_normalized_node_coordinates(node, raw_data))
     edge_ids: set[str] = set()
     edges = (
         graph.edges(keys=True, data=True)  # type: ignore[call-overload]
@@ -472,7 +472,10 @@ def _validated_multidigraph(graph: nx.Graph) -> nx.MultiDiGraph:
     return validated
 
 
-def _normalized_node_coordinates(raw_data: dict[str, object]) -> dict[str, object]:
+def _normalized_node_coordinates(
+    node: Hashable,
+    raw_data: dict[str, object],
+) -> dict[str, object]:
     data = dict(raw_data)
     for coordinate in ("x", "y"):
         if coordinate not in data:
@@ -490,6 +493,17 @@ def _normalized_node_coordinates(raw_data: dict[str, object]) -> dict[str, objec
             ) from None
         if not isfinite(parsed):
             raise RoadGraphInvalid(f"node {coordinate} must be a finite number")
+        lower, upper, label = (
+            (-180, 180, "longitude")
+            if coordinate == "x"
+            else (-90, 90, "latitude")
+        )
+        if not lower <= parsed <= upper:
+            raise RoadGraphInvalid(
+                f"road graph node {_node_identity(node)} "
+                f"{coordinate}/{label}={parsed} is outside allowed range "
+                f"[{lower}, {upper}]"
+            )
         data[coordinate] = parsed
     return data
 
