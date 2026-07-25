@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 test("an operator can decide the Park Fire replay recommendation", async ({ page }) => {
-  await page.goto("/");
+  // The decision exercise owns "/"; the live monitor moved to its own route.
+  await page.goto("/monitor");
 
   const queue = page.getByRole("complementary", { name: "Incident queue" });
   const incidents = queue.getByRole("button");
@@ -14,7 +15,16 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
   await expect(highestRiskIncident).toHaveAttribute("aria-pressed", "true");
 
   await expect(page.getByRole("region", { name: "Incident overview" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Risk explanation" })).toContainText(/Score[1-9]/);
+
+  // Evidence, provenance, and exposure each sit behind a collapsed disclosure.
+  for (const summary of ["Risk evidence", "Source provenance", "Exposed assets"]) {
+    await page.locator("summary").filter({ hasText: summary }).first().click();
+  }
+
+  // The panel labels this "Priority score"; the spec predates that rename.
+  await expect(page.getByRole("region", { name: "Risk explanation" })).toContainText(
+    /Priority score[1-9]/,
+  );
   const assets = page.getByRole("region", { name: "Exposed assets" });
   await expect(assets).toContainText(/Kindcommunity/i);
   await expect(assets).toContainText(/Population[1-9]/);
@@ -27,6 +37,8 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
 
   const planning = page.getByRole("region", { name: "Scenario planning" });
   await planning.getByRole("button", { name: "Create baseline and generate recommendation" }).click();
+  // The editor is optional once a baseline exists, so it too is collapsed.
+  await planning.getByText("Modify scenario assumptions (optional)").click();
   await expect(planning.getByRole("form", { name: "Scenario version editor" })).toBeVisible();
 
   const baselineAssignment = planning
@@ -34,18 +46,40 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
     .getByRole("listitem")
     .first();
   await expect(baselineAssignment).toContainText("Route statusreachable");
-  const baselineEdgeIds = (await baselineAssignment
-    .getByLabel("Route edge IDs")
-    .innerText())
+
+  // Raw identifiers live in their own section inside the technical-evidence
+  // disclosure, which has no rendered text until it is opened.
+  await planning.getByText("Technical recommendation evidence").first().click();
+  const identifiers = planning.getByRole("region", {
+    name: "Assignment identifiers",
+  });
+  const identifierValue = (term: string) =>
+    identifiers
+      .locator("dt")
+      .filter({ hasText: term })
+      .first()
+      .locator("xpath=following-sibling::dd[1]");
+
+  const baselineEdgeIds = (await identifierValue("Route edge IDs").innerText())
     .split(",")
     .map((edgeId) => edgeId.trim())
     .filter(Boolean);
   expect(baselineEdgeIds).not.toHaveLength(0);
   const closedEdgeId = baselineEdgeIds[0];
-  const baselineDestination = await baselineAssignment
-    .getByLabel("Assignment destination ID")
+  const baselineDestination = await identifierValue(
+    "Destination ID",
+  ).innerText();
+  // Uncovered destinations are listed by their human label, not their ID.
+  const baselineDestinationLabel = await baselineAssignment
+    .locator("dt")
+    .filter({ hasText: "Destination" })
+    .first()
+    .locator("xpath=following-sibling::dd[1]")
     .innerText();
+  expect(baselineDestination).not.toEqual(baselineDestinationLabel);
 
+  // The road catalog is a disclosure too, closed while the catalog loads fine.
+  await planning.getByText("Road catalog").first().click();
   await planning.getByLabel("Search road edges").fill(closedEdgeId);
   await planning.getByRole("button", { name: "Search roads" }).click();
 
@@ -65,7 +99,7 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
   await expect(planning).toContainText("No assignments were returned.");
   await expect(
     planning.getByRole("list", { name: "Uncovered destinations" }),
-  ).toContainText(baselineDestination);
+  ).toContainText(baselineDestinationLabel);
   const uncoveredRow = outcomes.getByRole("row", {
     name: /Weighted risk uncovered/,
   });

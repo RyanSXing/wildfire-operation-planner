@@ -25,6 +25,8 @@ import App from "./App";
 beforeEach(() => {
   shellHarness.clients.clear();
   shellHarness.shouldThrow = false;
+  // The live monitor now lives at /monitor; "/" renders the decision exercise.
+  window.history.replaceState({}, "", "/monitor");
 });
 
 describe("App", () => {

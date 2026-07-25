@@ -114,21 +114,103 @@ export class RecordedMap {
     return this;
   }
 
+  addControl(control: unknown, position?: string): this {
+    this.controlAdds.push({ control, position });
+    return this;
+  }
+
+  resize(): this {
+    return this;
+  }
+
+  fitBounds(bounds: unknown, options?: unknown): this {
+    this.fitBoundsCalls.push({ bounds, options });
+    return this;
+  }
+
+  getCanvas(): { style: Record<string, string> } {
+    return this.canvas;
+  }
+
   remove(): this {
     this.removed = true;
     this.removeCalls += 1;
     return this;
   }
+
+  readonly controlAdds: Array<{ control: unknown; position?: string }> = [];
+  readonly fitBoundsCalls: Array<{ bounds: unknown; options?: unknown }> = [];
+  private readonly canvas = { style: {} as Record<string, string> };
+}
+
+export class RecordedMarker {
+  lngLat: [number, number] = [0, 0];
+  map: RecordedMap | null = null;
+  removed = false;
+
+  private readonly options: { element: HTMLElement };
+
+  constructor(options: { element: HTMLElement }) {
+    this.options = options;
+    mapLibreTestState.markers.push(this);
+  }
+
+  setLngLat(lngLat: [number, number]): this {
+    this.lngLat = lngLat;
+    return this;
+  }
+
+  addTo(map: RecordedMap): this {
+    this.map = map;
+    document.body.append(this.options.element);
+    return this;
+  }
+
+  getElement(): HTMLElement {
+    return this.options.element;
+  }
+
+  remove(): this {
+    this.removed = true;
+    this.options.element.remove();
+    return this;
+  }
+}
+
+export class RecordedLngLatBounds {
+  readonly points: Array<[number, number]> = [];
+
+  constructor(first: [number, number], second: [number, number]) {
+    this.points.push(first, second);
+  }
+
+  extend(point: [number, number]): this {
+    this.points.push(point);
+    return this;
+  }
+}
+
+export class RecordedNavigationControl {
+  readonly options: unknown;
+
+  constructor(options?: unknown) {
+    this.options = options;
+  }
 }
 
 export const mapLibreTestState = {
   instances: [] as RecordedMap[],
+  markers: [] as RecordedMarker[],
 };
 
 export function resetMapLibreTestState(): void {
   mapLibreTestState.instances.length = 0;
+  mapLibreTestState.markers.length = 0;
 }
 
 export const mapLibreMock = {
   Map: RecordedMap,
+  Marker: RecordedMarker,
+  NavigationControl: RecordedNavigationControl,
+  LngLatBounds: RecordedLngLatBounds,
 };

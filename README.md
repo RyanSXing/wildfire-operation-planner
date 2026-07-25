@@ -37,6 +37,39 @@ tasks, disruptions, field reports, recommendations, and decisions. It is a
 portfolio exercise and must not be used for emergency or life-safety decisions.
 
 The backend exercise contract is available at
-`GET /api/exercises/park-fire-decision`. The current frontend remains the
-separate, incident-scoped Live Monitor until the planned Claude Code rebuild
-consumes the stable exercise responses.
+`GET /api/exercises/park-fire-decision`.
+
+### Frontend routes
+
+The exercise is the primary experience.
+
+| Route      | Screen                                                     |
+| ---------- | ---------------------------------------------------------- |
+| `/`        | Park Fire decision exercise — the guided, task-based flow   |
+| `/monitor` | Live Monitor — the original incident-scoped dashboard       |
+
+The exercise walks an operator from the safety and provenance briefing through
+objective selection, three checkpoints, the shelter field-report override, a
+named approval with a written decision note, and finally the audit timeline,
+debrief, and a read-only planning sandbox. Every screen reads from the exercise
+API; nothing is mocked and no planning logic is duplicated in the browser.
+
+Desktop-only by design: the workspace assumes a rail, a map, and a detail
+drawer side by side.
+
+### Verifying the frontend
+
+```bash
+cd frontend && npm run lint && npx tsc -b && npm test -- --run && npm run build
+```
+
+End-to-end, against a running replay stack:
+
+```bash
+cd frontend && npx playwright test e2e/park-fire-exercise.spec.ts
+```
+
+The Playwright global setup reuses an already-healthy replay stack and only
+invokes `./scripts/replay-preview` when nothing is listening, so running the
+suite does not destroy a preview you are already using. Set
+`PLAYWRIGHT_BASE_URL` when the dev server is not on port 5173.
