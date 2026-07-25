@@ -118,3 +118,9 @@ ruff + mypy: passed
 repository/session/event/plan path at `localhost:55432` to persist a
 checkpoint-three plan and shelter-bus override with nested explanation JSONB.
 It passed: `1 passed in 1.00s`.
+
+## Final replay semantics
+
+Override validation compares thawed JSON shapes, so it reports a neutral
+validated lock when the persisted plan is unchanged. Failed replay validates
+the exact latest actionable plan preceding the attempted run.
