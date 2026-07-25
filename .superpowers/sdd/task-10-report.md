@@ -1,10 +1,12 @@
 # Task 10 report
 
 Implementation commit: `19c50f6`
+Review correction commit: `5df67d3`
 
 ## Delivered
 
-- Added the exact configured ASGI health and three-checkpoint metadata contract.
+- Added the exact health and three-checkpoint metadata contract to the real
+  package-backed ASGI fixture; removed the redundant synthetic-fixture assertion.
 - Reused the committed real-package completion helper to prove the
   `protect-critical-services` journey through disruption, final bus override,
   named approval, audit, debrief, and sandbox-ready completion.
@@ -21,7 +23,8 @@ Implementation commit: `19c50f6`
   `{"status":"ok","service":"wildfireops-api"}`.
 - `GET /api/exercises/park-fire-decision` returned `200` with
   `checkpointCount: 3`.
-- Exercise-focused unit/integration suite: `226 passed`.
+- Package-backed startup and golden journey: `1 passed`.
+- Exercise-focused unit/integration suite: `225 passed`.
 - Existing Live Monitor regression suite: `50 passed`.
 - Ruff: passed.
 - mypy: passed for 83 source files.
