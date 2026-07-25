@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 from math import isfinite
 from pathlib import Path
+from types import MappingProxyType
 
 from wildfireops.domain.observations import (
     FrozenJsonObject,
@@ -93,6 +94,7 @@ class ReplayLoader:
             if hashed_file.digest != expected_hash:
                 raise ReplayPackageCorrupt(f"hash mismatch for {filename}")
             file_contents[filename] = hashed_file.content
+        self._file_contents = MappingProxyType(dict(file_contents))
 
         self.static_data: ReplayStaticData | None
         if any(
@@ -195,6 +197,14 @@ class ReplayLoader:
             for record in self._records
             if record.observed_at <= at
         )
+
+    def referenced_file(self, filename: str) -> bytes:
+        try:
+            return self._file_contents[filename]
+        except KeyError:
+            raise ReplayPackageCorrupt(
+                f"file is not referenced by manifest: {filename}"
+            ) from None
 
 
 def _referenced_file(package: Path, filename: str) -> Path:
