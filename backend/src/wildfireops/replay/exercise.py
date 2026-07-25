@@ -324,28 +324,38 @@ def _validate_definition_references(
         )
     maximum_multiplier = max(definition.sandbox.priority_multipliers.values())
     for checkpoint_index, checkpoint in enumerate(definition.checkpoints):
-        total_penalty = 0
-        for task_index, task in enumerate(checkpoint.tasks):
-            penalty = max(
-                weights.base_priority_weight * task.base_priority
-                + weights.critical_service_weight * int(task.critical_service)
-                + weights.population_weight
-                * (task.affected_population // weights.population_divisor)
-                for weights in definition.objectives.values()
-            )
-            if penalty > (2**63 - 1) // maximum_multiplier:
-                raise ReplayPackageCorrupt(
-                    "exercise.json: "
-                    f"checkpoints[{checkpoint_index}].tasks[{task_index}].basePriority: "
-                    "CP-SAT integer range exceeded"
-                )
-            total_penalty += penalty * maximum_multiplier
-            if total_penalty > 2**63 - 1:
-                raise ReplayPackageCorrupt(
-                    "exercise.json: "
-                    f"checkpoints[{checkpoint_index}].tasks[{task_index}].basePriority: "
-                    "CP-SAT integer range exceeded"
-                )
+        for objective, weights in definition.objectives.items():
+            total_penalty = 0
+            for task_index, task in enumerate(checkpoint.tasks):
+                penalty = 0
+                for field, term in (
+                    ("basePriority", weights.base_priority_weight * task.base_priority),
+                    (
+                        "criticalService",
+                        weights.critical_service_weight * int(task.critical_service),
+                    ),
+                    (
+                        "affectedPopulation",
+                        weights.population_weight
+                        * (task.affected_population // weights.population_divisor),
+                    ),
+                ):
+                    penalty += term
+                    if penalty > (2**63 - 1) // maximum_multiplier:
+                        raise ReplayPackageCorrupt(
+                            "exercise.json: "
+                            f"objectives.{objective}, checkpoints[{checkpoint_index}]"
+                            f".tasks[{task_index}].{field}: "
+                            "CP-SAT integer range exceeded"
+                        )
+                scaled_penalty = penalty * maximum_multiplier
+                if total_penalty > (2**63 - 1) - scaled_penalty:
+                    raise ReplayPackageCorrupt(
+                        "exercise.json: "
+                        f"objectives.{objective}, checkpoints[{checkpoint_index}]"
+                        f".tasks[{task_index}]: CP-SAT integer range exceeded"
+                    )
+                total_penalty += scaled_penalty
     if not definition.sandbox.wind_presets:
         raise ReplayPackageCorrupt(
             "exercise.json: sandbox requires at least one wind preset"

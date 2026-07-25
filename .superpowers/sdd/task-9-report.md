@@ -92,3 +92,8 @@ mypy: Success: no issues found in 5 source files
 The final committed-fixture edge-case group expanded focused coverage to 94
 passing tests, including `UNKNOWN`, definition mismatch, and strict version
 coercion without database mutation.
+
+The final bounds correction evaluates CP-SAT priority products and aggregates
+per actual objective preset. It accepts orthogonal tasks whose individual
+objective totals are valid, while retaining objective/task/field-specific
+overflow failures.

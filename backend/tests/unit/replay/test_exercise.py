@@ -291,6 +291,46 @@ def test_definition_rejects_sandbox_priority_cp_sat_overflow(
     assert "CP-SAT integer range exceeded" in str(error.value)
 
 
+def test_definition_accepts_objective_specific_sandbox_penalty_totals(
+    exercise_package: Path,
+) -> None:
+    def orthogonal_objectives(body: dict[str, Any]) -> None:
+        for value in body["sandbox"]["priorityMultipliers"]:
+            body["sandbox"]["priorityMultipliers"][value] = 1
+        body["objectives"] = {
+            "fastest-response": {
+                "travelWeight": 0,
+                "basePriorityWeight": 1,
+                "criticalServiceWeight": 0,
+                "populationDivisor": 1,
+                "populationWeight": 0,
+            },
+            "protect-critical-services": {
+                "travelWeight": 0,
+                "basePriorityWeight": 0,
+                "criticalServiceWeight": 0,
+                "populationDivisor": 1,
+                "populationWeight": 1,
+            },
+            "maximize-population-coverage": {
+                "travelWeight": 0,
+                "basePriorityWeight": 0,
+                "criticalServiceWeight": 0,
+                "populationDivisor": 1,
+                "populationWeight": 0,
+            },
+        }
+        first = body["checkpoints"][0]["tasks"][0]
+        first.update(basePriority=2**62, affectedPopulation=0)
+        second = dict(first)
+        second.update(taskId="population-task", basePriority=0, affectedPopulation=2**62)
+        body["checkpoints"][0]["tasks"].append(second)
+
+    rewrite_exercise(exercise_package, orthogonal_objectives)
+
+    assert load_exercise_definition(ReplayLoader(exercise_package)) is not None
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
