@@ -528,6 +528,7 @@ def serialize_task_result(
             {
                 "resourceId": route.resource_id,
                 "taskId": route.task_id,
+                "capacity": resources[route.resource_id].capacity,
                 "available": resources[route.resource_id].available,
                 "capabilityCompatible": tasks[route.task_id].required_capability
                 in resources[route.resource_id].capabilities,
@@ -638,7 +639,7 @@ class ExercisePlanningService:
                     **dict(previous.input_data),
                     "assignments": previous.output_data.get("assignments", []),
                 },
-                {**payload, "assignments": output["assignments"]},
+                {**payload, **output},
             )
         )
         return await self._store_plan(
@@ -797,7 +798,7 @@ class ExercisePlanningService:
             raise ExerciseCommandInvalid(str(error), fields=("lockedAssignments",)) from error
         output = serialize_task_result(solved, routes, sandbox)
         output["explanation"] = serialize_task_explanation(
-            explain_task_plan(None, {**payload, "assignments": output["assignments"]})
+            explain_task_plan(None, {**payload, **output})
         )
         input_hash = planning_input_hash(payload)
         output["versions"] = {
@@ -927,7 +928,7 @@ class ExercisePlanningService:
                     **dict(current.input_data),
                     "assignments": current.output_data.get("assignments", []),
                 },
-                {**payload, "assignments": output["assignments"]},
+                {**payload, **output},
             )
         )
         output["operatorOverride"] = {

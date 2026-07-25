@@ -112,21 +112,7 @@ class CommandServiceProvider:
             raise ExerciseCommandInvalid("exercise graph is unavailable")
         async with self._session_factory() as session:
             async with session.begin():
-                repository = ExerciseRepository(session)
-                yield ExercisePlanningService(
-                    definition=definition,
-                    definition_digest=exercise_definition_digest(definition),
-                    graph=graph,
-                    repository=repository,
-                    session_service=ExerciseSessionService(
-                        definition=definition,
-                        definition_digest=exercise_definition_digest(definition),
-                        repository=repository,
-                        clock=self._clock,
-                        callsign=self._callsign,
-                    ),
-                    clock=self._clock,
-                )
+                yield self._exercise_planning_service(session, definition, graph)
 
     @asynccontextmanager
     async def exercise_sandbox_planning(self) -> AsyncIterator[ExercisePlanningService]:
@@ -138,23 +124,12 @@ class CommandServiceProvider:
             raise ExerciseCommandInvalid("exercise graph is unavailable")
         async with self._session_factory() as session:
             await session.connection(
-                execution_options={"isolation_level": "AUTOCOMMIT"}
+                execution_options={
+                    "isolation_level": "SERIALIZABLE",
+                    "postgresql_readonly": True,
+                }
             )
-            repository = ExerciseRepository(session)
-            yield ExercisePlanningService(
-                definition=definition,
-                definition_digest=exercise_definition_digest(definition),
-                graph=graph,
-                repository=repository,
-                session_service=ExerciseSessionService(
-                    definition=definition,
-                    definition_digest=exercise_definition_digest(definition),
-                    repository=repository,
-                    clock=self._clock,
-                    callsign=self._callsign,
-                ),
-                clock=self._clock,
-            )
+            yield self._exercise_planning_service(session, definition, graph)
 
     @asynccontextmanager
     async def exercise_queries(self) -> AsyncIterator[ExerciseQueryService]:
@@ -168,6 +143,29 @@ class CommandServiceProvider:
                 repository=ExerciseRepository(session),
                 clock=self._clock,
             )
+
+    def _exercise_planning_service(
+        self,
+        session: AsyncSession,
+        definition: ExerciseDefinition,
+        graph: RoadGraph,
+    ) -> ExercisePlanningService:
+        digest = exercise_definition_digest(definition)
+        repository = ExerciseRepository(session)
+        return ExercisePlanningService(
+            definition=definition,
+            definition_digest=digest,
+            graph=graph,
+            repository=repository,
+            session_service=ExerciseSessionService(
+                definition=definition,
+                definition_digest=digest,
+                repository=repository,
+                clock=self._clock,
+                callsign=self._callsign,
+            ),
+            clock=self._clock,
+        )
 
 
 def _risk_config(settings: Settings) -> RiskConfig:

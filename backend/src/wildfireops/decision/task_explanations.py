@@ -12,6 +12,7 @@ from wildfireops.domain.observations import (
 
 
 _ORDER = {
+    "plan.outcome": 0,
     "objective.changed": 10,
     "wind.changed": 20,
     "incident.task-added": 30,
@@ -21,6 +22,13 @@ _ORDER = {
     "route.reopened": 70,
     "resource.unavailable": 80,
     "assignment.changed": 90,
+    "task.uncovered-solver-status": 100,
+    "task.uncovered-availability": 101,
+    "task.uncovered-compatibility": 102,
+    "task.uncovered-route": 103,
+    "task.uncovered-deadline": 104,
+    "task.uncovered-capacity": 105,
+    "task.uncovered-contention": 106,
 }
 
 
@@ -42,11 +50,11 @@ def explain_task_plan(
 ) -> TaskPlanExplanation:
     """Report only explicit differences between canonical planning inputs."""
     current_input = _planning_input(current, "current")
+    changes = _outcome_changes(current_input)
     if previous is None:
         _validate_collections(current_input)
-        return TaskPlanExplanation(())
+        return TaskPlanExplanation(tuple(changes))
     previous_input = _planning_input(previous, "previous")
-    changes: list[PlanChange] = []
     if previous_input.get("objective") != current_input.get("objective"):
         changes.append(
             _change(
@@ -74,6 +82,158 @@ def explain_task_plan(
     changes.extend(_assignment_changes(previous_input, current_input))
     return TaskPlanExplanation(
         tuple(sorted(changes, key=lambda item: (_ORDER[item.code], _sort_key(item))))
+    )
+
+
+def _outcome_changes(current: FrozenJsonObject) -> list[PlanChange]:
+    status = current.get("status")
+    covered = current.get("coveredTaskIds")
+    uncovered = current.get("uncoveredTaskIds")
+    if not isinstance(status, str) or covered is None or uncovered is None:
+        return []
+    covered_ids = _strings(covered, "coveredTaskIds")
+    uncovered_ids = _strings(uncovered, "uncoveredTaskIds")
+    total = len(covered_ids) + len(uncovered_ids)
+    remaining = len(uncovered_ids)
+    noun = "task" if total == 1 else "tasks"
+    remainder = "none remain uncovered" if remaining == 0 else (
+        f"{remaining} remains uncovered" if remaining == 1 else f"{remaining} remain uncovered"
+    )
+    changes = [
+        _change(
+            "plan.outcome",
+            f"The plan covers {len(covered_ids)} of {total} {noun}; {remainder}.",
+            {
+                "status": status,
+                "coveredTaskIds": covered_ids,
+                "uncoveredTaskIds": uncovered_ids,
+            },
+        )
+    ]
+    tasks = _rows(current.get("tasks"), "tasks", "taskId")
+    assignments = _rows(
+        current.get("assignments"), "assignments", "resourceId", "taskId"
+    )
+    facts = _candidate_facts(current.get("candidateFacts"))
+    changes.extend(
+        _uncovered_reason(task_id, status, tasks.get(task_id), assignments, facts)
+        for task_id in uncovered_ids
+    )
+    return changes
+
+
+def _uncovered_reason(
+    task_id: str,
+    status: str,
+    task: FrozenJsonObject | None,
+    assignments: Mapping[str, FrozenJsonObject],
+    facts: tuple[FrozenJsonObject, ...],
+) -> PlanChange:
+    task_facts = tuple(item for item in facts if item.get("taskId") == task_id)
+    if status not in {"FEASIBLE", "OPTIMAL"}:
+        return _change(
+            "task.uncovered-solver-status",
+            f"{task_id} remains uncovered because the solver returned {status.lower()}.",
+            {"taskId": task_id, "status": status},
+        )
+    compatible = tuple(
+        item for item in task_facts if item.get("capabilityCompatible") is True
+    )
+    available = tuple(item for item in compatible if item.get("available") is True)
+    reachable = tuple(item for item in available if item.get("routeReachable") is True)
+    eligible = tuple(item for item in reachable if item.get("eligible") is True)
+    if compatible and not available:
+        return _candidate_reason(
+            "task.uncovered-availability",
+            task_id,
+            compatible,
+            "because its compatible resource is unavailable",
+        )
+    if not compatible:
+        return _candidate_reason(
+            "task.uncovered-compatibility",
+            task_id,
+            task_facts,
+            "because no resource has the required capability",
+        )
+    if available and not reachable:
+        return _candidate_reason(
+            "task.uncovered-route",
+            task_id,
+            available,
+            "because no compatible route is reachable",
+        )
+    if reachable and not eligible:
+        return _candidate_reason(
+            "task.uncovered-deadline",
+            task_id,
+            reachable,
+            "because compatible routes miss its deadline",
+        )
+    required = None if task is None else task.get("requiredCapacity")
+    capacity = 0
+    for item in eligible:
+        value = item.get("capacity")
+        if isinstance(value, int) and not isinstance(value, bool):
+            capacity += value
+    if isinstance(required, int) and not isinstance(required, bool) and capacity < required:
+        return _candidate_reason(
+            "task.uncovered-capacity",
+            task_id,
+            eligible,
+            "because eligible resources cannot supply its required capacity",
+            {"requiredCapacity": required, "eligibleCapacity": capacity},
+        )
+    assigned_ids = {
+        str(item.get("resourceId"))
+        for item in eligible
+        if item.get("resourceId") in assignments
+    }
+    resource_ids = assigned_ids or {
+        str(item.get("resourceId")) for item in eligible if item.get("resourceId")
+    }
+    wording = (
+        "its compatible resource is assigned elsewhere"
+        if len(resource_ids) == 1
+        else "its compatible resources are assigned elsewhere"
+    )
+    return _change(
+        "task.uncovered-contention",
+        f"{task_id} remains uncovered because {wording}.",
+        {"taskId": task_id, "resourceIds": tuple(sorted(resource_ids))},
+    )
+
+
+def _candidate_reason(
+    code: str,
+    task_id: str,
+    facts: Sequence[FrozenJsonObject],
+    reason: str,
+    extra: Mapping[str, object] | None = None,
+) -> PlanChange:
+    resource_ids = tuple(
+        sorted(
+            str(item.get("resourceId"))
+            for item in facts
+            if item.get("resourceId") is not None
+        )
+    )
+    return _change(
+        code,
+        f"{task_id} remains uncovered {reason}.",
+        {"taskId": task_id, "resourceIds": resource_ids, **(extra or {})},
+    )
+
+
+def _candidate_facts(value: object) -> tuple[FrozenJsonObject, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        raise ValueError("candidateFacts must be a sequence")
+    return tuple(
+        freeze_json_object(item)
+        for item in value
+        if isinstance(item, Mapping)
     )
 
 

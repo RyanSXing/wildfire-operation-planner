@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from wildfireops.db import create_engine, create_session_factory
 from wildfireops.geospatial.clustering import ClusteringConfig
 from wildfireops.ingestion.worker import build_exposure_config, build_risk_config
 from wildfireops.main import create_app
+from wildfireops.persistence.exercises import ExerciseRepository
 from wildfireops.replay.loader import ReplayLoader
 from wildfireops.replay.seed import seed_replay_package
 
@@ -68,7 +70,7 @@ async def exercise_app() -> AsyncIterator[FastAPI]:
             graphs=lambda: app.state.graphs,
             settings=app.state.settings,
             exercise_definition=app.state.exercise_definition,
-            clock=lambda: app.state.clock(),
+            clock=lambda: app.state.exercise_clock(),
             callsign=lambda: "EMBER-GOLDEN",
         )
         resources.push_async_callback(app.state.engine.dispose)
@@ -107,7 +109,27 @@ async def test_park_fire_exercise_matches_golden_semantics(
             for value in actual.values()
         }
     ) >= 2
+    assert len(
+        {
+            tuple(
+                sorted(
+                    (item["resourceId"], item["taskId"])
+                    for item in value["cascadingDisruption"]["assignments"]
+                )
+            )
+            for value in actual.values()
+        }
+    ) == 3
     assert all(value["cascadingDisruption"]["uncoveredTaskIds"] for value in actual.values())
+    assert all(
+        value["initialAllocation"]["causalCodes"][0] == "plan.outcome"
+        for value in actual.values()
+    )
+    assert all(
+        "task.uncovered-contention"
+        in value["cascadingDisruption"]["causalCodes"]
+        for value in actual.values()
+    )
     assert all(
         value["finalOverride"]["operatorOverride"] == {
             "resourceId": "exercise-bus-1",
@@ -283,16 +305,62 @@ async def test_park_fire_complete_backend_journey_is_frontend_ready(
         "exercise.override-applied",
         "exercise.plan-approved",
     ]
-    assert debrief["finalPlan"]["operatorOverride"]["taskId"] == (
+    assert debrief["finalPlan"]["outputData"]["operatorOverride"]["taskId"] == (
         "shelter-capacity-transport"
     )
 
 
 @pytest.mark.asyncio
-async def test_park_fire_completed_sandbox_is_autocommit_read_only(
-    exercise_app: FastAPI,
+async def test_replay_configured_app_exercise_ttl_uses_wall_clock() -> None:
+    app = create_app(Settings(database_url=DATABASE_URL, replay_package=PACKAGE))
+    now = datetime(2026, 7, 25, 12, tzinfo=UTC)
+    app.state.exercise_clock = lambda: now
+    await _reset(app.state.engine)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            created = await _request(
+                client.post(
+                    "/api/exercises/park-fire-decision/sessions",
+                    headers={"Idempotency-Key": "wall-clock-create"},
+                ),
+                201,
+            )
+            app.state.exercise_clock = lambda: now + timedelta(hours=24)
+            expired = await client.post(
+                f"/api/exercise-sessions/{created['id']}/objective",
+                headers={"Idempotency-Key": "wall-clock-expired"},
+                json={
+                    "objective": "fastest-response",
+                    "expectedVersion": created["version"],
+                },
+            )
+    finally:
+        await _reset(app.state.engine)
+        await app.state.engine.dispose()
+
+    assert app.state.clock() == ReplayLoader(PACKAGE).manifest.end_at
+    assert expired.status_code == 410, expired.text
+
+
+@pytest.mark.asyncio
+async def test_park_fire_completed_sandbox_uses_database_read_only_transaction(
+    exercise_app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     statements: list[str] = []
+    read_only: list[str] = []
+    original_get_session = ExerciseRepository.get_session
+
+    async def get_session(
+        repository: ExerciseRepository, session_id: object
+    ) -> object:
+        read_only.append(
+            str(await repository._session.scalar(text("SHOW transaction_read_only")))
+        )
+        return await original_get_session(repository, session_id)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ExerciseRepository, "get_session", get_session)
 
     def record(
         connection: object,
@@ -312,6 +380,7 @@ async def test_park_fire_completed_sandbox_is_autocommit_read_only(
         ) as client:
             completed = await _completed_session(client)
             session_id = completed["id"]
+            statements.clear()
             async with exercise_app.state.engine.connect() as connection:
                 before = (
                     await connection.execute(
@@ -354,7 +423,11 @@ async def test_park_fire_completed_sandbox_is_autocommit_read_only(
     assert response.json()["output"]["status"] == "OPTIMAL"
     assert response.json()["input"]["sandboxControls"]["windPreset"] == "historical-calm"
     assert before == after
-    assert not any(statement.strip().upper() in {"BEGIN", "COMMIT"} for statement in statements)
+    assert read_only == ["on"]
+    assert not any(
+        statement.lstrip().upper().startswith(("INSERT ", "UPDATE ", "DELETE "))
+        for statement in statements
+    )
 
 
 @pytest.mark.asyncio
@@ -527,6 +600,7 @@ def _session_semantics(
     result = dict(state)
     result.pop("id", None)
     result.pop("callsign", None)
+    result.pop("expiresAt", None)
     return _normalize_links(result, aliases)
 
 

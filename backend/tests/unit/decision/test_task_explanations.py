@@ -39,8 +39,79 @@ def test_explanation_reports_wind_spot_fire_and_closed_route() -> None:
     ]
 
 
-def test_initial_plan_has_no_change_claims() -> None:
-    assert explain_task_plan(None, {"objective": "fastest-response"}).changes == ()
+def test_initial_plan_explains_outcome_and_each_uncovered_task() -> None:
+    explanation = explain_task_plan(
+        None,
+        {
+            "objective": "fastest-response",
+            "status": "OPTIMAL",
+            "tasks": [
+                {"taskId": "park-comms", "requiredCapacity": 2},
+                {"taskId": "spot-substation", "requiredCapacity": 2},
+            ],
+            "assignments": [
+                {"resourceId": "engine-1", "taskId": "spot-substation"}
+            ],
+            "coveredTaskIds": ["spot-substation"],
+            "uncoveredTaskIds": ["park-comms"],
+            "candidateFacts": [
+                {
+                    "resourceId": "engine-1",
+                    "taskId": "park-comms",
+                    "capacity": 2,
+                    "available": True,
+                    "capabilityCompatible": True,
+                    "routeReachable": True,
+                    "travelMinutes": 4,
+                    "deadlineMinutes": 30,
+                    "eligible": True,
+                }
+            ],
+        },
+    )
+
+    assert [item.code for item in explanation.changes] == [
+        "plan.outcome",
+        "task.uncovered-contention",
+    ]
+    assert explanation.changes[0].summary == (
+        "The plan covers 1 of 2 tasks; 1 remains uncovered."
+    )
+    assert explanation.changes[1].summary == (
+        "park-comms remains uncovered because its compatible resource is assigned elsewhere."
+    )
+    assert explanation.changes[1].evidence["resourceIds"] == ("engine-1",)
+
+
+def test_uncovered_reason_uses_candidate_evidence_not_scores() -> None:
+    explanation = explain_task_plan(
+        None,
+        {
+            "status": "OPTIMAL",
+            "tasks": [{"taskId": "hospital", "requiredCapacity": 4}],
+            "coveredTaskIds": [],
+            "uncoveredTaskIds": ["hospital"],
+            "candidateFacts": [
+                {
+                    "resourceId": "team-1",
+                    "taskId": "hospital",
+                    "available": False,
+                    "capabilityCompatible": True,
+                    "routeReachable": True,
+                    "travelMinutes": 5,
+                    "deadlineMinutes": 30,
+                    "eligible": False,
+                }
+            ],
+        },
+    )
+
+    reason = explanation.changes[1]
+    assert reason.code == "task.uncovered-availability"
+    assert reason.summary == (
+        "hospital remains uncovered because its compatible resource is unavailable."
+    )
+    assert "penalty" not in reason.evidence
 
 
 def test_task_added_and_removed_are_distinct() -> None:

@@ -13,8 +13,8 @@ from wildfireops.geospatial.road_graph import RouteResult, RouteStatus
 TASK_ALGORITHM_VERSION = "task-allocation-v1"
 _INT64_MAX = 2**63 - 1
 _CP_SAT_RANGE_ERROR = "CP-SAT integer range exceeded"
-_SOLUTION_STATUSES = frozenset({"OPTIMAL"})
-_PUBLIC_STATUSES = frozenset({"INFEASIBLE", "OPTIMAL"})
+_SOLUTION_STATUSES = frozenset({"FEASIBLE", "OPTIMAL"})
+_PUBLIC_STATUSES = frozenset({"FEASIBLE", "INFEASIBLE", "OPTIMAL"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,7 +178,7 @@ def solve_task_plan(request: TaskOptimizationRequest) -> TaskOptimizationResult:
         )
     )
     solver = cp_model.CpSolver()
-    # Compatibility name: max_solver_seconds is the deterministic CP-SAT budget.
+    solver.parameters.max_time_in_seconds = request.max_solver_seconds
     solver.parameters.max_deterministic_time = request.max_solver_seconds
     solver.parameters.num_search_workers = 1
     solver.parameters.random_seed = 0

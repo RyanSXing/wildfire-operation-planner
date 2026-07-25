@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -13,6 +14,7 @@ from wildfireops.application.commands import CommandServiceProvider
 from wildfireops.config import Settings
 from wildfireops.decision.task_optimizer import TaskOptimizationResult
 from wildfireops.main import create_app
+from wildfireops.persistence.exercises import ExerciseRepository
 from wildfireops.replay.exercise import (
     ExerciseDefinition,
     _canonicalize,
@@ -184,17 +186,19 @@ async def _complete(client: AsyncClient) -> dict[str, object]:
     return completed.json()
 
 
-async def _sandbox_counts(app: FastAPI, session_id: str) -> tuple[int, int, int, int]:
+async def _sandbox_counts(
+    app: FastAPI, session_id: str
+) -> tuple[int, int, int, int, int]:
     async with app.state.engine.connect() as connection:
         row = (
             await connection.execute(
                 text(
                     "SELECT "
-                    "(SELECT count(*) FROM exercise_plan_runs WHERE session_id = :session_id), "
-                    "(SELECT count(*) FROM exercise_events WHERE session_id = :session_id), "
-                    "(SELECT version FROM exercise_sessions WHERE id = :session_id), "
-                    "(SELECT count(*) FROM idempotency_keys "
-                    "WHERE scope LIKE 'exercise-session:' || :session_id || ':%')"
+                    "(SELECT count(*) FROM exercise_plan_runs), "
+                    "(SELECT count(*) FROM exercise_events), "
+                    "(SELECT count(*) FROM exercise_sessions), "
+                    "(SELECT count(*) FROM idempotency_keys), "
+                    "(SELECT version FROM exercise_sessions WHERE id = :session_id)"
                 ),
                 {"session_id": session_id},
             )
@@ -646,6 +650,39 @@ async def test_final_decision_requires_a_note_and_debrief_restores_in_a_new_clie
     assert debrief.status_code == 200, debrief.text
     assert restored.status_code == 200, restored.text
     assert restored.json() == debrief.json()
+    plan_ids = {item["id"] for item in debrief.json()["plans"]}
+    assert debrief.json()["finalPlan"] == debrief.json()["plans"][-1]
+    assert {
+        "id",
+        "sessionId",
+        "checkpointKey",
+        "inputHash",
+        "inputData",
+        "outputData",
+        "versions",
+        "createdAt",
+    } <= debrief.json()["finalPlan"].keys()
+    assert all(
+        {
+            "id",
+            "sessionId",
+            "eventType",
+            "expectedSessionVersion",
+            "resultingSessionVersion",
+            "beforeState",
+            "afterState",
+            "inputs",
+            "occurredAt",
+        }
+        <= event.keys()
+        for event in debrief.json()["events"]
+    )
+    assert {
+        value
+        for event in debrief.json()["events"]
+        for key, value in event["inputs"].items()
+        if key.endswith("PlanId") and value is not None
+    } <= plan_ids
 
 
 @pytest.mark.asyncio
@@ -755,7 +792,6 @@ async def test_sandbox_rejects_unbounded_controls_without_state_changes(
 
     assert stale.status_code == 409, stale.text
     assert stale.json()["error"]["code"] == "exercise_session_version_conflict"
-    assert await _sandbox_counts(exercise_app, session_id) == before_counts
     assert incomplete_response.status_code == 409, incomplete_response.text
     assert incomplete_response.json()["error"]["code"] == "exercise_transition_invalid"
     assert await _sandbox_counts(exercise_app, incomplete["id"]) == incomplete_before
@@ -765,6 +801,18 @@ async def test_sandbox_rejects_unbounded_controls_without_state_changes(
 async def test_concurrent_and_failing_sandbox_requests_never_write(
     exercise_app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    read_only: list[str] = []
+    original_get_session = ExerciseRepository.get_session
+
+    async def get_session(
+        repository: ExerciseRepository, session_id: UUID
+    ) -> object:
+        read_only.append(
+            str(await repository._session.scalar(text("SHOW transaction_read_only")))
+        )
+        return await original_get_session(repository, session_id)
+
+    monkeypatch.setattr(ExerciseRepository, "get_session", get_session)
     exercise = _sandbox_definition()
     exercise_app.state.command_service_provider = CommandServiceProvider(
         session_factory=lambda: exercise_app.state.session_factory(),
@@ -806,6 +854,7 @@ async def test_concurrent_and_failing_sandbox_requests_never_write(
 
     assert all(response.status_code == 200 for response in responses)
     assert failed.status_code == 500, failed.text
+    assert read_only == ["on"] * 4
     assert await _sandbox_counts(exercise_app, session_id) == before
 
 

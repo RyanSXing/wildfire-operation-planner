@@ -1,38 +1,217 @@
-# Task 10 report
+# Task 10 Report: Constraint-based resource allocation
 
-Implementation commit: `19c50f6`
-Review correction commit: `5df67d3`
+## Changed files
 
-## Delivered
+- `backend/src/wildfireops/decision/optimizer.py`
+  - Added frozen allocation request/result types, boundary validation, deterministic
+    CP-SAT modeling, stable result ordering, and constraint diagnostics.
+- `backend/src/wildfireops/decision/explanations.py`
+  - Added deterministic, JSON-compatible explanations with no LLM dependency.
+- `backend/tests/unit/decision/test_optimizer.py`
+  - Added deterministic examples, boundary validation, objective accounting,
+    explanation, status-constructor, and ordering coverage.
+- `backend/tests/unit/decision/test_optimizer_properties.py`
+  - Added 30 bounded Hypothesis examples with at most eight resources and eight
+    demands.
+- `backend/pyproject.toml`
+  - Added OR-Tools and the Hypothesis development dependency.
+- `backend/uv.lock`
+  - Locked the new direct and transitive dependencies.
+- `.superpowers/sdd/task-10-report.md`
+  - Recorded this implementation and its verification evidence.
 
-- Added the exact health and three-checkpoint metadata contract to the real
-  package-backed ASGI fixture; removed the redundant synthetic-fixture assertion.
-- Reused the committed real-package completion helper to prove the
-  `protect-critical-services` journey through disruption, final bus override,
-  named approval, audit, debrief, and sandbox-ready completion.
-- Documented the local Park Fire Decision Exercise command, provenance boundary,
-  safety boundary, stable backend contract, and deferred Claude Code frontend.
-- Kept `compose.replay.yaml` and `scripts/replay-preview` unchanged: the existing
-  migrate, seed, read-only package mount, and API process are sufficient.
+## RED evidence
 
-## Verification
+1. Before either production module existed:
 
-- `docker compose -f compose.yaml -f compose.replay.yaml config --quiet`
-- `docker compose -f compose.yaml -f compose.replay.yaml up -d --build db api`
-- `GET /api/health` returned
-  `{"status":"ok","service":"wildfireops-api"}`.
-- `GET /api/exercises/park-fire-decision` returned `200` with
-  `checkpointCount: 3`.
-- Package-backed startup and golden journey: `1 passed`.
-- Exercise-focused unit/integration suite: `225 passed`.
-- Existing Live Monitor regression suite: `50 passed`.
-- Ruff: passed.
-- mypy: passed for 83 source files.
+   ```text
+   uv run pytest tests/unit/decision/test_optimizer.py -v
+   ModuleNotFoundError: No module named 'wildfireops.decision.optimizer'
+   1 error during collection
+   ```
 
-The first health probe reached the container while its fresh dependency sync,
-migrations, and replay seed were still running. Container logs showed successful
-migration and seed completion; the unchanged API then served both contracts.
-The integration suites were run against the branch ledger's migrated test
-database on port 55432.
+   This was the expected missing-feature failure.
 
-No blocker remains.
+2. After the initial GREEN implementation, a new stable-explanation-order test
+   was added and run before changing `explain_result`:
+
+   ```text
+   uv run pytest tests/unit/decision/test_optimizer.py::test_explanation_stably_sorts_every_collection -v
+   AssertionError: assert ['zulu', 'alpha'] == ['alpha', 'zulu']
+   1 failed
+   ```
+
+## GREEN evidence
+
+- Initial deterministic example and validation suite: `18 passed`.
+- Initial combined example/property run: `19 passed`.
+- Stable-explanation-order test after its minimal fix: `1 passed`.
+- Final focused Task 10 run:
+
+  ```text
+  uv run pytest tests/unit/decision/test_optimizer.py tests/unit/decision/test_optimizer_properties.py -q
+  20 passed in 0.79s
+  ```
+
+## Verification commands and results
+
+- `uv run pytest tests/unit -q`
+  - `424 passed, 3 warnings in 5.35s`.
+  - The warnings are existing macOS `fork()` deprecations in road-graph
+    multiprocessing tests.
+- `uv run mypy src`
+  - `Success: no issues found in 57 source files`.
+- `uv run ruff format --check .`
+  - `93 files already formatted`.
+- `uv run ruff check .`
+  - `All checks passed!`.
+- `git diff --check`
+  - No whitespace errors.
+- Full `uv run pytest -q` using the local default database configuration:
+  - `429 passed, 84 errors`.
+  - All errors occurred during integration setup because the expected local
+    database role was absent; there were no assertion failures.
+- Full suite rerun against the established test database (connection details
+  intentionally omitted):
+  - `429 passed, 84 errors`.
+  - All errors occurred during integration setup because the database endpoint
+    refused the connection; there were no assertion failures.
+
+## Design choices
+
+- Risk is validated as finite and within `0..100`, then integerized once as
+  `round(1000 * weighted_risk / 100)` and reused for the model and result.
+- Eligibility compares the exact route `travel_minutes` float with the response
+  limit. The objective uses documented ceiling minutes so CP-SAT receives
+  conservative integer travel coefficients.
+- Inputs are validated and canonicalized before variable creation. Results and
+  explanation collections are stably sorted.
+- A resource can be assigned at most once. Destination assignments must supply
+  required aggregate capacity, and assignments are prohibited when its covered
+  variable is false.
+- `num_search_workers=1` and `random_seed=0` make solver replay deterministic.
+  Solver values are read only for `FEASIBLE` or `OPTIMAL`; any non-public solver
+  status maps to `UNKNOWN` and produces no assignments.
+- Explanations use fixed templates and JSON primitives. Constraint messages are
+  derived only from request eligibility and selected capacity, with no
+  persistence or API dependency.
+- `OptimizationResult` retains the planned positional field order; only the two
+  defaulted tail fields `unassigned_resource_ids` and `binding_constraints` were
+  added.
+
+## Risks
+
+- The database-backed integration suite could not complete because neither the
+  local nor established test database was reachable with a usable setup during
+  verification. All DB-independent tests passed, but integration coverage remains
+  an infrastructure-limited verification gap.
+- OR-Tools adds its normal solver runtime and transitive dependency footprint.
+
+## Formal review correction: truthful limiting reasons
+
+### Review finding
+
+Formal review found that sufficient total eligible capacity fell through to the
+generic message `required capacity ... was not satisfied by selected assignments`.
+That described the result, not the limiting cause. It also allowed a non-solution
+status to look like an optimized allocation tradeoff.
+
+The diagnostic builder now receives the already-computed solver status and selected
+resource/destination pairs. Without changing the model or public dataclasses, it
+distinguishes:
+
+- structural eligible-capacity shortage;
+- eligible resources consumed by deterministic `resource->competing destination`
+  assignments;
+- eligible resources left unassigned by the travel-plus-uncovered-risk objective;
+- a solver status that produced no allocation solution.
+
+### Correction RED evidence
+
+Before changing production code:
+
+```text
+uv run pytest tests/unit/decision/test_optimizer.py -k 'binding_reason or unknown_status' -v
+3 failed, 19 deselected
+```
+
+All three failures returned the old generic capacity message instead of the expected
+contention, objective-tradeoff, and solver-status reasons.
+
+### Correction GREEN and verification evidence
+
+- Focused correction tests: `3 passed, 19 deselected`.
+- Complete Task 10 suite:
+
+  ```text
+  uv run pytest tests/unit/decision/test_optimizer.py tests/unit/decision/test_optimizer_properties.py -q
+  23 passed in 0.37s
+  ```
+
+- Complete backend unit suite:
+
+  ```text
+  uv run pytest tests/unit -q
+  427 passed, 3 warnings in 4.53s
+  ```
+
+  The three warnings remain the existing macOS `fork()` deprecations in road-graph
+  multiprocessing tests.
+- `uv run ruff format --check .`: `93 files already formatted`.
+- `uv run ruff check .`: `All checks passed!`.
+- `uv run mypy src`: `Success: no issues found in 57 source files`.
+
+## Formal review correction: mutually exclusive limiting cause
+
+### Review finding
+
+The first explanation correction independently emitted resource contention when any
+eligible resource served another destination and an objective tradeoff when any
+eligible resource was idle. In mixed cases that could name two causes even though
+only one constrained coverage.
+
+For an uncovered destination with sufficient total eligible capacity, diagnostics
+now compare idle eligible capacity with required capacity:
+
+- if idle capacity can cover the demand, only the objective-tradeoff reason is
+  emitted;
+- if idle capacity cannot cover the demand, reclaiming contended capacity is
+  necessary, so only the deterministic resource-contention reason is emitted.
+
+Structural shortage and non-solution status handling are unchanged.
+
+### Causal correction RED evidence
+
+Before changing production code:
+
+```text
+uv run pytest tests/unit/decision/test_optimizer.py -k idle_capacity -v
+2 failed, 22 deselected
+```
+
+The first counterexample incorrectly added contention even though one idle resource
+could cover the demand. The second incorrectly added an objective tradeoff even
+though idle capacity could not cover without the contested resource.
+
+### Causal correction GREEN and verification evidence
+
+- Counterexample tests: `2 passed, 22 deselected`.
+- Complete Task 10 suite:
+
+  ```text
+  uv run pytest tests/unit/decision/test_optimizer.py tests/unit/decision/test_optimizer_properties.py -q
+  25 passed in 0.42s
+  ```
+
+- Complete backend unit suite:
+
+  ```text
+  uv run pytest tests/unit -q
+  429 passed, 3 warnings in 4.71s
+  ```
+
+  The three warnings remain the existing macOS `fork()` deprecations in road-graph
+  multiprocessing tests.
+- `uv run ruff format --check .`: `93 files already formatted`.
+- `uv run ruff check .`: `All checks passed!`.
+- `uv run mypy src`: `Success: no issues found in 57 source files`.

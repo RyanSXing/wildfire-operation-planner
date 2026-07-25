@@ -274,6 +274,41 @@ def test_definition_rejects_non_strict_or_overflowing_sandbox_multiplier(
     assert "sandbox.priorityMultipliers.standard" in str(error.value)
 
 
+@pytest.mark.parametrize(
+    ("section", "field", "value", "path"),
+    (
+        ("resources", "capacity", True, "resources.0.capacity"),
+        ("tasks", "requiredCapacity", "1", "checkpoints.0.tasks.0.requiredCapacity"),
+        ("tasks", "deadlineMinutes", 30.0, "checkpoints.0.tasks.0.deadlineMinutes"),
+        ("tasks", "affectedPopulation", False, "checkpoints.0.tasks.0.affectedPopulation"),
+        ("tasks", "basePriority", "10", "checkpoints.0.tasks.0.basePriority"),
+        ("objectives", "travelWeight", 1.0, "objectives.fastest-response.travelWeight"),
+        ("objectives", "populationDivisor", True, "objectives.fastest-response.populationDivisor"),
+    ),
+)
+def test_definition_rejects_coerced_integers_at_trust_boundary(
+    exercise_package: Path,
+    section: str,
+    field: str,
+    value: object,
+    path: str,
+) -> None:
+    def mutate(body: dict[str, Any]) -> None:
+        if section == "resources":
+            body["resources"][0][field] = value
+        elif section == "tasks":
+            body["checkpoints"][0]["tasks"][0][field] = value
+        else:
+            body["objectives"]["fastest-response"][field] = value
+
+    rewrite_exercise(exercise_package, mutate)
+
+    with pytest.raises(ReplayPackageCorrupt) as error:
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+    assert path in str(error.value)
+
+
 def test_definition_rejects_sandbox_priority_cp_sat_overflow(
     exercise_package: Path,
 ) -> None:

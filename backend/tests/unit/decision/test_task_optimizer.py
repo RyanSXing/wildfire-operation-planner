@@ -636,7 +636,7 @@ def test_unreachable_route_accepts_infinite_travel_sentinel() -> None:
     assert result.assignments == ()
 
 
-def test_solver_cutoff_status_is_normalized_without_reading_values(
+def test_solver_feasible_status_retains_actionable_assignments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Parameters:
@@ -654,7 +654,8 @@ def test_solver_cutoff_status_is_normalized_without_reading_values(
             return "FEASIBLE"
 
         def value(self, variable: object) -> int:
-            raise AssertionError(f"value read for cutoff variable {variable}")
+            del variable
+            return 1
 
     monkeypatch.setattr(task_optimizer_module.cp_model, "CpSolver", CutoffSolver)
     result = solve_task_plan(
@@ -667,15 +668,14 @@ def test_solver_cutoff_status_is_normalized_without_reading_values(
         )
     )
 
-    assert result.status == "UNKNOWN"
-    assert result.assignments == ()
-    assert result.uncovered_task_ids == ("protect-1",)
-    assert result.binding_constraints == (
-        "solver-status: task=protect-1; status=UNKNOWN produced no solution",
-    )
+    assert result.status == "FEASIBLE"
+    assert [(item.resource_id, item.task_id) for item in result.assignments] == [
+        ("engine-1", "protect-1")
+    ]
+    assert result.uncovered_task_ids == ()
 
 
-def test_solver_uses_fixed_deterministic_search_budget(
+def test_solver_uses_fixed_search_and_two_second_wall_bound(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Parameters:
@@ -702,7 +702,9 @@ def test_solver_uses_fixed_deterministic_search_budget(
     solve_task_plan(TaskOptimizationRequest((), (), (), (), 1, 2))
 
     assert UnknownSolver.instance.parameters.max_deterministic_time == 2
-    assert not hasattr(UnknownSolver.instance.parameters, "max_time_in_seconds")
+    assert UnknownSolver.instance.parameters.max_time_in_seconds == 2
+    assert UnknownSolver.instance.parameters.num_search_workers == 1
+    assert UnknownSolver.instance.parameters.random_seed == 0
 
 
 @pytest.mark.parametrize(

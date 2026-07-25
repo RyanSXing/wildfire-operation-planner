@@ -516,6 +516,46 @@ async def test_audit_hides_private_replay_snapshot() -> None:
 
 
 @pytest.mark.asyncio
+async def test_debrief_returns_complete_immutable_plan_and_event_envelopes() -> None:
+    repository = FakeExerciseRepository()
+    session = await service(repository).create(idempotency_key="create")
+    session.status = "completed"
+    plan = ExercisePlanRun(
+        id=uuid4(),
+        session_id=session.id,
+        checkpoint_key="field-report",
+        input_hash="b" * 64,
+        input_data={"task": {"id": "shelter"}},
+        output_data={"status": "OPTIMAL"},
+        versions={"exercise": "1"},
+        created_at=NOW,
+    )
+    repository.plans.append(plan)
+    await repository.append_event(
+        session_id=session.id,
+        event_type="exercise.plan-approved",
+        actor_callsign=session.callsign,
+        display_name=None,
+        expected_session_version=1,
+        resulting_session_version=2,
+        before_state={},
+        after_state={},
+        inputs={"planId": str(plan.id)},
+        note="Approved.",
+    )
+
+    result = await query(repository).debrief(session.id)
+    returned = result["plans"][0]
+    assert returned["id"] == str(plan.id)
+    assert returned["inputData"]["task"]["id"] == "shelter"
+    assert result["events"][-1]["inputs"]["planId"] == str(plan.id)
+    with pytest.raises(TypeError):
+        returned["id"] = "changed"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        returned["inputData"]["task"]["id"] = "changed"  # type: ignore[index]
+
+
+@pytest.mark.asyncio
 async def test_forged_cross_session_event_claim_cannot_replay() -> None:
     repository = FakeExerciseRepository()
     commands = service(repository)

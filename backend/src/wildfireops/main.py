@@ -88,6 +88,7 @@ def create_app(
         if replay_clock is not None
         else lambda: datetime.now(UTC)
     )
+    app.state.exercise_clock = lambda: datetime.now(UTC)
     app.state.graphs = graphs
     app.state.exercise_definition = exercise_definition
     app.state.read_service_provider = create_read_service_provider(
@@ -102,7 +103,7 @@ def create_app(
         graphs=lambda: app.state.graphs,
         settings=resolved,
         exercise_definition=exercise_definition,
-        clock=lambda: app.state.clock(),
+        clock=lambda: app.state.exercise_clock(),
     )
 
     app.add_middleware(RequestMetricsMiddleware)

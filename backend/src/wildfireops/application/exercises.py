@@ -660,7 +660,7 @@ class ExerciseQueryService:
             for item in await self._repository.list_events(session_id)
         )
 
-    async def debrief(self, session_id: UUID) -> dict[str, object]:
+    async def debrief(self, session_id: UUID) -> Mapping[str, object]:
         session = await self._repository.get_session(session_id)
         if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
@@ -671,20 +671,15 @@ class ExerciseQueryService:
         events = await self._repository.list_events(session.id)
         if not plans:
             raise RuntimeError("completed exercise has no plan")
-        return {
-            "session": _session_state(session),
-            "plans": [dict(item.output_data) for item in plans],
-            "finalPlan": dict(plans[-1].output_data),
-            "events": [
-                {
-                    "eventType": item.event_type,
-                    "inputs": _public_inputs(item.inputs),
-                    "note": item.note,
-                    "occurredAt": item.occurred_at.isoformat(),
-                }
-                for item in events
-            ],
-        }
+        public_plans = tuple(_plan_envelope(item) for item in plans)
+        return freeze_json_object(
+            {
+                "session": _session_state(session),
+                "plans": public_plans,
+                "finalPlan": public_plans[-1],
+                "events": tuple(_event_envelope(_public_event(item)) for item in events),
+            }
+        )
 
 
 def _idempotency_key(value: str) -> str:
@@ -729,6 +724,40 @@ def _public_event(event: ExerciseEvent) -> ExerciseEvent:
         inputs=_public_inputs(event.inputs),
         note=event.note,
         occurred_at=event.occurred_at,
+    )
+
+
+def _plan_envelope(plan: ExercisePlanRun) -> Mapping[str, object]:
+    return freeze_json_object(
+        {
+            "id": str(plan.id),
+            "sessionId": str(plan.session_id),
+            "checkpointKey": plan.checkpoint_key,
+            "inputHash": plan.input_hash,
+            "inputData": plan.input_data,
+            "outputData": plan.output_data,
+            "versions": plan.versions,
+            "createdAt": plan.created_at.isoformat(),
+        }
+    )
+
+
+def _event_envelope(event: ExerciseEvent) -> Mapping[str, object]:
+    return freeze_json_object(
+        {
+            "id": str(event.id),
+            "sessionId": str(event.session_id),
+            "eventType": event.event_type,
+            "actorCallsign": event.actor_callsign,
+            "displayName": event.display_name,
+            "expectedSessionVersion": event.expected_session_version,
+            "resultingSessionVersion": event.resulting_session_version,
+            "beforeState": event.before_state,
+            "afterState": event.after_state,
+            "inputs": event.inputs,
+            "note": event.note,
+            "occurredAt": event.occurred_at.isoformat(),
+        }
     )
 
 

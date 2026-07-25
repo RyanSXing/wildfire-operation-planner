@@ -130,3 +130,30 @@ def test_committed_park_fire_exercise_is_complete() -> None:
         in graph._graph
         for asset in definition.assets
     )
+
+
+def test_park_fire_cascade_has_real_cross_incident_scarcity_and_approved_assets() -> None:
+    package = Path(__file__).parents[4] / "data/replay/park-fire"
+    definition = load_exercise_definition(ReplayLoader(package))
+    assert definition is not None
+    cascade = definition.checkpoints[1]
+    tasks_by_capability: dict[str, set[str]] = {}
+    for task in cascade.tasks:
+        tasks_by_capability.setdefault(task.required_capability, set()).add(
+            task.incident_key
+        )
+
+    assert any(
+        len(tasks_by_capability.get(capability, set())) > 1
+        for resource in definition.resources
+        for capability in resource.capabilities
+    )
+    assets = {item.asset_id: item for item in definition.assets}
+    assert assets["kpay-fm-chico"].name == "KPAY-FM (Chico)"
+    assert assets["kpay-fm-chico"].source_record_id == "node/358814442"
+    assert assets["kpay-fm-chico"].position.longitude == -121.7224787
+    assert assets["kpay-fm-chico"].position.latitude == 39.9459939
+    assert assets["nunneley-road-corridor"].source_record_id == "way/629318940"
+    assert next(
+        task for task in cascade.tasks if task.task_id == "clear-primary-corridor"
+    ).asset_id == "nunneley-road-corridor"

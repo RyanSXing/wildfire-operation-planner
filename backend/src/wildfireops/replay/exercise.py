@@ -26,6 +26,8 @@ type ObjectivePreset = Literal[
     "maximize-population-coverage",
 ]
 type ProvenanceKind = Literal["historical", "exercise"]
+type StrictPositiveInt = Annotated[StrictInt, Field(gt=0, le=2**63 - 1)]
+type StrictNonNegativeInt = Annotated[StrictInt, Field(ge=0, le=2**63 - 1)]
 
 
 _OSM_RECORD_ID = re.compile(r"(?:node|way|relation)/[1-9][0-9]*$")
@@ -59,7 +61,7 @@ class ExerciseResource(ExerciseModel):
     resource_id: str = Field(min_length=1)
     resource_type: Literal["engine", "evacuation-bus", "medical-team", "road-crew"]
     capabilities: frozenset[str] = Field(min_length=1)
-    capacity: int = Field(gt=0)
+    capacity: StrictPositiveInt
     available: bool = True
     position: Point
     provenance: Literal["exercise"] = "exercise"
@@ -97,11 +99,11 @@ class ExerciseTask(ExerciseModel):
         "corridor-clearing",
     ]
     required_capability: str = Field(min_length=1)
-    required_capacity: int = Field(gt=0)
-    deadline_minutes: int = Field(gt=0)
-    affected_population: int = Field(ge=0)
+    required_capacity: StrictPositiveInt
+    deadline_minutes: StrictPositiveInt
+    affected_population: StrictNonNegativeInt
     critical_service: bool
-    base_priority: int = Field(ge=0)
+    base_priority: StrictNonNegativeInt
     provenance: Literal["exercise"] = "exercise"
 
 
@@ -157,11 +159,11 @@ class ExerciseCheckpoint(ExerciseModel):
 
 
 class ObjectiveWeights(ExerciseModel):
-    travel_weight: int = Field(ge=0)
-    base_priority_weight: int = Field(ge=0)
-    critical_service_weight: int = Field(ge=0)
-    population_divisor: int = Field(gt=0)
-    population_weight: int = Field(ge=0)
+    travel_weight: StrictNonNegativeInt
+    base_priority_weight: StrictNonNegativeInt
+    critical_service_weight: StrictNonNegativeInt
+    population_divisor: StrictPositiveInt
+    population_weight: StrictNonNegativeInt
 
 
 class SandboxControls(ExerciseModel):
