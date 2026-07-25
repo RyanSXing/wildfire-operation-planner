@@ -19,6 +19,7 @@ from wildfireops.application.exercises import (
     ExerciseVersionConflict,
     _copy_json_object,
     _event_inputs,
+    _json_for_storage,
     _require_definition,
     _session_from_state,
     _session_state,
@@ -66,6 +67,7 @@ class MaterializedCheckpoint:
     asset_sources: Mapping[str, Mapping[str, str]]
     wind: Mapping[str, float] | None
     source_versions: Mapping[str, object]
+    incidents: tuple[Mapping[str, object], ...]
 
 
 def uncovered_penalty(task: ExerciseTask, weights: ObjectiveWeights) -> int:
@@ -159,6 +161,24 @@ def materialize_checkpoint(
             "replayPackage": definition.replay_package_id,
             "historicalWeatherIdentity": checkpoint.historical_weather_identity,
         }),
+        incidents=tuple(
+            freeze_json_object(
+                {
+                    "incidentId": item.incident_key,
+                    "provenance": item.provenance,
+                    "detectionIdentities": list(item.detection_identities),
+                    "simulatedPosition": (
+                        None
+                        if item.simulated_position is None
+                        else [
+                            item.simulated_position.longitude,
+                            item.simulated_position.latitude,
+                        ]
+                    ),
+                }
+            )
+            for item in sorted(checkpoint.incidents, key=lambda item: item.incident_key)
+        ),
     )
 
 
@@ -240,6 +260,7 @@ def serialize_planning_input(
             )
         ],
         "sourceVersions": dict(checkpoint.source_versions),
+        "incidents": [dict(item) for item in checkpoint.incidents],
     }
 
 
@@ -375,7 +396,7 @@ class ExercisePlanningService:
             checkpoint.asset_positions,
             checkpoint.closed_edge_ids,
         )
-        payload = self._payload(checkpoint, routes)
+        payload = self._payload(checkpoint, routes, session.consequences)
         result = solve_task_plan(
             TaskOptimizationRequest(
                 checkpoint.resources,
@@ -475,7 +496,7 @@ class ExercisePlanningService:
             checkpoint.asset_positions,
             checkpoint.closed_edge_ids,
         )
-        base_payload = self._payload(checkpoint, routes)
+        base_payload = self._payload(checkpoint, routes, session.consequences)
         if (
             planning_input_hash(current.input_data) != current.input_hash
             or planning_input_hash(base_payload) != current.input_hash
@@ -483,7 +504,7 @@ class ExercisePlanningService:
         ):
             raise ExerciseVersionConflict("checkpoint planning input changed")
         locked = (LockedTaskAssignment(resource_id, task_id),)
-        payload = self._payload(checkpoint, routes, locked)
+        payload = self._payload(checkpoint, routes, session.consequences, locked)
         try:
             request = TaskOptimizationRequest(
                 checkpoint.resources,
@@ -520,6 +541,29 @@ class ExercisePlanningService:
             "taskId": task_id,
             "beforePlanId": str(current.id),
         }
+        explanation = cast(Mapping[str, object], output["explanation"])
+        changes = explanation["changes"]
+        assert isinstance(changes, list)
+        changes.extend(
+            [
+                {
+                    "code": "override.locked-assignment",
+                    "summary": "The operator locked the requested assignment.",
+                    "evidence": {"resourceId": resource_id, "taskId": task_id},
+                },
+                {
+                    "code": "operator.override-changed-plan",
+                    "summary": "The operator override changed the stored plan.",
+                    "evidence": {
+                        "resourceId": resource_id,
+                        "taskId": task_id,
+                        "beforePlanId": str(current.id),
+                        "before": current.output_data.get("objectiveComponents"),
+                        "after": output.get("objectiveComponents"),
+                    },
+                },
+            ]
+        )
         return await self._store_plan(
             session,
             claim.id,
@@ -546,6 +590,17 @@ class ExercisePlanningService:
         checkpoint_key: str,
         event_inputs: Mapping[str, object],
     ) -> tuple[ExercisePlanRun, dict[str, object]]:
+        output["versions"] = {
+            "inputHash": planning_input_hash(payload),
+            "exercise": self._definition.version,
+            "definitionDigest": self._definition_digest,
+            "graph": self._definition.graph_version,
+            "sources": payload["sourceVersions"],
+            "objective": payload["objective"],
+            "algorithm": payload["algorithm"],
+            "riskVersion": "not-applicable",
+            "riskReason": "task planning consumes no risk model",
+        }
         stored = await self._repository.store_plan(
             session_id=session.id,
             checkpoint_key=checkpoint_key,
@@ -597,6 +652,7 @@ class ExercisePlanningService:
         self,
         checkpoint: MaterializedCheckpoint,
         routes: tuple[TaskCandidateRoute, ...],
+        consequences: Mapping[str, object],
         locked: tuple[LockedTaskAssignment, ...] = (),
     ) -> dict[str, object]:
         payload = serialize_planning_input(checkpoint, routes, locked)
@@ -608,8 +664,10 @@ class ExercisePlanningService:
             ),
             "maxSolverSeconds": 2,
         }
-        payload["consequences"] = {}
-        return payload
+        payload["consequences"] = {
+            "corridorCleared": consequences.get("corridorCleared") is True
+        }
+        return cast(dict[str, object], _json_for_storage(payload))
 
     async def _replay(
         self, session_id: UUID, event: ExerciseEvent
@@ -634,8 +692,15 @@ class ExercisePlanningService:
         _require_definition(replay_session, self._definition, self._definition_digest)
         snapshot = event.inputs.get("_responseProjection")
         _validate_replay_snapshot(snapshot, replay_session, self._definition)
-        if not isinstance(snapshot, Mapping) or snapshot.get("latestPlan") != stored.output_data:
+        actionable = stored.output_data.get("status") in {"FEASIBLE", "OPTIMAL"}
+        if not isinstance(snapshot, Mapping) or (
+            actionable and snapshot.get("latestPlan") != stored.output_data
+        ):
             raise RuntimeError("exercise replay response is invalid")
+        if not actionable:
+            actions = snapshot.get("allowedActions")
+            if not isinstance(actions, tuple) or "generate-plan" not in actions:
+                raise RuntimeError("exercise replay response is invalid")
         return stored, _copy_json_object(snapshot)
 
 
