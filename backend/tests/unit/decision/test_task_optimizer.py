@@ -1,4 +1,5 @@
 from dataclasses import replace
+from math import inf, nan
 
 import pytest
 
@@ -359,6 +360,259 @@ def test_invalid_locked_assignment_fails_before_solving() -> None:
         match="locked assignment is not eligible: bus-1 -> medical-1",
     ):
         solve_task_plan(request)
+
+
+def test_conflicting_locked_assignments_for_one_resource_fail_before_solving() -> None:
+    request = TaskOptimizationRequest(
+        resources=(resource("engine-1"),),
+        tasks=(task("park-task"), task("spot-task")),
+        routes=(
+            candidate("engine-1", "park-task", 2),
+            candidate("engine-1", "spot-task", 3),
+        ),
+        locked_assignments=(
+            LockedTaskAssignment("engine-1", "park-task"),
+            LockedTaskAssignment("engine-1", "spot-task"),
+        ),
+        travel_weight=1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="conflicting locked assignments for resource: engine-1",
+    ):
+        solve_task_plan(request)
+
+
+def test_locked_task_with_insufficient_eligible_capacity_fails_before_solving() -> (
+    None
+):
+    request = TaskOptimizationRequest(
+        resources=(resource("engine-1"),),
+        tasks=(task("protect-1", capacity=2),),
+        routes=(candidate("engine-1", "protect-1", 2),),
+        locked_assignments=(LockedTaskAssignment("engine-1", "protect-1"),),
+        travel_weight=1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="locked task has insufficient eligible capacity: protect-1",
+    ):
+        solve_task_plan(request)
+
+
+def test_multiple_resources_may_be_locked_to_one_capacity_task() -> None:
+    result = solve_task_plan(
+        TaskOptimizationRequest(
+            resources=(resource("engine-a"), resource("engine-b")),
+            tasks=(task("protect-1", capacity=2),),
+            routes=(
+                candidate("engine-a", "protect-1", 2),
+                candidate("engine-b", "protect-1", 3),
+            ),
+            locked_assignments=(
+                LockedTaskAssignment("engine-a", "protect-1"),
+                LockedTaskAssignment("engine-b", "protect-1"),
+            ),
+            travel_weight=1,
+        )
+    )
+
+    assert result.status == "OPTIMAL"
+    assert result.uncovered_task_ids == ()
+    assert [(item.resource_id, item.task_id) for item in result.assignments] == [
+        ("engine-a", "protect-1"),
+        ("engine-b", "protect-1"),
+    ]
+
+
+def test_duplicate_locked_assignment_fails_before_solving() -> None:
+    request = TaskOptimizationRequest(
+        resources=(resource("engine-1"),),
+        tasks=(task("protect-1"),),
+        routes=(candidate("engine-1", "protect-1", 2),),
+        locked_assignments=(
+            LockedTaskAssignment("engine-1", "protect-1"),
+            LockedTaskAssignment("engine-1", "protect-1"),
+        ),
+        travel_weight=1,
+    )
+
+    with pytest.raises(ValueError, match="duplicate locked assignment"):
+        solve_task_plan(request)
+
+
+@pytest.mark.parametrize(
+    ("required_capacity", "deadline_minutes", "uncovered_penalty", "message"),
+    (
+        (True, 30, 200, "required_capacity must be a positive integer"),
+        (1.5, 30, 200, "required_capacity must be a positive integer"),
+        (nan, 30, 200, "required_capacity must be a positive integer"),
+        (inf, 30, 200, "required_capacity must be a positive integer"),
+        (-1, 30, 200, "required_capacity must be a positive integer"),
+        (1, False, 200, "deadline_minutes must be a positive integer"),
+        (1, 1.5, 200, "deadline_minutes must be a positive integer"),
+        (1, nan, 200, "deadline_minutes must be a positive integer"),
+        (1, inf, 200, "deadline_minutes must be a positive integer"),
+        (1, -1, 200, "deadline_minutes must be a positive integer"),
+        (1, 30, True, "uncovered_penalty must be a nonnegative integer"),
+        (1, 30, 1.5, "uncovered_penalty must be a nonnegative integer"),
+        (1, 30, nan, "uncovered_penalty must be a nonnegative integer"),
+        (1, 30, inf, "uncovered_penalty must be a nonnegative integer"),
+        (1, 30, -1, "uncovered_penalty must be a nonnegative integer"),
+    ),
+)
+def test_task_demand_rejects_noninteger_numeric_values(
+    required_capacity: object,
+    deadline_minutes: object,
+    uncovered_penalty: object,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        TaskDemand(
+            "protect-1",
+            "park-fire",
+            "asset-a",
+            "protect",
+            required_capacity,  # type: ignore[arg-type]
+            deadline_minutes,  # type: ignore[arg-type]
+            uncovered_penalty,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize("value", (True, 1.5, nan, inf, -1))
+def test_request_rejects_invalid_travel_weight(value: object) -> None:
+    request = TaskOptimizationRequest((), (), (), (), value)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="travel_weight must be a nonnegative integer"):
+        solve_task_plan(request)
+
+
+@pytest.mark.parametrize("value", (True, 1.5))
+def test_request_rejects_invalid_resource_capacity(value: object) -> None:
+    request = TaskOptimizationRequest(
+        (resource("engine-1", capacity=value),),  # type: ignore[arg-type]
+        (),
+        (),
+        (),
+        1,
+    )
+
+    with pytest.raises(ValueError, match="resource capacity must be a positive integer"):
+        solve_task_plan(request)
+
+
+@pytest.mark.parametrize("value", (True, nan, inf, 0, -1))
+def test_request_rejects_invalid_solver_wall_seconds(value: object) -> None:
+    request = TaskOptimizationRequest((), (), (), (), 1, value)  # type: ignore[arg-type]
+
+    with pytest.raises(
+        ValueError,
+        match="max_solver_seconds must be finite and positive",
+    ):
+        solve_task_plan(request)
+
+
+@pytest.mark.parametrize("minutes", (nan, inf, -1, False))
+def test_reachable_route_rejects_invalid_travel_minutes(minutes: object) -> None:
+    request = TaskOptimizationRequest(
+        (resource("engine-1"),),
+        (task("protect-1"),),
+        (candidate("engine-1", "protect-1", minutes),),  # type: ignore[arg-type]
+        (),
+        1,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="route travel_minutes must be finite and nonnegative",
+    ):
+        solve_task_plan(request)
+
+
+def test_unreachable_route_accepts_infinite_travel_sentinel() -> None:
+    result = solve_task_plan(
+        TaskOptimizationRequest(
+            (resource("engine-1"),),
+            (task("protect-1"),),
+            (candidate("engine-1", "protect-1", inf, RouteStatus.UNREACHABLE),),
+            (),
+            1,
+        )
+    )
+
+    assert result.status == "OPTIMAL"
+    assert result.assignments == ()
+
+
+def test_solver_cutoff_status_is_normalized_without_reading_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Parameters:
+        pass
+
+    class CutoffSolver:
+        def __init__(self) -> None:
+            self.parameters = Parameters()
+            self.wall_time = 0.0
+
+        def solve(self, model: object) -> object:
+            return model
+
+        def status_name(self, status: object) -> str:
+            return "FEASIBLE"
+
+        def value(self, variable: object) -> int:
+            raise AssertionError(f"value read for cutoff variable {variable}")
+
+    monkeypatch.setattr(task_optimizer_module.cp_model, "CpSolver", CutoffSolver)
+    result = solve_task_plan(
+        TaskOptimizationRequest(
+            (resource("engine-1"),),
+            (task("protect-1"),),
+            (candidate("engine-1", "protect-1", 2),),
+            (),
+            1,
+        )
+    )
+
+    assert result.status == "UNKNOWN"
+    assert result.assignments == ()
+    assert result.uncovered_task_ids == ("protect-1",)
+    assert result.binding_constraints == (
+        "solver-status: task=protect-1; status=UNKNOWN produced no solution",
+    )
+
+
+def test_solver_uses_fixed_deterministic_search_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Parameters:
+        pass
+
+    class UnknownSolver:
+        instance: "UnknownSolver"
+
+        def __init__(self) -> None:
+            self.parameters = Parameters()
+            self.wall_time = 0.0
+            type(self).instance = self
+
+        def solve(self, model: object) -> object:
+            return model
+
+        def status_name(self, status: object) -> str:
+            return "UNKNOWN"
+
+        def value(self, variable: object) -> int:
+            raise AssertionError(f"value read for non-solution variable {variable}")
+
+    monkeypatch.setattr(task_optimizer_module.cp_model, "CpSolver", UnknownSolver)
+    solve_task_plan(TaskOptimizationRequest((), (), (), (), 1, 2))
+
+    assert UnknownSolver.instance.parameters.max_deterministic_time == 1.0
+    assert UnknownSolver.instance.parameters.max_time_in_seconds == 2
 
 
 def test_unknown_solver_status_does_not_read_variable_values(

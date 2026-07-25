@@ -11,7 +11,9 @@ from wildfireops.geospatial.road_graph import RouteResult, RouteStatus
 
 
 TASK_ALGORITHM_VERSION = "task-allocation-v1"
-_SOLUTION_STATUSES = frozenset({"FEASIBLE", "OPTIMAL"})
+_DETERMINISTIC_SEARCH_BUDGET = 1.0
+_SOLUTION_STATUSES = frozenset({"OPTIMAL"})
+_PUBLIC_STATUSES = frozenset({"INFEASIBLE", "OPTIMAL"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,12 +35,24 @@ class TaskDemand:
         ):
             if not value.strip():
                 raise ValueError(f"{field} must not be blank")
-        if self.required_capacity <= 0:
-            raise ValueError("required_capacity must be positive")
-        if self.deadline_minutes <= 0:
-            raise ValueError("deadline_minutes must be positive")
-        if self.uncovered_penalty < 0:
-            raise ValueError("uncovered_penalty must be nonnegative")
+        if (
+            isinstance(self.required_capacity, bool)
+            or not isinstance(self.required_capacity, int)
+            or self.required_capacity <= 0
+        ):
+            raise ValueError("required_capacity must be a positive integer")
+        if (
+            isinstance(self.deadline_minutes, bool)
+            or not isinstance(self.deadline_minutes, int)
+            or self.deadline_minutes <= 0
+        ):
+            raise ValueError("deadline_minutes must be a positive integer")
+        if (
+            isinstance(self.uncovered_penalty, bool)
+            or not isinstance(self.uncovered_penalty, int)
+            or self.uncovered_penalty < 0
+        ):
+            raise ValueError("uncovered_penalty must be a nonnegative integer")
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +116,7 @@ def solve_task_plan(request: TaskOptimizationRequest) -> TaskOptimizationResult:
             route.route,
         )
     }
+    _validate_locked_assignments(locks, tasks_by_id, eligible, resources_by_id)
     model = cp_model.CpModel()
     assigned = {
         pair: model.new_bool_var(f"assigned[{pair[0]},{pair[1]}]")
@@ -137,13 +152,7 @@ def solve_task_plan(request: TaskOptimizationRequest) -> TaskOptimizationResult:
                 <= len(capacity) * covered[task.task_id]
             )
     for lock in locks:
-        variable = assigned.get((lock.resource_id, lock.task_id))
-        if variable is None:
-            raise ValueError(
-                f"locked assignment is not eligible: "
-                f"{lock.resource_id} -> {lock.task_id}"
-            )
-        model.add(variable == 1)
+        model.add(assigned[(lock.resource_id, lock.task_id)] == 1)
     travel_costs = {
         pair: request.travel_weight * ceil(route.route.travel_minutes)
         for pair, route in eligible.items()
@@ -156,10 +165,12 @@ def solve_task_plan(request: TaskOptimizationRequest) -> TaskOptimizationResult:
         )
     )
     solver = cp_model.CpSolver()
+    solver.parameters.max_deterministic_time = _DETERMINISTIC_SEARCH_BUDGET
     solver.parameters.max_time_in_seconds = request.max_solver_seconds
     solver.parameters.num_search_workers = 1
     solver.parameters.random_seed = 0
-    status = solver.status_name(solver.solve(model))
+    raw_status = solver.status_name(solver.solve(model))
+    status = raw_status if raw_status in _PUBLIC_STATUSES else "UNKNOWN"
     selected = (
         tuple(pair for pair, variable in assigned.items() if solver.value(variable))
         if status in _SOLUTION_STATUSES
@@ -191,11 +202,7 @@ def solve_task_plan(request: TaskOptimizationRequest) -> TaskOptimizationResult:
         tasks_by_id[task_id].uncovered_penalty for task_id in uncovered
     )
     return TaskOptimizationResult(
-        status=(
-            status
-            if status in {*_SOLUTION_STATUSES, "INFEASIBLE", "UNKNOWN"}
-            else "UNKNOWN"
-        ),
+        status=status,
         assignments=assignments,
         uncovered_task_ids=uncovered,
         unassigned_resource_ids=tuple(
@@ -228,9 +235,18 @@ def _canonicalize(
     tuple[TaskCandidateRoute, ...],
     tuple[LockedTaskAssignment, ...],
 ]:
-    if request.travel_weight < 0:
-        raise ValueError("travel_weight must be nonnegative")
-    if not isfinite(request.max_solver_seconds) or request.max_solver_seconds <= 0:
+    if (
+        isinstance(request.travel_weight, bool)
+        or not isinstance(request.travel_weight, int)
+        or request.travel_weight < 0
+    ):
+        raise ValueError("travel_weight must be a nonnegative integer")
+    if (
+        isinstance(request.max_solver_seconds, bool)
+        or not isinstance(request.max_solver_seconds, int | float)
+        or not isfinite(request.max_solver_seconds)
+        or request.max_solver_seconds <= 0
+    ):
         raise ValueError("max_solver_seconds must be finite and positive")
     resources = tuple(sorted(request.resources, key=lambda item: item.resource_id))
     tasks = tuple(sorted(request.tasks, key=lambda item: item.task_id))
@@ -255,17 +271,63 @@ def _canonicalize(
     )
     resource_ids = {item.resource_id for item in resources}
     task_ids = {item.task_id for item in tasks}
+    for resource in resources:
+        if (
+            isinstance(resource.capacity, bool)
+            or not isinstance(resource.capacity, int)
+            or resource.capacity <= 0
+        ):
+            raise ValueError("resource capacity must be a positive integer")
     for route in routes:
         if route.resource_id not in resource_ids:
             raise ValueError(f"unknown route resource: {route.resource_id}")
         if route.task_id not in task_ids:
             raise ValueError(f"unknown route task: {route.task_id}")
+        if route.route.status is RouteStatus.REACHABLE and (
+            isinstance(route.route.travel_minutes, bool)
+            or not isinstance(route.route.travel_minutes, int | float)
+            or not isfinite(route.route.travel_minutes)
+            or route.route.travel_minutes < 0
+        ):
+            raise ValueError("route travel_minutes must be finite and nonnegative")
     for lock in locks:
         if lock.resource_id not in resource_ids or lock.task_id not in task_ids:
             raise ValueError(
                 f"unknown locked assignment: {lock.resource_id} -> {lock.task_id}"
             )
     return resources, tasks, routes, locks
+
+
+def _validate_locked_assignments(
+    locks: tuple[LockedTaskAssignment, ...],
+    tasks: dict[str, TaskDemand],
+    eligible: dict[tuple[str, str], TaskCandidateRoute],
+    resources: dict[str, ResourceUnit],
+) -> None:
+    locked_resources: set[str] = set()
+    locked_task_ids: set[str] = set()
+    for lock in locks:
+        if lock.resource_id in locked_resources:
+            raise ValueError(
+                f"conflicting locked assignments for resource: {lock.resource_id}"
+            )
+        locked_resources.add(lock.resource_id)
+        if (lock.resource_id, lock.task_id) not in eligible:
+            raise ValueError(
+                f"locked assignment is not eligible: "
+                f"{lock.resource_id} -> {lock.task_id}"
+            )
+        locked_task_ids.add(lock.task_id)
+    for task_id in sorted(locked_task_ids):
+        eligible_capacity = sum(
+            resources[resource_id].capacity
+            for resource_id, candidate_task_id in eligible
+            if candidate_task_id == task_id
+        )
+        if eligible_capacity < tasks[task_id].required_capacity:
+            raise ValueError(
+                f"locked task has insufficient eligible capacity: {task_id}"
+            )
 
 
 def _eligible(
