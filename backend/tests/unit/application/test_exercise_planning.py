@@ -316,6 +316,9 @@ class FakeExerciseRepository:
             None,
         )
 
+    async def list_plans(self, session_id: UUID) -> tuple[ExercisePlanRun, ...]:
+        return tuple(plan for plan in self.plans if plan.session_id == session_id)
+
     async def get_event(self, session_id: UUID, event_id: UUID) -> ExerciseEvent | None:
         return next(
             (
@@ -578,3 +581,24 @@ async def test_override_recalculates_uncovered_tasks_and_objective() -> None:
     assert components["objectiveValue"] == (
         components["travelCost"] + components["uncoveredTaskPenalty"]
     )
+
+
+@pytest.mark.asyncio
+async def test_generate_rejects_checkpoint_three_after_override() -> None:
+    repository = FakeExerciseRepository()
+    service, _ = planning_service(repository)
+    current = session(repository, checkpoint_index=2, consequences={"corridorCleared": True})
+    await service.generate_plan(current.id, expected_version=1, idempotency_key="plan")
+    await service.apply_override(
+        current.id,
+        resource_id="bus-1",
+        task_id="shelter-capacity-transport",
+        expected_version=2,
+        idempotency_key="override",
+    )
+
+    with pytest.raises(
+        ExerciseTransitionInvalid,
+        match="checkpoint-three override is already applied",
+    ):
+        await service.generate_plan(current.id, expected_version=3, idempotency_key="retry")

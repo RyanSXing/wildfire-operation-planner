@@ -249,6 +249,14 @@ def _validate_replay_snapshot(
     latest_plan = snapshot["latestPlan"]
     if latest_plan is not None and not isinstance(latest_plan, MappingProxyType):
         raise RuntimeError("exercise replay response is invalid")
+    try:
+        snapshot_session = _session_from_state(
+            {key: snapshot.get(key) for key in _STATE_KEYS}
+        )
+    except RuntimeError as error:
+        raise RuntimeError("exercise replay response is invalid") from error
+    if _session_state(snapshot_session) != _session_state(session):
+        raise RuntimeError("exercise replay response is invalid")
 
 
 def _allowed_action_options(session: ExerciseSession) -> frozenset[tuple[str, ...]]:
@@ -538,11 +546,6 @@ class ExerciseSessionService:
         snapshot = event.inputs.get(_RESPONSE_SNAPSHOT)
         _validate_replay_snapshot(snapshot, session, self._definition)
         assert isinstance(snapshot, Mapping)
-        snapshot_session = _session_from_state(
-            {key: snapshot.get(key) for key in _STATE_KEYS}
-        )
-        if _session_state(snapshot_session) != _session_state(session):
-            raise RuntimeError("exercise replay response is invalid")
         session.response_projection = freeze_json_object(snapshot)
         return session
 
@@ -873,14 +876,23 @@ async def session_projection(
     )
     if projected.status == "active" and now >= projected.expires_at:
         projected.status = "expired"
-    latest = await repository.latest_plan_for_session(projected.id)
+    plans = await repository.list_plans(projected.id)
+    latest = plans[-1] if plans else None
+    latest_valid = next(
+        (
+            item
+            for item in reversed(plans)
+            if item.output_data.get("status") in {"FEASIBLE", "OPTIMAL"}
+        ),
+        None,
+    )
     return {
         **_session_state(projected),
         "allowedActions": _allowed_actions(projected, latest),
         "currentCheckpoint": definition.checkpoints[
             projected.checkpoint_index
         ].model_dump(mode="json", by_alias=True),
-        "latestPlan": None if latest is None else dict(latest.output_data),
+        "latestPlan": None if latest_valid is None else dict(latest_valid.output_data),
     }
 
 
@@ -917,6 +929,7 @@ def _allowed_actions(
         latest is None
         or latest.checkpoint_key != "field-report"
         or latest.input_data.get("objective") != session.objective
+        or latest.output_data.get("status") not in {"FEASIBLE", "OPTIMAL"}
     ):
         return ("select-objective", "generate-plan")
     return (

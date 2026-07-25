@@ -1,7 +1,7 @@
 """Deterministic, session-scoped exercise plan materialization."""
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 import json
@@ -64,7 +64,7 @@ class MaterializedCheckpoint:
     closed_edge_ids: tuple[str, ...]
     asset_positions: Mapping[str, tuple[float, float]]
     asset_sources: Mapping[str, Mapping[str, str]]
-    wind: dict[str, float] | None
+    wind: Mapping[str, float] | None
     source_versions: Mapping[str, object]
 
 
@@ -80,7 +80,10 @@ def uncovered_penalty(task: ExerciseTask, weights: ObjectiveWeights) -> int:
 def planning_input_hash(payload: Mapping[str, object]) -> str:
     return sha256(
         json.dumps(
-            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+            _copy_json_object(payload),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
         ).encode()
     ).hexdigest()
 
@@ -128,11 +131,11 @@ def materialize_checkpoint(
             for item in sorted(definition.resources, key=lambda item: item.resource_id)
         ),
         closed_edge_ids=tuple(sorted(closed)),
-        asset_positions={
+        asset_positions=cast(Mapping[str, tuple[float, float]], freeze_json_object({
             asset_id: (assets[asset_id].position.longitude, assets[asset_id].position.latitude)
             for asset_id in sorted(task_assets)
-        },
-        asset_sources={
+        })),
+        asset_sources=cast(Mapping[str, Mapping[str, str]], freeze_json_object({
             asset_id: {
                 "sourceName": assets[asset_id].source_name,
                 "sourceVersion": assets[asset_id].source_version,
@@ -141,21 +144,21 @@ def materialize_checkpoint(
                 "provenance": assets[asset_id].provenance,
             }
             for asset_id in sorted(task_assets)
-        },
+        })),
         wind=(
             None
             if checkpoint.disruption is None
-            else {
+            else cast(Mapping[str, float], freeze_json_object({
                 "speedMps": checkpoint.disruption.wind_speed_mps,
                 "directionDegrees": checkpoint.disruption.wind_direction_degrees,
-            }
+            }))
         ),
-        source_versions={
+        source_versions=freeze_json_object({
             "exercise": definition.version,
             "graph": definition.graph_version,
             "replayPackage": definition.replay_package_id,
             "historicalWeatherIdentity": checkpoint.historical_weather_identity,
-        },
+        }),
     )
 
 
@@ -243,8 +246,15 @@ def serialize_planning_input(
 def serialize_task_result(
     result: TaskOptimizationResult,
     routes: tuple[TaskCandidateRoute, ...],
+    checkpoint: MaterializedCheckpoint,
 ) -> dict[str, object]:
     route_by_pair = {(item.resource_id, item.task_id): item.route for item in routes}
+    resources = {item.resource_id: item for item in checkpoint.resources}
+    tasks = {item.task_id: item for item in checkpoint.tasks}
+    supplied = {
+        task_id: sum(item.capacity for item in result.assignments if item.task_id == task_id)
+        for task_id in tasks
+    }
     return {
         "status": result.status,
         "assignments": [
@@ -260,6 +270,38 @@ def serialize_task_result(
             for item in result.assignments
         ],
         "uncoveredTaskIds": list(result.uncovered_task_ids),
+        "coveredTaskIds": [
+            task_id for task_id in tasks if task_id not in result.uncovered_task_ids
+        ],
+        "taskCoverage": [
+            {
+                "taskId": task_id,
+                "requiredCapacity": task.required_capacity,
+                "suppliedCapacity": supplied[task_id],
+                "covered": task_id not in result.uncovered_task_ids,
+            }
+            for task_id, task in tasks.items()
+        ],
+        "candidateFacts": [
+            {
+                "resourceId": route.resource_id,
+                "taskId": route.task_id,
+                "available": resources[route.resource_id].available,
+                "capabilityCompatible": tasks[route.task_id].required_capability
+                in resources[route.resource_id].capabilities,
+                "routeReachable": route.route.status is RouteStatus.REACHABLE,
+                "travelMinutes": route.route.travel_minutes,
+                "deadlineMinutes": tasks[route.task_id].deadline_minutes,
+                "eligible": (
+                    resources[route.resource_id].available
+                    and tasks[route.task_id].required_capability
+                    in resources[route.resource_id].capabilities
+                    and route.route.status is RouteStatus.REACHABLE
+                    and route.route.travel_minutes <= tasks[route.task_id].deadline_minutes
+                ),
+            }
+            for route in routes
+        ],
         "unassignedResourceIds": list(result.unassigned_resource_ids),
         "objectiveComponents": {
             "travelCost": result.travel_cost,
@@ -316,6 +358,10 @@ class ExercisePlanningService:
             return await self._replay(session_id, replayed)
         if session.objective is None:
             raise ExerciseTransitionInvalid("select an objective before planning")
+        if session.checkpoint_index == 2:
+            latest = await self._repository.latest_plan(session.id, "field-report")
+            if latest is not None and latest.output_data.get("operatorOverride"):
+                raise ExerciseTransitionInvalid("checkpoint-three override is already applied")
         checkpoint = materialize_checkpoint(
             self._definition,
             checkpoint_index=session.checkpoint_index,
@@ -329,7 +375,7 @@ class ExercisePlanningService:
             checkpoint.asset_positions,
             checkpoint.closed_edge_ids,
         )
-        payload = serialize_planning_input(checkpoint, routes)
+        payload = self._payload(checkpoint, routes)
         result = solve_task_plan(
             TaskOptimizationRequest(
                 checkpoint.resources,
@@ -341,7 +387,7 @@ class ExercisePlanningService:
             )
         )
         previous = await self._repository.latest_plan_for_session(session.id)
-        output = serialize_task_result(result, routes)
+        output = serialize_task_result(result, routes, checkpoint)
         output["explanation"] = serialize_task_explanation(
             explain_task_plan(
                 None
@@ -429,18 +475,23 @@ class ExercisePlanningService:
             checkpoint.asset_positions,
             checkpoint.closed_edge_ids,
         )
-        base_payload = serialize_planning_input(checkpoint, routes)
-        if planning_input_hash(base_payload) != current.input_hash:
+        base_payload = self._payload(checkpoint, routes)
+        if (
+            planning_input_hash(current.input_data) != current.input_hash
+            or planning_input_hash(base_payload) != current.input_hash
+            or current.input_data != freeze_json_object(base_payload)
+        ):
             raise ExerciseVersionConflict("checkpoint planning input changed")
         locked = (LockedTaskAssignment(resource_id, task_id),)
-        payload = serialize_planning_input(checkpoint, routes, locked)
+        payload = self._payload(checkpoint, routes, locked)
         try:
-            request = replace(
-                _request_from_input(
-                    current.input_data,
-                    self._definition.objectives[session.objective].travel_weight,
-                ),
-                locked_assignments=locked,
+            request = TaskOptimizationRequest(
+                checkpoint.resources,
+                checkpoint.tasks,
+                routes,
+                locked,
+                self._definition.objectives[session.objective].travel_weight,
+                max_solver_seconds=2,
             )
             result = solve_task_plan(request)
         except ValueError as error:
@@ -454,7 +505,7 @@ class ExercisePlanningService:
             raise ExerciseCommandInvalid(
                 "override fails capability, capacity, route, deadline, or uniqueness"
             )
-        output = serialize_task_result(result, routes)
+        output = serialize_task_result(result, routes, checkpoint)
         output["explanation"] = serialize_task_explanation(
             explain_task_plan(
                 {
@@ -541,6 +592,24 @@ class ExercisePlanningService:
             raise RuntimeError("exercise planning response snapshot is invalid")
         session.response_projection = freeze_json_object(snapshot)
         return stored, _copy_json_object(snapshot)
+
+    def _payload(
+        self,
+        checkpoint: MaterializedCheckpoint,
+        routes: tuple[TaskCandidateRoute, ...],
+        locked: tuple[LockedTaskAssignment, ...] = (),
+    ) -> dict[str, object]:
+        payload = serialize_planning_input(checkpoint, routes, locked)
+        payload["definitionDigest"] = self._definition_digest
+        payload["algorithm"] = {
+            "taskAlgorithm": TASK_ALGORITHM_VERSION,
+            "objectiveWeights": self._definition.objectives[checkpoint.objective].model_dump(
+                mode="json", by_alias=True
+            ),
+            "maxSolverSeconds": 2,
+        }
+        payload["consequences"] = {}
+        return payload
 
     async def _replay(
         self, session_id: UUID, event: ExerciseEvent
