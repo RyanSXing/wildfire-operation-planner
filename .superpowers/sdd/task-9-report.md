@@ -88,3 +88,7 @@ Follow-up verification:
 ruff: All checks passed
 mypy: Success: no issues found in 5 source files
 ```
+
+The final committed-fixture edge-case group expanded focused coverage to 94
+passing tests, including `UNKNOWN`, definition mismatch, and strict version
+coercion without database mutation.
