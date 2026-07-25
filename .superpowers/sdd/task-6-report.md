@@ -92,3 +92,12 @@ uv run pytest tests/architecture -q
 designated PostGIS persistence: 16 passed
 ruff + mypy: passed
 ```
+
+## JSONB/replay follow-up
+
+- Persisted planning payloads now thaw frozen evidence to plain JSON containers.
+- Failed planning retries replay their attempted plan while retaining the prior
+  actionable projection; inputs include incident provenance and the bounded
+  `corridorCleared` consequence.
+- Full unit (701), architecture (3), and designated PostGIS persistence (16)
+  checks passed again.
