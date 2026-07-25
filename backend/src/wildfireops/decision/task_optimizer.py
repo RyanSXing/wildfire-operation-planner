@@ -2,7 +2,6 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from functools import cache
 from math import ceil, isfinite
 
 from ortools.sat.python import cp_model
@@ -367,30 +366,24 @@ def _validate_locked_assignments(
                 f"locked task has insufficient eligible capacity: {task_id}"
             )
 
-    @cache
-    def can_complete(
-        index: int,
-        remaining: tuple[int, ...],
-    ) -> bool:
-        if not any(remaining):
-            return True
-        if index == len(free_resources):
-            return False
-        if can_complete(index + 1, remaining):
-            return True
-        resource_id = free_resources[index]
-        for task_index, task_id in enumerate(task_ids):
-            if remaining[task_index] and (resource_id, task_id) in eligible:
-                updated = list(remaining)
-                updated[task_index] = max(
-                    0,
-                    updated[task_index] - resources[resource_id].capacity,
-                )
-                if can_complete(index + 1, tuple(updated)):
-                    return True
-        return False
+    complete = (0,) * len(task_ids)
+    states = {deficits}
+    for resource_id in free_resources:
+        next_states = set(states)
+        for remaining in sorted(states):
+            for task_index, task_id in enumerate(task_ids):
+                if remaining[task_index] and (resource_id, task_id) in eligible:
+                    updated = list(remaining)
+                    updated[task_index] = max(
+                        0,
+                        updated[task_index] - resources[resource_id].capacity,
+                    )
+                    next_states.add(tuple(updated))
+        states = next_states
+        if complete in states:
+            return
 
-    if not can_complete(0, deficits):
+    if complete not in states:
         raise ValueError("locked assignments cannot jointly satisfy required capacity")
 
 

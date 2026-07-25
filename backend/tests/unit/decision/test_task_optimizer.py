@@ -467,6 +467,31 @@ def test_locked_tasks_can_use_overlapping_free_resources_when_jointly_feasible()
     }
 
 
+def test_locked_task_feasibility_handles_more_than_python_recursion_depth() -> None:
+    free_resources = tuple(resource(f"free-{index:04d}") for index in range(1_101))
+    resources = (resource("locked"), *free_resources)
+    routes = (
+        candidate("locked", "task-a", 1),
+        *(
+            candidate(item.resource_id, "task-a", 1) for item in free_resources
+        ),
+    )
+
+    result = solve_task_plan(
+        TaskOptimizationRequest(
+            resources=resources,
+            tasks=(task("task-a", capacity=2),),
+            routes=routes,
+            locked_assignments=(LockedTaskAssignment("locked", "task-a"),),
+            travel_weight=1,
+        )
+    )
+
+    assert result.status == "OPTIMAL"
+    assert result.uncovered_task_ids == ()
+    assert any(item.resource_id == "locked" for item in result.assignments)
+
+
 def test_multiple_resources_may_be_locked_to_one_capacity_task() -> None:
     result = solve_task_plan(
         TaskOptimizationRequest(
