@@ -20,6 +20,7 @@ from wildfireops.api.routes.scenarios import router as scenarios_router
 from wildfireops.api.routes.sources import router as sources_router
 from wildfireops.config import Settings, get_settings
 from wildfireops.application.commands import CommandServiceProvider
+from wildfireops.application.exercise_planning import validate_exercise_runtime
 from wildfireops.db import (
     create_engine,
     create_read_service_provider,
@@ -57,6 +58,8 @@ def create_app(
                 )
             graphs[graph.graph_version] = graph
         exercise_definition = load_exercise_definition(loader)
+        if exercise_definition is not None:
+            validate_exercise_runtime(exercise_definition, graph)
     engine = create_engine(resolved)
 
     @asynccontextmanager

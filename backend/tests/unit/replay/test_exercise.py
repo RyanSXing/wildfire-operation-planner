@@ -268,8 +268,8 @@ def test_definition_rejects_invalid_static_asset_reference(
     ("mutation", "message"),
     [
         (
-            lambda body: _external_asset(body).update(sourceName="OpenStreetMap"),
-            "sourceName must be openstreetmap",
+            lambda body: _external_asset(body).update(sourceName="openstreetmap"),
+            "sourceName must be OpenStreetMap",
         ),
         (
             lambda body: _external_asset(body).update(sourceRecordId="node:1"),
@@ -477,7 +477,7 @@ def _replace_asset_with_external(body: dict[str, Any]) -> None:
         "assetKind": "hospital",
         "name": "Enloe Medical Center",
         "position": {"longitude": -121.8504052, "latitude": 39.7423938},
-        "sourceName": "openstreetmap",
+        "sourceName": "OpenStreetMap",
         "sourceVersion": "2026-07-23T12:45:22Z",
         "sourceRecordId": "way/546946902",
         "citationUrl": "https://www.openstreetmap.org/way/546946902",

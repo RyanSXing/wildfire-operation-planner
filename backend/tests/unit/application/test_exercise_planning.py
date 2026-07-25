@@ -19,8 +19,8 @@ from wildfireops.decision.task_optimizer import (
 )
 from wildfireops.domain.observations import freeze_json_object
 from wildfireops.domain.scenario_versions import IdempotencyClaim
-from wildfireops.geospatial.road_graph import RoadGraph
-from wildfireops.replay.exercise import ExerciseDefinition
+from wildfireops.geospatial.road_graph import RoadGraph, RoadGraphInvalid
+from wildfireops.replay.exercise import ExerciseDefinition, _canonicalize
 
 
 NOW = datetime(2026, 7, 24, 12, tzinfo=UTC)
@@ -766,3 +766,68 @@ async def test_generate_rejects_checkpoint_three_after_override() -> None:
         match="checkpoint-three override is already applied",
     ):
         await service.generate_plan(current.id, expected_version=3, idempotency_key="retry")
+
+
+def test_runtime_validation_accepts_the_curated_definition() -> None:
+    from wildfireops.application.exercise_planning import validate_exercise_runtime
+
+    validate_exercise_runtime(_runtime_definition(), graph())
+
+
+def test_runtime_validation_rejects_unknown_closure_edge() -> None:
+    from wildfireops.application.exercise_planning import (
+        ExerciseRuntimeInvalid,
+        validate_exercise_runtime,
+    )
+
+    payload = _definition_payload()
+    payload["checkpoints"][1]["disruption"]["closedEdgeIds"] = ["unknown-edge"]
+
+    with pytest.raises(ExerciseRuntimeInvalid, match="unknown closure edge: unknown-edge"):
+        validate_exercise_runtime(ExerciseDefinition.model_validate(payload), graph())
+
+
+def test_runtime_validation_rejects_an_unsnappable_asset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wildfireops.application import exercise_planning
+
+    def unsnappable(*_args: object) -> object:
+        raise RoadGraphInvalid("road graph has no finite coordinate nodes")
+
+    monkeypatch.setattr(exercise_planning, "nearest_road_node", unsnappable)
+
+    with pytest.raises(
+        exercise_planning.ExerciseRuntimeInvalid,
+        match="cannot snap asset: park-asset",
+    ):
+        exercise_planning.validate_exercise_runtime(_runtime_definition(), graph())
+
+
+def test_runtime_validation_rejects_an_infeasible_shelter_override() -> None:
+    from wildfireops.application.exercise_planning import (
+        ExerciseRuntimeInvalid,
+        validate_exercise_runtime,
+    )
+
+    payload = _canonicalize(_runtime_definition())
+    assert isinstance(payload, dict)
+    payload["resources"][1]["capabilities"] = ["not-transport"]
+
+    with pytest.raises(
+        ExerciseRuntimeInvalid,
+        match="shelter override is unavailable: fastest-response, corridorCleared=False",
+    ):
+        validate_exercise_runtime(ExerciseDefinition.model_validate(payload), graph())
+
+
+def _runtime_definition() -> ExerciseDefinition:
+    payload = _definition_payload()
+    payload["checkpoints"][2]["disruption"]["closedEdgeIds"] = []
+    return ExerciseDefinition.model_validate(payload)
+
+
+def _definition_payload() -> dict[str, object]:
+    payload = _canonicalize(definition())
+    assert isinstance(payload, dict)
+    return payload

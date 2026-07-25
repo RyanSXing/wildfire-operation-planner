@@ -116,6 +116,7 @@ def test_committed_park_fire_exercise_is_complete() -> None:
         "medical-team",
         "road-crew",
     }
+    assert sum(item.resource_type == "road-crew" for item in definition.resources) == 1
     assert all(item.provenance == "exercise" for item in definition.resources)
     assert any(
         incident.provenance == "exercise"

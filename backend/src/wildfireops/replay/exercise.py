@@ -385,12 +385,12 @@ def _validate_asset_reference(
     asset: ExerciseAsset,
     loader: ReplayLoader,
 ) -> None:
-    if asset.source_name == "openstreetmap" or _OSM_RECORD_ID.fullmatch(
+    if asset.source_name == "OpenStreetMap" or _OSM_RECORD_ID.fullmatch(
         asset.source_record_id
     ):
-        if asset.source_name != "openstreetmap":
+        if asset.source_name != "OpenStreetMap":
             raise ReplayPackageCorrupt(
-                "exercise.json: external asset sourceName must be openstreetmap: "
+                "exercise.json: external asset sourceName must be OpenStreetMap: "
                 f"{asset.asset_id}"
             )
         _validate_openstreetmap_asset(asset)

@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from wildfireops.application.commands import CommandServiceProvider
 from wildfireops.config import Settings
 from wildfireops.db import create_engine, create_session_factory
 from wildfireops.geospatial.clustering import ClusteringConfig
@@ -61,6 +62,14 @@ async def exercise_app() -> AsyncIterator[FastAPI]:
             risk_config=build_risk_config(settings),
         )
         app = create_app(settings)
+        app.state.command_service_provider = CommandServiceProvider(
+            session_factory=lambda: app.state.session_factory(),
+            graphs=lambda: app.state.graphs,
+            settings=app.state.settings,
+            exercise_definition=app.state.exercise_definition,
+            clock=lambda: app.state.clock(),
+            callsign=lambda: "EMBER-GOLDEN",
+        )
         resources.push_async_callback(app.state.engine.dispose)
         try:
             yield app
@@ -83,8 +92,10 @@ async def test_park_fire_exercise_matches_golden_semantics(
     assert len(
         {
             tuple(
-                (item["resourceId"], item["taskId"])
-                for item in value["initialAllocation"]["assignments"]
+                sorted(
+                    (item["resourceId"], item["taskId"])
+                    for item in value["initialAllocation"]["assignments"]
+                )
             )
             for value in actual.values()
         }
@@ -96,6 +107,19 @@ async def test_park_fire_exercise_matches_golden_semantics(
             "taskId": "shelter-capacity-transport",
         }
         for value in actual.values()
+    )
+    assert all(
+        ("exercise-bus-1", "shelter-capacity-transport")
+        in {
+            (item["resourceId"], item["taskId"])
+            for item in value["finalOverride"]["assignments"]
+        }
+        for value in actual.values()
+    )
+    assert any(
+        CLOSED_EDGE_ID in assignment["route"]["edgeIds"]
+        for value in actual.values()
+        for assignment in value["initialAllocation"]["assignments"]
     )
     assert all(
         CLOSED_EDGE_ID not in assignment["route"]["edgeIds"]
@@ -144,7 +168,7 @@ async def _journey(client: AsyncClient, objective: str) -> dict[str, object]:
         "cascadingDisruption": _plan_semantics(cascade["plan"]),
         "shelterFieldReport": _plan_semantics(final["plan"]),
         "finalOverride": _plan_semantics(override["plan"]),
-        "auditEventTypes": [item["eventType"] for item in audit["items"]],
+        "audit": [_audit_semantics(item) for item in audit["items"]],
     }
 
 
@@ -182,6 +206,7 @@ def _plan_semantics(plan: dict[str, Any]) -> dict[str, object]:
     output = plan["outputData"]
     return {
         "inputHash": plan["inputHash"],
+        "versions": output["versions"],
         "tasks": [
             {"taskId": item["taskId"], "penalty": item["penalty"]}
             for item in plan["inputData"]["tasks"]
@@ -209,3 +234,34 @@ def _plan_semantics(plan: dict[str, Any]) -> dict[str, object]:
             }
         ),
     }
+
+
+def _audit_semantics(event: dict[str, Any]) -> dict[str, object]:
+    inputs = dict(event["inputs"])
+    inputs.pop("_responseProjection", None)
+    inputs.pop("planId", None)
+    inputs.pop("visiblePlanId", None)
+    inputs.pop("beforePlanId", None)
+    inputs.pop("acceptedPlanId", None)
+    return {
+        "eventType": event["eventType"],
+        "actorCallsign": event["actorCallsign"],
+        "displayName": event["displayName"],
+        "expectedSessionVersion": event["expectedSessionVersion"],
+        "resultingSessionVersion": event["resultingSessionVersion"],
+        "beforeState": _session_semantics(event["beforeState"]),
+        "afterState": _session_semantics(event["afterState"]),
+        "inputs": inputs,
+        "note": event["note"],
+    }
+
+
+def _session_semantics(state: dict[str, Any]) -> dict[str, object]:
+    result = dict(state)
+    result.pop("id", None)
+    result.pop("callsign", None)
+    if "consequences" in result:
+        consequences = dict(result["consequences"])
+        consequences.pop("lastPlanId", None)
+        result["consequences"] = consequences
+    return result

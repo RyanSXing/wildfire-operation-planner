@@ -43,6 +43,7 @@ from wildfireops.domain.observations import freeze_json_object
 from wildfireops.domain.operations import ResourceUnit
 from wildfireops.geospatial.road_graph import (
     RoadGraph,
+    RoadGraphInvalid,
     RouteResult,
     RouteStatus,
     compute_route,
@@ -53,6 +54,7 @@ from wildfireops.replay.exercise import (
     ExerciseTask,
     ObjectivePreset,
     ObjectiveWeights,
+    Point,
 )
 
 
@@ -68,6 +70,98 @@ class MaterializedCheckpoint:
     wind: Mapping[str, float] | None
     source_versions: Mapping[str, object]
     incidents: tuple[Mapping[str, object], ...]
+
+
+class ExerciseRuntimeInvalid(ValueError):
+    """Raised when a loaded exercise cannot be safely planned on its graph."""
+
+
+def validate_exercise_runtime(
+    definition: ExerciseDefinition,
+    graph: RoadGraph,
+) -> None:
+    """Validate graph-dependent exercise assumptions before serving the exercise."""
+    for asset in definition.assets:
+        _validate_snappable(graph, asset.asset_id, "asset", asset.position)
+    for resource in definition.resources:
+        _validate_snappable(graph, resource.resource_id, "resource", resource.position)
+    closures = {
+        edge_id
+        for checkpoint in definition.checkpoints
+        if checkpoint.disruption is not None
+        for edge_id in checkpoint.disruption.closed_edge_ids
+    } | set(definition.sandbox.closure_edge_ids)
+    unknown = sorted(closures - graph.edge_ids)
+    if unknown:
+        raise ExerciseRuntimeInvalid(f"unknown closure edge: {unknown[0]}")
+    for objective in definition.objectives:
+        for corridor_cleared in (False, True):
+            if not _has_valid_shelter_override(
+                definition,
+                graph,
+                objective,
+                corridor_cleared,
+            ):
+                raise ExerciseRuntimeInvalid(
+                    "shelter override is unavailable: "
+                    f"{objective}, corridorCleared={corridor_cleared}"
+                )
+
+
+def _validate_snappable(
+    graph: RoadGraph,
+    identifier: str,
+    kind: str,
+    position: Point,
+) -> None:
+    try:
+        nearest_road_node(graph, position.longitude, position.latitude)
+    except (RoadGraphInvalid, ValueError) as error:
+        raise ExerciseRuntimeInvalid(f"cannot snap {kind}: {identifier}") from error
+
+
+def _has_valid_shelter_override(
+    definition: ExerciseDefinition,
+    graph: RoadGraph,
+    objective: ObjectivePreset,
+    corridor_cleared: bool,
+) -> bool:
+    checkpoint = materialize_checkpoint(
+        definition,
+        checkpoint_index=2,
+        objective=objective,
+        consequences={"corridorCleared": corridor_cleared},
+    )
+    routes = candidate_routes(
+        graph,
+        checkpoint.resources,
+        checkpoint.tasks,
+        checkpoint.asset_positions,
+        checkpoint.closed_edge_ids,
+    )
+    for resource in definition.resources:
+        if resource.resource_type != "evacuation-bus":
+            continue
+        try:
+            result = solve_task_plan(
+                TaskOptimizationRequest(
+                    checkpoint.resources,
+                    checkpoint.tasks,
+                    routes,
+                    (LockedTaskAssignment(resource.resource_id, "shelter-capacity-transport"),),
+                    definition.objectives[objective].travel_weight,
+                    max_solver_seconds=2,
+                )
+            )
+        except ValueError:
+            continue
+        if result.status == "OPTIMAL" and any(
+            assignment.resource_id == resource.resource_id
+            and assignment.task_id == "shelter-capacity-transport"
+            for assignment in result.assignments
+        ):
+            return True
+    return False
 
 
 def uncovered_penalty(task: ExerciseTask, weights: ObjectiveWeights) -> int:

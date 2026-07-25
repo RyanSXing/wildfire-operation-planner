@@ -1,14 +1,280 @@
 {
   "fastest-response": {
-    "auditEventTypes": [
-      "exercise.session-created",
-      "exercise.objective-selected",
-      "exercise.plan-generated",
-      "exercise.checkpoint-advanced",
-      "exercise.plan-generated",
-      "exercise.checkpoint-advanced",
-      "exercise.plan-generated",
-      "exercise.override-applied"
+    "audit": [
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": null,
+          "status": "active",
+          "version": 1
+        },
+        "beforeState": {},
+        "displayName": null,
+        "eventType": "exercise.session-created",
+        "expectedSessionVersion": 0,
+        "inputs": {},
+        "note": null,
+        "resultingSessionVersion": 1
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 2
+        },
+        "beforeState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": null,
+          "status": "active",
+          "version": 1
+        },
+        "displayName": null,
+        "eventType": "exercise.objective-selected",
+        "expectedSessionVersion": 1,
+        "inputs": {
+          "objective": "fastest-response"
+        },
+        "note": null,
+        "resultingSessionVersion": 2
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 3
+        },
+        "beforeState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 2
+        },
+        "displayName": null,
+        "eventType": "exercise.plan-generated",
+        "expectedSessionVersion": 2,
+        "inputs": {
+          "inputHash": "e73e049472ca43d2d08bd19d0ff667c90d9c582d01f725e2316a327b7ca10190"
+        },
+        "note": null,
+        "resultingSessionVersion": 3
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 4
+        },
+        "beforeState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 3
+        },
+        "displayName": null,
+        "eventType": "exercise.checkpoint-advanced",
+        "expectedSessionVersion": 3,
+        "inputs": {},
+        "note": null,
+        "resultingSessionVersion": 4
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 5
+        },
+        "beforeState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 4
+        },
+        "displayName": null,
+        "eventType": "exercise.plan-generated",
+        "expectedSessionVersion": 4,
+        "inputs": {
+          "inputHash": "aa535aee1eb05d77484ce91044e2ae47bb1da4bd853fee1e8748348b722e8932"
+        },
+        "note": null,
+        "resultingSessionVersion": 5
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 6
+        },
+        "beforeState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 5
+        },
+        "displayName": null,
+        "eventType": "exercise.checkpoint-advanced",
+        "expectedSessionVersion": 5,
+        "inputs": {},
+        "note": null,
+        "resultingSessionVersion": 6
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 7
+        },
+        "beforeState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 6
+        },
+        "displayName": null,
+        "eventType": "exercise.plan-generated",
+        "expectedSessionVersion": 6,
+        "inputs": {
+          "inputHash": "554b250fa2d75eeb78a69a81d0b348bcbd6011703f191b830ba70ebab1b240be"
+        },
+        "note": null,
+        "resultingSessionVersion": 7
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 8
+        },
+        "beforeState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "fastest-response",
+          "status": "active",
+          "version": 7
+        },
+        "displayName": null,
+        "eventType": "exercise.override-applied",
+        "expectedSessionVersion": 7,
+        "inputs": {
+          "resourceId": "exercise-bus-1",
+          "taskId": "shelter-capacity-transport"
+        },
+        "note": null,
+        "resultingSessionVersion": 8
+      }
     ],
     "cascadingDisruption": {
       "assignments": [
@@ -69,7 +335,7 @@
         "clear-primary-corridor",
         "evacuate-paradise"
       ],
-      "inputHash": "efb27373bc8fcaaf1a4f71a0f3027687741514b985e34cd4b5c683ea8845dccb",
+      "inputHash": "aa535aee1eb05d77484ce91044e2ae47bb1da4bd853fee1e8748348b722e8932",
       "objectiveComponents": {
         "objectiveValue": 212,
         "travelCost": 40,
@@ -102,7 +368,33 @@
         "evacuate-chico",
         "protect-paradise-substation",
         "support-feather-river"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 1,
+            "criticalServiceWeight": 1,
+            "populationDivisor": 1000,
+            "populationWeight": 1,
+            "travelWeight": 10
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "aa535aee1eb05d77484ce91044e2ae47bb1da4bd853fee1e8748348b722e8932",
+        "objective": "fastest-response",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T20:58:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     },
     "finalOverride": {
       "assignments": [
@@ -207,7 +499,7 @@
       "coveredTaskIds": [
         "shelter-capacity-transport"
       ],
-      "inputHash": "4593fc59585c592d398a48921181685a489e19fc12f39dad7d2f87b4780d06a3",
+      "inputHash": "c17937a8e88570ed9564287666b03ab8c32c503f01f4fb82e822692f0e09cb3d",
       "objectiveComponents": {
         "objectiveValue": 386,
         "travelCost": 220,
@@ -239,7 +531,33 @@
         "evacuate-chico",
         "evacuate-paradise",
         "support-feather-river"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 1,
+            "criticalServiceWeight": 1,
+            "populationDivisor": 1000,
+            "populationWeight": 1,
+            "travelWeight": 10
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "c17937a8e88570ed9564287666b03ab8c32c503f01f4fb82e822692f0e09cb3d",
+        "objective": "fastest-response",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T21:54:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     },
     "initialAllocation": {
       "assignments": [
@@ -270,7 +588,7 @@
       "coveredTaskIds": [
         "evacuate-paradise"
       ],
-      "inputHash": "ad9027b042a81d90342bc771ae85bcc9f18de4cb221bb7b46c7d147a1b09b6a7",
+      "inputHash": "e73e049472ca43d2d08bd19d0ff667c90d9c582d01f725e2316a327b7ca10190",
       "objectiveComponents": {
         "objectiveValue": 172,
         "travelCost": 0,
@@ -299,7 +617,33 @@
         "evacuate-chico",
         "protect-paradise-substation",
         "support-feather-river"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 1,
+            "criticalServiceWeight": 1,
+            "populationDivisor": 1000,
+            "populationWeight": 1,
+            "travelWeight": 10
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "e73e049472ca43d2d08bd19d0ff667c90d9c582d01f725e2316a327b7ca10190",
+        "objective": "fastest-response",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T19:54:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     },
     "shelterFieldReport": {
       "assignments": [
@@ -338,7 +682,7 @@
       "coveredTaskIds": [
         "evacuate-paradise"
       ],
-      "inputHash": "df3a8aa8b49555ad588223bb8343ed9c0e7db6b28eacad20477bdb070ec47eac",
+      "inputHash": "554b250fa2d75eeb78a69a81d0b348bcbd6011703f191b830ba70ebab1b240be",
       "objectiveComponents": {
         "objectiveValue": 144,
         "travelCost": 0,
@@ -367,19 +711,311 @@
         "evacuate-chico",
         "shelter-capacity-transport",
         "support-feather-river"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 1,
+            "criticalServiceWeight": 1,
+            "populationDivisor": 1000,
+            "populationWeight": 1,
+            "travelWeight": 10
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "554b250fa2d75eeb78a69a81d0b348bcbd6011703f191b830ba70ebab1b240be",
+        "objective": "fastest-response",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T21:54:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     }
   },
   "maximize-population-coverage": {
-    "auditEventTypes": [
-      "exercise.session-created",
-      "exercise.objective-selected",
-      "exercise.plan-generated",
-      "exercise.checkpoint-advanced",
-      "exercise.plan-generated",
-      "exercise.checkpoint-advanced",
-      "exercise.plan-generated",
-      "exercise.override-applied"
+    "audit": [
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": null,
+          "status": "active",
+          "version": 1
+        },
+        "beforeState": {},
+        "displayName": null,
+        "eventType": "exercise.session-created",
+        "expectedSessionVersion": 0,
+        "inputs": {},
+        "note": null,
+        "resultingSessionVersion": 1
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 2
+        },
+        "beforeState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": null,
+          "status": "active",
+          "version": 1
+        },
+        "displayName": null,
+        "eventType": "exercise.objective-selected",
+        "expectedSessionVersion": 1,
+        "inputs": {
+          "objective": "maximize-population-coverage"
+        },
+        "note": null,
+        "resultingSessionVersion": 2
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 3
+        },
+        "beforeState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 2
+        },
+        "displayName": null,
+        "eventType": "exercise.plan-generated",
+        "expectedSessionVersion": 2,
+        "inputs": {
+          "inputHash": "97cbb4a7776e963d62fe9b6caccc14e3a94c4f8271d59ebf2055e4c1b330c6d7"
+        },
+        "note": null,
+        "resultingSessionVersion": 3
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 4
+        },
+        "beforeState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 3
+        },
+        "displayName": null,
+        "eventType": "exercise.checkpoint-advanced",
+        "expectedSessionVersion": 3,
+        "inputs": {},
+        "note": null,
+        "resultingSessionVersion": 4
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 5
+        },
+        "beforeState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 4
+        },
+        "displayName": null,
+        "eventType": "exercise.plan-generated",
+        "expectedSessionVersion": 4,
+        "inputs": {
+          "inputHash": "1008f1a75a2ed627f7341518e7db2c41e44b44070058eb98e6447cbe52a1cac4"
+        },
+        "note": null,
+        "resultingSessionVersion": 5
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 6
+        },
+        "beforeState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 5
+        },
+        "displayName": null,
+        "eventType": "exercise.checkpoint-advanced",
+        "expectedSessionVersion": 5,
+        "inputs": {},
+        "note": null,
+        "resultingSessionVersion": 6
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 7
+        },
+        "beforeState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 6
+        },
+        "displayName": null,
+        "eventType": "exercise.plan-generated",
+        "expectedSessionVersion": 6,
+        "inputs": {
+          "inputHash": "1b5480e33abc5247f4abcae23631270df655c4271b0cf61b57faea09fc475e08"
+        },
+        "note": null,
+        "resultingSessionVersion": 7
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 8
+        },
+        "beforeState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "maximize-population-coverage",
+          "status": "active",
+          "version": 7
+        },
+        "displayName": null,
+        "eventType": "exercise.override-applied",
+        "expectedSessionVersion": 7,
+        "inputs": {
+          "resourceId": "exercise-bus-1",
+          "taskId": "shelter-capacity-transport"
+        },
+        "note": null,
+        "resultingSessionVersion": 8
+      }
     ],
     "cascadingDisruption": {
       "assignments": [
@@ -587,7 +1223,7 @@
         "protect-paradise-substation",
         "support-feather-river"
       ],
-      "inputHash": "86437267433517b1f9e177332747e751c514b05b51c1e3bf9ceaf4053e3914a5",
+      "inputHash": "1008f1a75a2ed627f7341518e7db2c41e44b44070058eb98e6447cbe52a1cac4",
       "objectiveComponents": {
         "objectiveValue": 97,
         "travelCost": 37,
@@ -618,7 +1254,33 @@
       ],
       "uncoveredTaskIds": [
         "evacuate-paradise"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 1,
+            "criticalServiceWeight": 1,
+            "populationDivisor": 1000,
+            "populationWeight": 10,
+            "travelWeight": 1
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "1008f1a75a2ed627f7341518e7db2c41e44b44070058eb98e6447cbe52a1cac4",
+        "objective": "maximize-population-coverage",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T20:58:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     },
     "finalOverride": {
       "assignments": [
@@ -768,7 +1430,7 @@
         "shelter-capacity-transport",
         "support-feather-river"
       ],
-      "inputHash": "cc6e11b1a69f732e2c37f67e547bdbb6aaf2f3c4f9d46b751fdcfc3691c35a3c",
+      "inputHash": "e7af3fad51689a2fbd93b93365211145738a93f946ed386995b6b02ca3410582",
       "objectiveComponents": {
         "objectiveValue": 1108,
         "travelCost": 28,
@@ -799,7 +1461,33 @@
       "uncoveredTaskIds": [
         "evacuate-chico",
         "evacuate-paradise"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 1,
+            "criticalServiceWeight": 1,
+            "populationDivisor": 1000,
+            "populationWeight": 10,
+            "travelWeight": 1
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "e7af3fad51689a2fbd93b93365211145738a93f946ed386995b6b02ca3410582",
+        "objective": "maximize-population-coverage",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T21:54:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     },
     "initialAllocation": {
       "assignments": [
@@ -960,7 +1648,7 @@
         "protect-paradise-substation",
         "support-feather-river"
       ],
-      "inputHash": "7a1a9a6c8d1dbdb0a9522e48f7f38b3d68e3bf825d85bb6d06fdae848596e769",
+      "inputHash": "97cbb4a7776e963d62fe9b6caccc14e3a94c4f8271d59ebf2055e4c1b330c6d7",
       "objectiveComponents": {
         "objectiveValue": 91,
         "travelCost": 31,
@@ -987,7 +1675,33 @@
       ],
       "uncoveredTaskIds": [
         "evacuate-paradise"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 1,
+            "criticalServiceWeight": 1,
+            "populationDivisor": 1000,
+            "populationWeight": 10,
+            "travelWeight": 1
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "97cbb4a7776e963d62fe9b6caccc14e3a94c4f8271d59ebf2055e4c1b330c6d7",
+        "objective": "maximize-population-coverage",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T19:54:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     },
     "shelterFieldReport": {
       "assignments": [
@@ -1140,7 +1854,7 @@
         "evacuate-chico",
         "support-feather-river"
       ],
-      "inputHash": "de60ad504e4007e93a550f8fefacc8472278ef50d67572277daed9f06b582127",
+      "inputHash": "1b5480e33abc5247f4abcae23631270df655c4271b0cf61b57faea09fc475e08",
       "objectiveComponents": {
         "objectiveValue": 90,
         "travelCost": 28,
@@ -1168,19 +1882,311 @@
       "uncoveredTaskIds": [
         "evacuate-paradise",
         "shelter-capacity-transport"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 1,
+            "criticalServiceWeight": 1,
+            "populationDivisor": 1000,
+            "populationWeight": 10,
+            "travelWeight": 1
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "1b5480e33abc5247f4abcae23631270df655c4271b0cf61b57faea09fc475e08",
+        "objective": "maximize-population-coverage",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T21:54:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     }
   },
   "protect-critical-services": {
-    "auditEventTypes": [
-      "exercise.session-created",
-      "exercise.objective-selected",
-      "exercise.plan-generated",
-      "exercise.checkpoint-advanced",
-      "exercise.plan-generated",
-      "exercise.checkpoint-advanced",
-      "exercise.plan-generated",
-      "exercise.override-applied"
+    "audit": [
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": null,
+          "status": "active",
+          "version": 1
+        },
+        "beforeState": {},
+        "displayName": null,
+        "eventType": "exercise.session-created",
+        "expectedSessionVersion": 0,
+        "inputs": {},
+        "note": null,
+        "resultingSessionVersion": 1
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 2
+        },
+        "beforeState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": null,
+          "status": "active",
+          "version": 1
+        },
+        "displayName": null,
+        "eventType": "exercise.objective-selected",
+        "expectedSessionVersion": 1,
+        "inputs": {
+          "objective": "protect-critical-services"
+        },
+        "note": null,
+        "resultingSessionVersion": 2
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 3
+        },
+        "beforeState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 2
+        },
+        "displayName": null,
+        "eventType": "exercise.plan-generated",
+        "expectedSessionVersion": 2,
+        "inputs": {
+          "inputHash": "3e3aa355098a2c1e6261a0a0d5e5a3994c0728c0ef85f010db9034ac93452ec5"
+        },
+        "note": null,
+        "resultingSessionVersion": 3
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 4
+        },
+        "beforeState": {
+          "checkpointIndex": 0,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 3
+        },
+        "displayName": null,
+        "eventType": "exercise.checkpoint-advanced",
+        "expectedSessionVersion": 3,
+        "inputs": {},
+        "note": null,
+        "resultingSessionVersion": 4
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 5
+        },
+        "beforeState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 4
+        },
+        "displayName": null,
+        "eventType": "exercise.plan-generated",
+        "expectedSessionVersion": 4,
+        "inputs": {
+          "inputHash": "aec1cc79a18a80250ea5717a049db44093a759459f7fcd0850e609246b76142b"
+        },
+        "note": null,
+        "resultingSessionVersion": 5
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 6
+        },
+        "beforeState": {
+          "checkpointIndex": 1,
+          "consequences": {},
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 5
+        },
+        "displayName": null,
+        "eventType": "exercise.checkpoint-advanced",
+        "expectedSessionVersion": 5,
+        "inputs": {},
+        "note": null,
+        "resultingSessionVersion": 6
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 7
+        },
+        "beforeState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 6
+        },
+        "displayName": null,
+        "eventType": "exercise.plan-generated",
+        "expectedSessionVersion": 6,
+        "inputs": {
+          "inputHash": "15b77bd185eb14ed0d8d5f81c0e806408b3784ec81f0da61863f491f4550fa2e"
+        },
+        "note": null,
+        "resultingSessionVersion": 7
+      },
+      {
+        "actorCallsign": "EMBER-GOLDEN",
+        "afterState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 8
+        },
+        "beforeState": {
+          "checkpointIndex": 2,
+          "consequences": {
+            "corridorCleared": true
+          },
+          "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+          "definitionVersion": "1",
+          "displayName": null,
+          "exerciseId": "park-fire-decision",
+          "expiresAt": "2024-07-30T22:30:00+00:00",
+          "objective": "protect-critical-services",
+          "status": "active",
+          "version": 7
+        },
+        "displayName": null,
+        "eventType": "exercise.override-applied",
+        "expectedSessionVersion": 7,
+        "inputs": {
+          "resourceId": "exercise-bus-1",
+          "taskId": "shelter-capacity-transport"
+        },
+        "note": null,
+        "resultingSessionVersion": 8
+      }
     ],
     "cascadingDisruption": {
       "assignments": [
@@ -1388,7 +2394,7 @@
         "protect-paradise-substation",
         "support-feather-river"
       ],
-      "inputHash": "118b1932768d0e18f5a6a9f90d592fde89fcbd2e546fc646577cf10d1d232cd8",
+      "inputHash": "aec1cc79a18a80250ea5717a049db44093a759459f7fcd0850e609246b76142b",
       "objectiveComponents": {
         "objectiveValue": 81,
         "travelCost": 37,
@@ -1419,7 +2425,33 @@
       ],
       "uncoveredTaskIds": [
         "evacuate-paradise"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 2,
+            "criticalServiceWeight": 100,
+            "populationDivisor": 1000,
+            "populationWeight": 1,
+            "travelWeight": 1
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "aec1cc79a18a80250ea5717a049db44093a759459f7fcd0850e609246b76142b",
+        "objective": "protect-critical-services",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T20:58:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     },
     "finalOverride": {
       "assignments": [
@@ -1569,7 +2601,7 @@
         "shelter-capacity-transport",
         "support-feather-river"
       ],
-      "inputHash": "8bc4fd18ea274054981a387ede1c9a82c45ae572b27a96fe28076385163a9eaa",
+      "inputHash": "26add272da06f923aedc300850f275ac369bf748dc3c8ccf4edde2102ba03968",
       "objectiveComponents": {
         "objectiveValue": 193,
         "travelCost": 28,
@@ -1600,7 +2632,33 @@
       "uncoveredTaskIds": [
         "evacuate-chico",
         "evacuate-paradise"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 2,
+            "criticalServiceWeight": 100,
+            "populationDivisor": 1000,
+            "populationWeight": 1,
+            "travelWeight": 1
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "26add272da06f923aedc300850f275ac369bf748dc3c8ccf4edde2102ba03968",
+        "objective": "protect-critical-services",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T21:54:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     },
     "initialAllocation": {
       "assignments": [
@@ -1761,7 +2819,7 @@
         "protect-paradise-substation",
         "support-feather-river"
       ],
-      "inputHash": "f0eb1cb86052b27023c15b62617204dff4e6cdcb9e37905c52428ff2954d0dde",
+      "inputHash": "3e3aa355098a2c1e6261a0a0d5e5a3994c0728c0ef85f010db9034ac93452ec5",
       "objectiveComponents": {
         "objectiveValue": 75,
         "travelCost": 31,
@@ -1788,7 +2846,33 @@
       ],
       "uncoveredTaskIds": [
         "evacuate-paradise"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 2,
+            "criticalServiceWeight": 100,
+            "populationDivisor": 1000,
+            "populationWeight": 1,
+            "travelWeight": 1
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "3e3aa355098a2c1e6261a0a0d5e5a3994c0728c0ef85f010db9034ac93452ec5",
+        "objective": "protect-critical-services",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T19:54:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     },
     "shelterFieldReport": {
       "assignments": [
@@ -1941,7 +3025,7 @@
         "evacuate-chico",
         "support-feather-river"
       ],
-      "inputHash": "413f4b0e53a5c6da052397fe9c80b5080b0182b20ca3273699c7dc4bc16b14af",
+      "inputHash": "15b77bd185eb14ed0d8d5f81c0e806408b3784ec81f0da61863f491f4550fa2e",
       "objectiveComponents": {
         "objectiveValue": 174,
         "travelCost": 28,
@@ -1969,7 +3053,33 @@
       "uncoveredTaskIds": [
         "evacuate-paradise",
         "shelter-capacity-transport"
-      ]
+      ],
+      "versions": {
+        "algorithm": {
+          "maxSolverSeconds": 2,
+          "objectiveWeights": {
+            "basePriorityWeight": 2,
+            "criticalServiceWeight": 100,
+            "populationDivisor": 1000,
+            "populationWeight": 1,
+            "travelWeight": 1
+          },
+          "taskAlgorithm": "task-allocation-v1"
+        },
+        "definitionDigest": "982cd05e6b0ca9bd1c457885ed4b770159a2e9a9b323c166f536bb126d0dbbd9",
+        "exercise": "1",
+        "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+        "inputHash": "15b77bd185eb14ed0d8d5f81c0e806408b3784ec81f0da61863f491f4550fa2e",
+        "objective": "protect-critical-services",
+        "riskReason": "task planning consumes no risk model",
+        "riskVersion": "not-applicable",
+        "sources": {
+          "exercise": "1",
+          "graph": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+          "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T21:54:00",
+          "replayPackage": "park-fire-2024-v1"
+        }
+      }
     }
   }
 }

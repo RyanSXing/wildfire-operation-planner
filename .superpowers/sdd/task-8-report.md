@@ -61,3 +61,41 @@ for all three objective presets. `exercise_golden_outputs.json` pins planning
 input hashes, task penalties, assignments and exact route edge IDs, coverage,
 objective components, constraints, causal codes, corridor consequences,
 override semantics, and audit event types.
+
+## Review follow-up
+
+The replay contract now requires the canonical external source name
+`OpenStreetMap` (case-sensitive); Census matching is unchanged. Startup calls
+the graph-dependent validator after loading the exercise definition and graph.
+It validates all asset/resource snaps, every checkpoint and sandbox closure
+edge, and an optimal locked shelter-bus plan for every objective under both
+corridor-cleared states.
+
+Golden normalization now includes plan version markers and ordered audit
+semantics (actor/display, session versions, deterministic state, public inputs,
+note, and consequences), while removing UUID-backed plan references and private
+response snapshots. The test fixture uses the fixed `EMBER-GOLDEN` callsign.
+
+```text
+cd backend && uv run pytest tests/unit/replay/test_exercise.py tests/unit/replay/test_manifest.py tests/unit/replay/test_park_fire_package.py tests/unit/application/test_exercise_planning.py tests/unit/test_health.py tests/integration/replay/test_park_fire_exercise_golden.py -q
+102 passed
+
+cd backend && WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test uv run pytest tests/integration/replay -q
+24 passed
+
+cd backend && WILDFIREOPS_DATABASE_URL=postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test uv run pytest tests/unit tests/architecture -q
+723 passed, 3 existing fork warnings
+
+cd backend && uv run ruff check [touched files]
+All checks passed
+
+cd backend && uv run mypy src/wildfireops/replay/exercise.py src/wildfireops/application/exercise_planning.py src/wildfireops/main.py
+Success: no issues found in 3 source files
+```
+
+Final hashes:
+
+```text
+exercise.json: f98966af9cce464e132d899ae1bcc952a421a0845390667a8852fbd7a773c5e0
+exercise_golden_outputs.json: 570db014d930a1a8c5b7704c92ab5a004d4b977e87fdf5287daf7035103fbe88
+```
