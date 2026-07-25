@@ -24,6 +24,7 @@ import {
 } from "./language";
 
 export type DetailDrawerProps = {
+  inert: boolean;
   tab: DrawerTab;
   onTabChange: (tab: DrawerTab) => void;
   session: ExerciseSession;
@@ -39,6 +40,7 @@ export type DetailDrawerProps = {
 };
 
 export function DetailDrawer({
+  inert,
   tab,
   onTabChange,
   session,
@@ -53,7 +55,7 @@ export function DetailDrawer({
   onLocate,
 }: DetailDrawerProps) {
   return (
-    <aside className="wf-drawer" aria-label="Checkpoint details">
+    <aside className="wf-drawer" aria-label="Checkpoint details" inert={inert}>
       <div className="wf-drawer__head">
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2 className="wf-drawer__title">{checkpoint.title}</h2>

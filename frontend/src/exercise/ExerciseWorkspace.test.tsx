@@ -439,6 +439,40 @@ describe("ExerciseWorkspace", () => {
     expect(document.querySelector(".wf-marker--closed")).not.toBeInTheDocument();
   });
 
+  it("offers a way out of an expired session instead of a dead dock", async () => {
+    // The server answers 200 with status "expired" and exactly one allowed
+    // action, so a reviewer returning the next day must not be stranded.
+    vi.spyOn(exerciseApiClient, "getSession").mockResolvedValue(
+      session({
+        objective: "protect-critical-services",
+        version: 3,
+        status: "expired",
+        allowedActions: ["start-new-exercise"],
+        latestPlan: plan,
+      }),
+    );
+    const createSession = vi
+      .spyOn(exerciseApiClient, "createSession")
+      .mockResolvedValue(session());
+    window.sessionStorage.setItem(SESSION_STORAGE_KEY, session().id);
+    renderWorkspace();
+
+    expect(
+      await screen.findByRole("heading", { name: "This exercise timed out" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Start a new exercise" }),
+    );
+    // Restarting clears the stored session and returns to the briefing.
+    expect(window.sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: /start the exercise/ }),
+    ).toBeVisible();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
   it("falls back to the offline plot when the basemap style cannot load", async () => {
     vi.spyOn(exerciseApiClient, "getSession").mockResolvedValue(
       session({

@@ -14,6 +14,28 @@ import {
   type PlainChange,
 } from "./language";
 
+/**
+ * Moves focus to a panel's heading when it opens and returns it to whatever
+ * opened the panel when it closes. Without this a dialog appears with focus
+ * still on the document body, so a keyboard user has to tab the whole page to
+ * reach the only thing they are allowed to do.
+ */
+function usePanelFocus() {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    const opener = document.activeElement;
+    headingRef.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && document.contains(opener)) {
+        opener.focus();
+      }
+    };
+  }, []);
+
+  return headingRef;
+}
+
 const OBJECTIVE_ORDER: ExerciseObjective[] = [
   "protect-critical-services",
   "fastest-response",
@@ -36,6 +58,7 @@ export function ObjectivePanel({
   onChoose,
   onClose,
 }: ObjectivePanelProps) {
+  const headingRef = usePanelFocus();
   return (
     <section
       className="wf-panel wf-panel--above-dock"
@@ -43,7 +66,7 @@ export function ObjectivePanel({
       aria-label="Choose an objective"
     >
       <div className="wf-panel__head">
-        <h2 className="wf-panel__title">
+        <h2 className="wf-panel__title" ref={headingRef} tabIndex={-1}>
           {replanning ? "Change the objective" : "Choose an objective"}
         </h2>
         {onClose !== null && (
@@ -109,11 +132,34 @@ export function ChangeBriefing({
 }: ChangeBriefingProps) {
   const dismissRef = useRef<HTMLButtonElement>(null);
 
+  const sheetRef = useRef<HTMLElement>(null);
+
   useEffect(() => {
     dismissRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onDismiss();
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      // The briefing declares itself modal, so Tab has to stay inside it.
+      const focusable = sheetRef.current?.querySelectorAll<HTMLElement>(
+        "a[href], button:not(:disabled), input, select, textarea, [tabindex]:not([tabindex='-1'])",
+      );
+      if (!focusable || focusable.length === 0) {
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !sheetRef.current?.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -127,6 +173,7 @@ export function ChangeBriefing({
         role="dialog"
         aria-modal="true"
         aria-labelledby="wf-brief-title"
+        ref={sheetRef}
       >
         <p className="wf-brief__eyebrow">
           CHECKPOINT {index + 1} OF {total} ·{" "}
@@ -200,6 +247,7 @@ export function OverridePanel({
   const holding = plan?.assignments.find(
     (assignment) => assignment.resourceId === resourceId,
   );
+  const headingRef = usePanelFocus();
 
   return (
     <section
@@ -208,7 +256,9 @@ export function OverridePanel({
       aria-label="Field report override"
     >
       <div className="wf-panel__head">
-        <h2 className="wf-panel__title">Field report</h2>
+        <h2 className="wf-panel__title" ref={headingRef} tabIndex={-1}>
+          Field report
+        </h2>
       </div>
       <div className="wf-note" data-tone="caution" style={{ marginTop: 10 }}>
         <strong>{taskLabel(report.taskId, book)}</strong>
@@ -290,9 +340,11 @@ export function ApprovalPanel({
   const [note, setNote] = useState("");
   const nameId = useId();
   const noteId = useId();
+  const hintId = useId();
 
   const uncovered = plan?.uncoveredTaskIds ?? [];
   const ready = displayName.trim().length > 0 && note.trim().length > 0;
+  const headingRef = usePanelFocus();
 
   return (
     <section
@@ -301,7 +353,9 @@ export function ApprovalPanel({
       aria-label="Approve the plan"
     >
       <div className="wf-panel__head">
-        <h2 className="wf-panel__title">Sign off on this plan</h2>
+        <h2 className="wf-panel__title" ref={headingRef} tabIndex={-1}>
+          Sign off on this plan
+        </h2>
       </div>
       <p className="wf-dock__hint" style={{ marginBottom: 4 }}>
         Recorded against callsign {callsign}. This closes the exercise.
@@ -348,12 +402,15 @@ export function ApprovalPanel({
             onChange={(event) => setNote(event.target.value)}
             disabled={pending}
             placeholder="What you accepted, what you gave up, and why."
+            aria-describedby={hintId}
           />
-          <span className="wf-field__hint">
-            Written into the audit trail exactly as typed. {note.trim().length}{" "}
-            of 2000 characters.
-          </span>
         </label>
+        <p className="wf-field__hint" id={hintId}>
+          Written into the audit trail exactly as typed.
+        </p>
+        <p className="wf-field__hint" aria-hidden="true">
+          {note.trim().length} of 2000 characters.
+        </p>
         {error !== null && (
           <p className="wf-error" role="alert">
             {error}

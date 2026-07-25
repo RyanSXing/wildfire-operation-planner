@@ -15,6 +15,7 @@ export const exerciseActionSchema = z.enum([
   "apply-override",
   "approve-plan",
   "view-debrief",
+  "start-new-exercise",
 ]);
 
 const positionSchema = z.object({

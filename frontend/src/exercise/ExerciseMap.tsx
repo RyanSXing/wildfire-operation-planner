@@ -339,10 +339,20 @@ export function ExerciseMap({
         marker.setLngLat(lngLat);
       }
       const element = marker.getElement();
-      element.setAttribute("aria-label", labelFor(kind, id));
+      const uncovered = kind === "asset" && uncoveredAssetIds.has(id);
+      // The dataset attributes drive CSS; ARIA has to carry the meaning, and
+      // "uncovered" belongs in the name because the pulse that shows it is
+      // both colour-only and removed under prefers-reduced-motion.
+      element.setAttribute(
+        "aria-label",
+        uncovered
+          ? `${labelFor(kind, id)} — uncovered by this plan`
+          : labelFor(kind, id),
+      );
+      element.setAttribute("aria-pressed", String(selectedId === id));
       element.dataset.selected = String(selectedId === id);
       if (kind === "asset") {
-        element.dataset.uncovered = String(uncoveredAssetIds.has(id));
+        element.dataset.uncovered = String(uncovered);
       }
     }
   }, [assets, resources, selectedId, uncoveredAssetIds, labelFor]);
@@ -385,6 +395,14 @@ export function ExerciseMap({
       element.textContent = "✕";
       const label = closedEdges.find((edge) => edge.edgeId === id)?.label;
       element.title = label ? `${label} — closed` : "Road closed";
+      // MapLibre gives an unroled marker element role="button" and tabindex=0,
+      // which would put a focusable control that does nothing into the tab
+      // order. This marker is a graphic, so it says so before it is added.
+      element.setAttribute("role", "img");
+      element.setAttribute(
+        "aria-label",
+        label ? `${label} is closed` : "A road is closed",
+      );
       closureMarkersRef.current.set(
         id,
         new maplibregl.Marker({ element }).setLngLat(lngLat).addTo(map),

@@ -296,6 +296,34 @@ export function ExerciseWorkspace() {
     );
   }
 
+  // Sessions expire 24 hours after they start. The server keeps answering with
+  // status "expired" and a single allowed action, so the exercise has to offer
+  // that action rather than leave the operator on a dock with nothing to press.
+  if (session.status === "expired") {
+    return (
+      <div className="wf">
+        <div className="wf-centre">
+          <main className="wf-sheet" aria-labelledby="wf-expired-title">
+            <p className="wf-sheet__eyebrow">SESSION EXPIRED</p>
+            <h1 className="wf-sheet__title" id="wf-expired-title">
+              This exercise timed out
+            </h1>
+            <p className="wf-sheet__lede">
+              Sessions run for 24 hours so the replay data behind them stays
+              consistent. Everything {session.callsign} recorded is still in the
+              audit trail; a new run starts from the first checkpoint.
+            </p>
+            <div className="wf-actions">
+              <button type="button" className="wf-primary" onClick={restart}>
+                Start a new exercise
+              </button>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
   if (completed && debriefOpen && debriefQuery.data) {
     return (
       <div className="wf">
@@ -320,7 +348,9 @@ export function ExerciseWorkspace() {
 
   return (
     <div className="wf">
-      <nav className="wf-rail" aria-label="Exercise progress">
+      {/* inert removes the subtree from both the tab order and the
+          accessibility tree while the modal briefing is open. */}
+      <nav className="wf-rail" aria-label="Exercise progress" inert={showBriefing}>
         <div className="wf-brand">
           <span className="wf-brand__dot" />
           <span className="wf-brand__name">WildfireOps</span>
@@ -329,15 +359,20 @@ export function ExerciseWorkspace() {
         <p className="wf-label">YOUR PROGRESS</p>
         <ol className="wf-steps">
           {buildSteps(session, metadata.checkpointCount).map((step) => (
-            <li className="wf-step" data-state={step.state} key={step.key}>
+            <li
+              className="wf-step"
+              data-state={step.state}
+              key={step.key}
+              aria-current={step.state === "current" ? "step" : undefined}
+            >
               <span className="wf-step__mark" aria-hidden="true">
                 {step.state === "done" ? "✓" : step.ordinal}
               </span>
               <span style={{ minWidth: 0 }}>
+                <span className="wf-visually-hidden">{STEP_STATE_TEXT[step.state]}</span>
                 <span className="wf-step__title">{step.title}</span>
                 <span className="wf-step__note">{step.note}</span>
               </span>
-              <span className="wf-visually-hidden" />
             </li>
           ))}
         </ol>
@@ -474,6 +509,7 @@ export function ExerciseWorkspace() {
         )}
 
         <CommandDock
+          inert={showBriefing}
           session={session}
           allowed={allowed}
           running={running}
@@ -487,6 +523,7 @@ export function ExerciseWorkspace() {
       </main>
 
       <DetailDrawer
+        inert={showBriefing}
         tab={tab}
         onTabChange={setTab}
         session={session}
@@ -505,6 +542,7 @@ export function ExerciseWorkspace() {
 }
 
 function CommandDock({
+  inert: isInert,
   session,
   allowed,
   running,
@@ -515,6 +553,7 @@ function CommandDock({
   onChangeObjective,
   onOpenDebrief,
 }: {
+  inert: boolean;
   session: ExerciseSession;
   allowed: ReadonlySet<string>;
   running: boolean;
@@ -530,6 +569,7 @@ function CommandDock({
   if (session.objective === null) {
     return (
       <Dock
+        isInert={isInert}
         title="Start by choosing an objective"
         hint="It decides which task wins when two need the same unit."
         error={error}
@@ -540,6 +580,7 @@ function CommandDock({
   if (allowed.has("generate-plan")) {
     return (
       <Dock
+        isInert={isInert}
         title="Ready to plan"
         hint="The planner will assign every unit it can and tell you what it could not cover."
         error={error}
@@ -571,6 +612,7 @@ function CommandDock({
   if (allowed.has("advance")) {
     return (
       <Dock
+        isInert={isInert}
         title={coverageLine(plan)}
         hint="Read the plan on the right. Continue when you are satisfied, or change the objective and plan again."
         tone="active"
@@ -603,6 +645,7 @@ function CommandDock({
   if (allowed.has("apply-override")) {
     return (
       <Dock
+        isInert={isInert}
         title="A field report needs your judgement"
         hint={
           panel === "override"
@@ -619,6 +662,7 @@ function CommandDock({
   if (allowed.has("approve-plan")) {
     return (
       <Dock
+        isInert={isInert}
         title={coverageLine(plan)}
         hint="Sign the plan off with your name and the reason for it."
         tone="active"
@@ -631,6 +675,7 @@ function CommandDock({
   if (allowed.has("view-debrief")) {
     return (
       <Dock
+        isInert={isInert}
         title="Exercise complete"
         hint="Your decision is recorded in the audit trail."
         tone="done"
@@ -654,6 +699,7 @@ function Dock({
   error,
   actions,
   busy,
+  isInert,
 }: {
   title: string;
   hint: string;
@@ -661,16 +707,28 @@ function Dock({
   error: string | null;
   actions?: React.ReactNode;
   busy?: boolean;
+  isInert?: boolean;
 }) {
   return (
-    <div className="wf-dock" role="region" aria-label="Next step">
+    <div
+      className="wf-dock"
+      role="region"
+      aria-label="Next step"
+      aria-busy={busy === true}
+      inert={isInert}
+    >
       {busy === true && <span className="wf-spinner" aria-hidden="true" />}
-      <div className="wf-dock__body">
+      <div className="wf-dock__body" aria-live="polite" aria-atomic="true">
         <p className="wf-dock__title" data-tone={tone}>
           {title}
         </p>
-        <p className="wf-dock__hint">{error ?? hint}</p>
+        <p className="wf-dock__hint">{hint}</p>
       </div>
+      {error !== null && (
+        <p className="wf-error wf-dock__error" role="alert">
+          {error}
+        </p>
+      )}
       {actions}
     </div>
   );
@@ -728,6 +786,12 @@ function resolvePanel(
   }
   return null;
 }
+
+const STEP_STATE_TEXT: Record<Step["state"], string> = {
+  done: "Completed:",
+  current: "Current step:",
+  pending: "Not started:",
+};
 
 type Step = {
   key: string;

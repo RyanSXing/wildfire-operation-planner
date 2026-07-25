@@ -17,10 +17,14 @@
   --wf-line-faint: rgba(255, 255, 255, 0.07);
   --wf-line: rgba(255, 255, 255, 0.12);
   --wf-line-strong: rgba(255, 255, 255, 0.18);
+  /* Form controls need a 3:1 boundary against BOTH the field fill and the panel
+     behind them. This composites to #707276: 3.8:1 and 3.6:1 respectively. */
+  --wf-line-control: rgba(255, 255, 255, 0.4);
 
   --wf-text: #e7eaf0;
   --wf-text-2: #98a1ad;
-  --wf-text-3: #6b7480;
+  /* 5.2:1 on --wf-chrome, 5.0:1 on --wf-card. Was #6b7480 (3.5:1). */
+  --wf-text-3: #8a94a1;
   --wf-data: #c6ccd6;
 
   --wf-fire: #ff6a3d;
@@ -844,7 +848,7 @@
 /* ---------------------------------------------------------- change veil -- */
 
 .wf-veil {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 30;
   display: grid;
@@ -928,7 +932,7 @@
 .wf-select {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--wf-line);
+  border: 1px solid var(--wf-line-control);
   border-radius: 8px;
   background: #10141a;
   color: var(--wf-text);
@@ -1094,6 +1098,18 @@
   color: #a4ecc6;
   font: 600 12.5px var(--wf-sans);
   animation: wfUp 0.18s ease;
+}
+
+.wf-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .wf-marker {
