@@ -331,17 +331,19 @@ async def test_lock_session_serializes_concurrent_commands() -> None:
             await asyncio.wait_for(asyncio.shield(second_task), timeout=0.1)
         release_first.set()
 
-        assert await first_task == 2
-        assert await second_task == 2
+        assert await asyncio.wait_for(
+            asyncio.gather(first_task, second_task), timeout=1
+        ) == [2, 2]
     finally:
         release_first.set()
-        for task in (first_task, second_task):
+        tasks = tuple(task for task in (first_task, second_task) if task is not None)
+        for task in tasks:
             if task is not None and not task.done():
                 task.cancel()
-        await asyncio.gather(
-            *(task for task in (first_task, second_task) if task is not None),
-            return_exceptions=True,
-        )
+        if tasks:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True), timeout=1
+            )
         if created_id is not None:
             async with engine.begin() as connection:
                 await connection.execute(
