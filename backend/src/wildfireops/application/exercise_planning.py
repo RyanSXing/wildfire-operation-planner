@@ -1,6 +1,6 @@
 """Deterministic, session-scoped exercise plan materialization."""
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -755,101 +755,3 @@ class ExercisePlanningService:
             else:
                 raise RuntimeError("exercise replay response is invalid")
         return stored, _copy_json_object(snapshot)
-
-
-def _request_from_input(
-    payload: Mapping[str, object], travel_weight: int
-) -> TaskOptimizationRequest:
-    """Rebuild known planner values from canonical JSON, never class metadata."""
-    try:
-        resources = tuple(
-            ResourceUnit(
-                _string(row, "resourceId"),
-                frozenset(_strings(row, "capabilities")),
-                _integer(row, "capacity"),
-                _boolean(row, "available"),
-                _number(row, "longitude"),
-                _number(row, "latitude"),
-            )
-            for row in _rows(payload, "resources")
-        )
-        tasks = tuple(
-            TaskDemand(
-                _string(row, "taskId"),
-                _string(row, "incidentId"),
-                _string(row, "assetId"),
-                _string(row, "requiredCapability"),
-                _integer(row, "requiredCapacity"),
-                _integer(row, "deadlineMinutes"),
-                _integer(row, "penalty"),
-            )
-            for row in _rows(payload, "tasks")
-        )
-        routes = tuple(
-            TaskCandidateRoute(
-                _string(row, "resourceId"),
-                _string(row, "taskId"),
-                RouteResult(
-                    RouteStatus(_string(row, "status")),
-                    tuple(_strings(row, "edgeIds")),
-                    _number(row, "distanceMeters"),
-                    _number(row, "travelMinutes"),
-                    _string(row, "graphVersion"),
-                    _string(row, "closureHash"),
-                ),
-            )
-            for row in _rows(payload, "routes")
-        )
-        locks = tuple(
-            LockedTaskAssignment(_string(row, "resourceId"), _string(row, "taskId"))
-            for row in _rows(payload, "lockedAssignments")
-        )
-    except (TypeError, ValueError) as error:
-        raise ExerciseVersionConflict("stored planning input is invalid") from error
-    return TaskOptimizationRequest(resources, tasks, routes, locks, travel_weight, 2)
-
-
-def _rows(payload: Mapping[str, object], field: str) -> tuple[Mapping[str, object], ...]:
-    value = payload.get(field)
-    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
-        raise TypeError(field)
-    if not all(isinstance(item, Mapping) for item in value):
-        raise TypeError(field)
-    return tuple(cast(Mapping[str, object], item) for item in value)
-
-
-def _string(row: Mapping[str, object], field: str) -> str:
-    value = row.get(field)
-    if not isinstance(value, str) or not value.strip():
-        raise TypeError(field)
-    return value
-
-
-def _strings(row: Mapping[str, object], field: str) -> tuple[str, ...]:
-    value = row.get(field)
-    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
-        raise TypeError(field)
-    if not all(isinstance(item, str) and item.strip() for item in value):
-        raise TypeError(field)
-    return tuple(cast(str, item) for item in value)
-
-
-def _integer(row: Mapping[str, object], field: str) -> int:
-    value = row.get(field)
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(field)
-    return value
-
-
-def _number(row: Mapping[str, object], field: str) -> float:
-    value = row.get(field)
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise TypeError(field)
-    return float(value)
-
-
-def _boolean(row: Mapping[str, object], field: str) -> bool:
-    value = row.get(field)
-    if not isinstance(value, bool):
-        raise TypeError(field)
-    return value
