@@ -188,6 +188,9 @@ class ReplayManifest:
         files[metadata.filename] = metadata.graph_digest
         return replace(self, files=files, road_graph=metadata)
 
+    def with_files(self, updates: Mapping[str, str]) -> "ReplayManifest":
+        return replace(self, files={**self.files, **dict(updates)})
+
     def write_atomic(
         self,
         path: Path,

@@ -1,0 +1,1975 @@
+{
+  "fastest-response": {
+    "auditEventTypes": [
+      "exercise.session-created",
+      "exercise.objective-selected",
+      "exercise.plan-generated",
+      "exercise.checkpoint-advanced",
+      "exercise.plan-generated",
+      "exercise.checkpoint-advanced",
+      "exercise.plan-generated",
+      "exercise.override-applied"
+    ],
+    "cascadingDisruption": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": []
+          },
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "resourceId": "exercise-road-crew-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-1b200758887a947c968d3631d85224333adca74b2a053594aa7e6f680d7f10ba",
+              "osm-4d1bd86ef9798b772121f26e17a4d87cdd3ac52db776ebbfe1be9499ee15d812",
+              "osm-632af1bd9927162d5a185ab4f05b62a90ab6b6604ee4db36dc356d84ad3ba115",
+              "osm-0ffc957d1599a867543716cfaca35d80404ae9048f306a2479c1cba6a7afa064",
+              "osm-ad4e75dfbdae3c8722346ae32f27cc92ddc6c1c655f0851c4aec837ff72f5f21",
+              "osm-add71968d06cdeccdea685a93af0e52c897d4a438faebd658fdc228b7cf0fbbf",
+              "osm-2ffb02fd68d5e4932877eecd92476e5507506bbbd0f8effc717e0b8a40791ecd",
+              "osm-8c9dcdd1d36dd1775211ab2f28439b828b57ecffacd5b823ddd165f6dcfd52e4",
+              "osm-14d52ceb3365ddb33bbb548db2e693189c75d3bc9e06c8c4924fe7ddb35ae1a2",
+              "osm-74c468fc4ba327dae6af4bef72172129a5d6ffb5910384892851b4997b60202a",
+              "osm-65038fa9c0f8d50613107968c4a45af5f25664c48069ea96cc45c1b0e2c332c1",
+              "osm-8c190c710b5065ec988ec6b12f2ac6ddc96d014020f18588a7d9c78cab6a858b",
+              "osm-2edc641878cb02350c473b97ce7186fb6adab1bec1a52df5f073352fa6838f57"
+            ]
+          },
+          "taskId": "clear-primary-corridor"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-bus-1; task=protect-paradise-substation; resource lacks capability=suppression",
+        "compatibility: resource=exercise-bus-1; task=support-feather-river; resource lacks capability=medical-support",
+        "compatibility: resource=exercise-engine-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=support-feather-river; resource lacks capability=medical-support",
+        "compatibility: resource=exercise-medical-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=protect-paradise-substation; resource lacks capability=suppression",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=protect-paradise-substation; resource lacks capability=suppression",
+        "compatibility: resource=exercise-road-crew-1; task=support-feather-river; resource lacks capability=medical-support",
+        "resource-contention: task=evacuate-chico; eligible assignments=exercise-bus-1->evacuate-paradise consume needed capacity"
+      ],
+      "causalCodes": [
+        "wind.changed",
+        "incident.task-added",
+        "route.closed",
+        "assignment.changed"
+      ],
+      "consequences": {
+        "corridorCleared": false
+      },
+      "coveredTaskIds": [
+        "clear-primary-corridor",
+        "evacuate-paradise"
+      ],
+      "inputHash": "efb27373bc8fcaaf1a4f71a0f3027687741514b985e34cd4b5c683ea8845dccb",
+      "objectiveComponents": {
+        "objectiveValue": 212,
+        "travelCost": 40,
+        "uncoveredTaskPenalty": 172
+      },
+      "operatorOverride": null,
+      "tasks": [
+        {
+          "penalty": 105,
+          "taskId": "clear-primary-corridor"
+        },
+        {
+          "penalty": 111,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 24,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 30,
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "penalty": 31,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-chico",
+        "protect-paradise-substation",
+        "support-feather-river"
+      ]
+    },
+    "finalOverride": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f",
+              "osm-754e70257e7606a0fd092da6f3bed0c17baacf49c62c32c29e7fb16cc0d566ff",
+              "osm-0ed05f534175513b9e03f2e3b0b30bee47311a2ac3433022051e53d4d3c20449",
+              "osm-5c5b282573ad61df35e2a2c10b8f07cac8a73b464fe2167cf8faab40b924d64f",
+              "osm-4e7ec4d655d213d699eea6d1c0f76d33a34fb359ed774c8591c8a4bdef9a49c1",
+              "osm-e1b5b242c1b816faade7467944ad058a8dc1e258bb8ee7e2dfc218726b9ceb79",
+              "osm-264a5461959e5fc8ec8049a81e4bec69f22cdbdba3432adcd2b197af1665d754",
+              "osm-38883027cbae0f9b92a615eb925ee94ab73c1298eb081373da94cffe5837c0f1",
+              "osm-0f2062296962c55e1b0be3e23d29b9a0b275aa386af2c26476af679139380ddb",
+              "osm-b03b91bc9c751c6c60bed648360a87b8b1f6f3435449a083ba34354d640ead9a",
+              "osm-e48d238e5011ab9727d93dc28086063f23cefeac6a36df989fb6817f661a2f9e",
+              "osm-24e669020f4936c8e98d7e765626704056207949db3c48d89de66f90602eb8bf",
+              "osm-e8e6a4f5e8bb0239334f8f0145b26da08cb1d81da839551ee498ac4ec53da1a4",
+              "osm-67baacb4cc6dd1b407bd08eebeb3b8b0b985b1a02e3f68d521e49e8d84ed472d",
+              "osm-66445e57a3b3c6a3d5d9b0860e23b341cc53755c34d8bd5286538723457faa94",
+              "osm-9a4ed34072b0e8aa59c07e42b9fb4f8c565ad1cf5af937d36614bbac1145ce0e",
+              "osm-502d1732fddcd9beb1b896dd9c003a0ce32eaad56c52b33d6476cf0c386d7f10",
+              "osm-713cfe9449634bbadca7e27e61ee1e0f277b2812c2ccba01ca1290bbb1e1349e",
+              "osm-a16141a8261e0a81fcb9f24ba40ea8e5babfdf2a3d9ef73f8508bec07ee45628",
+              "osm-81d8df228a59d92d7a2cf0b5b091fdade2bee02243a48f8ac7b2914bffb122fa",
+              "osm-e04ebf56b117231428570a61a7a858e032d8de6cddecb4b36d57709fe4993254",
+              "osm-9b6cbc1997248f5d51044c88b069f64a71fda97601e340bcc37dee29bec99bdd",
+              "osm-fdd12b55de0d0daa3b0e66d80bad55c939d8af298ee7d073bfc55661146338e9",
+              "osm-1416641387d860ddb97a94c74fb3e5ec07fb2a01899fd62743402730824d46f6",
+              "osm-c813f468135679fe4fa2e055627251f11ffb42a8c41e284c0fe272f2348a85e1",
+              "osm-c0d1b1cc684266d6a4a8d4faec63eccfabc02a928e747628b3982338004b7974",
+              "osm-a6908c3cc6e5e10442eefe19fb17d2c0f663941a969dfd83ab9b524a28ace9d1",
+              "osm-95202181054619c14e274e5aa5709f751fa30ac28d6a45e8c8901c86afd0d3d6",
+              "osm-0b0e981d73bace2155928f8ee7d05ff1f6b9ade2b35c5efc6d8efc7b5f67941f",
+              "osm-634c69684c40ca1a990ee3e53490d921d4a27403c07f797009275b3143b577eb",
+              "osm-fe4e022a1d7dd6c66100fb01d8e45fd792ff8e7eb5e78537673d8d4513306432",
+              "osm-a1623659593bb5d83d486956364c9355ac595a36fd8411d03c1f3eee2759d444",
+              "osm-5986965770b0a769094f600590d4b28fbc7cc95e25933a0eae179fd0e2098439",
+              "osm-9cf599bfd72cd9153b4ee22157fea621f871a39efe171fa76c44614776bf4543",
+              "osm-c9ef471ef4628ed360bf7652c44bcfe674f83c9c229315ebd4887ee5297ce90e",
+              "osm-a493e94b34979e91af17f39cf3b8703fe42300cd84a25303c7a629430012e195",
+              "osm-9f56debb9c2a60d12e7b9b202d7535fb7a113a41223f20e7b22847c74fa9abba",
+              "osm-a3963af28e4495ba789b43914d2552ff2a8e9b45e36edb8149d441166c8b06f9",
+              "osm-e1a96c2c2c96c2667263c45bb6b8a4bbd9bd8dd0cda2bee5f41f90f80b1ec8b7",
+              "osm-077064d86559ea136f2ac6861c58b7e698012e165cd48e0977b47389e3e5e169",
+              "osm-afbcb937b76e3bd659e20fe8ca1b0ee541a3b56ab16de5e330f580641aa53640",
+              "osm-29c00b6fe45e9e87736bc9ca6177cd2b362cd0008841481ca5ac3d85f68d1eb5",
+              "osm-9d486779bbfce019018d1cb8213faac2528f1f80f0464920069f1cf2cb417381",
+              "osm-a35323012eef92a42b693302cb796c28c1f0a2ba5deee5b3ba0d9c60d4c2b978",
+              "osm-d0691d34054ee4bf1b85ff3ddd1a267b64e6389399f21f5eb23129618d648afc",
+              "osm-aa17756c6e5bcee15649ee14e3825b71149b26148ad53842f5b9998d60c1b384",
+              "osm-6aa44383772486c86f67973a89add8782d2981693734965c07eb897ca1825510",
+              "osm-44b75a220be69928c3589293e6b95203182ad52d75e9dcc537da1c50a74def9d",
+              "osm-dd50c1d99cf429f9f6051d9a1f350daf96cdffd488b7bf82ce8b6d189a095bfc",
+              "osm-dfd34013188410744b20d8f4cc81d28b0607d811db3e6b727e6aef13010c0784",
+              "osm-7d32f8a96386f9d6c16c95838f615a7bffacb50d10d130d2c1d1005574c490db",
+              "osm-6d2886ac7f1e951e48743069a952ee6e7743baae3d0733578d204c778b8994c0",
+              "osm-162ec04964c32a4891a79a29bc081a053150c0a8a7359838176db6aa9049b4aa",
+              "osm-17a27816ed3d150c857ccfa26db51ccad71eaa388aba3c3221132134c74aa768",
+              "osm-706ee7a9c41b8c28d77571ac54fb23e366cf5aafbaf26b3d28fa312bec28192f",
+              "osm-5d694f6bf1f63faaa678d8efad82c2241e3b1b9cdf40236e152829c0961f4aef",
+              "osm-a0f7d56d0503647c59149b7f6cbcb9a749286e29fb40e4c2d13e385aeee46735",
+              "osm-64554171daea2a1178ab13682650dec11d9f72915e7eef466423581606aa05e2",
+              "osm-b7daf19e9933a6f145a6bb283b4413b5e977d8ee72815b4d10bf41bd9d647182",
+              "osm-7dc4832b807ea0cd7fb3a1b189a52cc7d4dca37236a4b289b4beec26cac64eaa",
+              "osm-d6e93f30bac1ada1ecc6f94b7b41fe05d11cf348e58efbd8aecc569b5e21299a",
+              "osm-0d37b7ffa5abe8b0d05b806c765ff7b0f5294092584b0bfe8bb96ed4cbd866e9",
+              "osm-61587027da996e2067cf5e31e4056b04fb8476b916d2d4f7660954220abcffb6",
+              "osm-d5c88e461b0ac52e4c445ec917fad4c8f69240eaa015ee3595f2eb1f62d8647f",
+              "osm-fd60220c7c9243e6fce759c1c44ecb97e53885aeecb0e80ddf628ce4416ae18c",
+              "osm-b97db3acdd8c01e50b4e1ae115b3876e8ebe112af0f6a1fd8aa3bbaed65817d3",
+              "osm-d9a6e9e7340c49cc2be7cd0eab523140963ce1efab1090e22a95932fe0e28444"
+            ]
+          },
+          "taskId": "shelter-capacity-transport"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-bus-1; task=support-feather-river; resource lacks capability=medical-support",
+        "compatibility: resource=exercise-engine-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=support-feather-river; resource lacks capability=medical-support",
+        "compatibility: resource=exercise-medical-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=support-feather-river; resource lacks capability=medical-support",
+        "resource-contention: task=evacuate-chico; eligible assignments=exercise-bus-1->shelter-capacity-transport consume needed capacity",
+        "resource-contention: task=evacuate-paradise; eligible assignments=exercise-bus-1->shelter-capacity-transport consume needed capacity"
+      ],
+      "causalCodes": [
+        "assignment.changed",
+        "override.locked-assignment",
+        "operator.override-changed-plan"
+      ],
+      "consequences": {
+        "corridorCleared": true
+      },
+      "coveredTaskIds": [
+        "shelter-capacity-transport"
+      ],
+      "inputHash": "4593fc59585c592d398a48921181685a489e19fc12f39dad7d2f87b4780d06a3",
+      "objectiveComponents": {
+        "objectiveValue": 386,
+        "travelCost": 220,
+        "uncoveredTaskPenalty": 166
+      },
+      "operatorOverride": {
+        "resourceId": "exercise-bus-1",
+        "taskId": "shelter-capacity-transport"
+      },
+      "tasks": [
+        {
+          "penalty": 111,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 24,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 2,
+          "taskId": "shelter-capacity-transport"
+        },
+        {
+          "penalty": 31,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-chico",
+        "evacuate-paradise",
+        "support-feather-river"
+      ]
+    },
+    "initialAllocation": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": []
+          },
+          "taskId": "evacuate-paradise"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-bus-1; task=protect-paradise-substation; resource lacks capability=suppression",
+        "compatibility: resource=exercise-bus-1; task=support-feather-river; resource lacks capability=medical-support",
+        "compatibility: resource=exercise-engine-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=support-feather-river; resource lacks capability=medical-support",
+        "compatibility: resource=exercise-medical-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=protect-paradise-substation; resource lacks capability=suppression",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=protect-paradise-substation; resource lacks capability=suppression",
+        "compatibility: resource=exercise-road-crew-1; task=support-feather-river; resource lacks capability=medical-support",
+        "resource-contention: task=evacuate-chico; eligible assignments=exercise-bus-1->evacuate-paradise consume needed capacity"
+      ],
+      "causalCodes": [],
+      "consequences": {
+        "corridorCleared": false
+      },
+      "coveredTaskIds": [
+        "evacuate-paradise"
+      ],
+      "inputHash": "ad9027b042a81d90342bc771ae85bcc9f18de4cb221bb7b46c7d147a1b09b6a7",
+      "objectiveComponents": {
+        "objectiveValue": 172,
+        "travelCost": 0,
+        "uncoveredTaskPenalty": 172
+      },
+      "operatorOverride": null,
+      "tasks": [
+        {
+          "penalty": 111,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 24,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 30,
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "penalty": 31,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-chico",
+        "protect-paradise-substation",
+        "support-feather-river"
+      ]
+    },
+    "shelterFieldReport": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": []
+          },
+          "taskId": "evacuate-paradise"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-bus-1; task=support-feather-river; resource lacks capability=medical-support",
+        "compatibility: resource=exercise-engine-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=shelter-capacity-transport; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=support-feather-river; resource lacks capability=medical-support",
+        "compatibility: resource=exercise-medical-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=shelter-capacity-transport; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=shelter-capacity-transport; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=support-feather-river; resource lacks capability=medical-support",
+        "resource-contention: task=evacuate-chico; eligible assignments=exercise-bus-1->evacuate-paradise consume needed capacity",
+        "resource-contention: task=shelter-capacity-transport; eligible assignments=exercise-bus-1->evacuate-paradise consume needed capacity"
+      ],
+      "causalCodes": [
+        "wind.changed",
+        "incident.task-added",
+        "incident.task-removed",
+        "incident.task-removed",
+        "route.reopened",
+        "assignment.changed"
+      ],
+      "consequences": {
+        "corridorCleared": true
+      },
+      "coveredTaskIds": [
+        "evacuate-paradise"
+      ],
+      "inputHash": "df3a8aa8b49555ad588223bb8343ed9c0e7db6b28eacad20477bdb070ec47eac",
+      "objectiveComponents": {
+        "objectiveValue": 144,
+        "travelCost": 0,
+        "uncoveredTaskPenalty": 144
+      },
+      "operatorOverride": null,
+      "tasks": [
+        {
+          "penalty": 111,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 24,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 2,
+          "taskId": "shelter-capacity-transport"
+        },
+        {
+          "penalty": 31,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-chico",
+        "shelter-capacity-transport",
+        "support-feather-river"
+      ]
+    }
+  },
+  "maximize-population-coverage": {
+    "auditEventTypes": [
+      "exercise.session-created",
+      "exercise.objective-selected",
+      "exercise.plan-generated",
+      "exercise.checkpoint-advanced",
+      "exercise.plan-generated",
+      "exercise.checkpoint-advanced",
+      "exercise.plan-generated",
+      "exercise.override-applied"
+    ],
+    "cascadingDisruption": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-1b200758887a947c968d3631d85224333adca74b2a053594aa7e6f680d7f10ba",
+              "osm-4d1bd86ef9798b772121f26e17a4d87cdd3ac52db776ebbfe1be9499ee15d812",
+              "osm-632af1bd9927162d5a185ab4f05b62a90ab6b6604ee4db36dc356d84ad3ba115",
+              "osm-0ffc957d1599a867543716cfaca35d80404ae9048f306a2479c1cba6a7afa064",
+              "osm-ad4e75dfbdae3c8722346ae32f27cc92ddc6c1c655f0851c4aec837ff72f5f21",
+              "osm-add71968d06cdeccdea685a93af0e52c897d4a438faebd658fdc228b7cf0fbbf",
+              "osm-2ffb02fd68d5e4932877eecd92476e5507506bbbd0f8effc717e0b8a40791ecd",
+              "osm-8c9dcdd1d36dd1775211ab2f28439b828b57ecffacd5b823ddd165f6dcfd52e4",
+              "osm-14d52ceb3365ddb33bbb548db2e693189c75d3bc9e06c8c4924fe7ddb35ae1a2",
+              "osm-74c468fc4ba327dae6af4bef72172129a5d6ffb5910384892851b4997b60202a",
+              "osm-65038fa9c0f8d50613107968c4a45af5f25664c48069ea96cc45c1b0e2c332c1",
+              "osm-8c190c710b5065ec988ec6b12f2ac6ddc96d014020f18588a7d9c78cab6a858b",
+              "osm-c862499226cac637fbf338cd87beb924821609a6ab56b8e0726e0e6c42d5ffce",
+              "osm-7b2bdef3c647e51784e6c3917e38d381cdcd327ce40873ddc75fed2e4409479b",
+              "osm-51db650ce2e2a17e8d50388ccc3ef3a00e7402d5905d0149c1b62fc15c7b06aa",
+              "osm-de0bf2fc0ab3142a9fe12b0295d166b81b796873d4f78f8d6eed61d74ae692d4",
+              "osm-526f3585c1abe383026ea602aa7b78bd17def442ddf01671d5001d295d70dc4c",
+              "osm-ac25d0d4d23b92e6dc346422922e7a55fa87cb5e2e727916c9e5bcb66b19f61a",
+              "osm-26f379f216aeb659bf3c3c6006f4ccb2e571546716175da8ff61a73ce38b409f",
+              "osm-9239edcbdf851030de966294a075c0d5abff35ccc22e7fa531d33a5e90125faf",
+              "osm-978f92d8652f893a8b9a778399c7cf43c9759184368a634e7300a639c5642990",
+              "osm-9c23ef1ae2023e72fee2a7f5a8834fc04a733a962aadb73b5bc6fba58749fe2a",
+              "osm-87f4a93480b95a50d3948de60d5d970979c1ddb91364e524503203b71b33ad2a",
+              "osm-67baacb4cc6dd1b407bd08eebeb3b8b0b985b1a02e3f68d521e49e8d84ed472d",
+              "osm-66445e57a3b3c6a3d5d9b0860e23b341cc53755c34d8bd5286538723457faa94",
+              "osm-9a4ed34072b0e8aa59c07e42b9fb4f8c565ad1cf5af937d36614bbac1145ce0e",
+              "osm-502d1732fddcd9beb1b896dd9c003a0ce32eaad56c52b33d6476cf0c386d7f10",
+              "osm-713cfe9449634bbadca7e27e61ee1e0f277b2812c2ccba01ca1290bbb1e1349e",
+              "osm-a16141a8261e0a81fcb9f24ba40ea8e5babfdf2a3d9ef73f8508bec07ee45628",
+              "osm-81d8df228a59d92d7a2cf0b5b091fdade2bee02243a48f8ac7b2914bffb122fa",
+              "osm-e04ebf56b117231428570a61a7a858e032d8de6cddecb4b36d57709fe4993254",
+              "osm-9b6cbc1997248f5d51044c88b069f64a71fda97601e340bcc37dee29bec99bdd",
+              "osm-fdd12b55de0d0daa3b0e66d80bad55c939d8af298ee7d073bfc55661146338e9",
+              "osm-1416641387d860ddb97a94c74fb3e5ec07fb2a01899fd62743402730824d46f6",
+              "osm-c813f468135679fe4fa2e055627251f11ffb42a8c41e284c0fe272f2348a85e1",
+              "osm-c0d1b1cc684266d6a4a8d4faec63eccfabc02a928e747628b3982338004b7974",
+              "osm-a6908c3cc6e5e10442eefe19fb17d2c0f663941a969dfd83ab9b524a28ace9d1",
+              "osm-95202181054619c14e274e5aa5709f751fa30ac28d6a45e8c8901c86afd0d3d6",
+              "osm-0b0e981d73bace2155928f8ee7d05ff1f6b9ade2b35c5efc6d8efc7b5f67941f",
+              "osm-634c69684c40ca1a990ee3e53490d921d4a27403c07f797009275b3143b577eb",
+              "osm-fe4e022a1d7dd6c66100fb01d8e45fd792ff8e7eb5e78537673d8d4513306432",
+              "osm-a1623659593bb5d83d486956364c9355ac595a36fd8411d03c1f3eee2759d444",
+              "osm-5986965770b0a769094f600590d4b28fbc7cc95e25933a0eae179fd0e2098439",
+              "osm-9cf599bfd72cd9153b4ee22157fea621f871a39efe171fa76c44614776bf4543",
+              "osm-c9ef471ef4628ed360bf7652c44bcfe674f83c9c229315ebd4887ee5297ce90e",
+              "osm-a493e94b34979e91af17f39cf3b8703fe42300cd84a25303c7a629430012e195",
+              "osm-9f56debb9c2a60d12e7b9b202d7535fb7a113a41223f20e7b22847c74fa9abba",
+              "osm-a3963af28e4495ba789b43914d2552ff2a8e9b45e36edb8149d441166c8b06f9",
+              "osm-e1a96c2c2c96c2667263c45bb6b8a4bbd9bd8dd0cda2bee5f41f90f80b1ec8b7",
+              "osm-077064d86559ea136f2ac6861c58b7e698012e165cd48e0977b47389e3e5e169",
+              "osm-afbcb937b76e3bd659e20fe8ca1b0ee541a3b56ab16de5e330f580641aa53640",
+              "osm-29c00b6fe45e9e87736bc9ca6177cd2b362cd0008841481ca5ac3d85f68d1eb5",
+              "osm-9d486779bbfce019018d1cb8213faac2528f1f80f0464920069f1cf2cb417381",
+              "osm-a35323012eef92a42b693302cb796c28c1f0a2ba5deee5b3ba0d9c60d4c2b978",
+              "osm-d0691d34054ee4bf1b85ff3ddd1a267b64e6389399f21f5eb23129618d648afc",
+              "osm-aa17756c6e5bcee15649ee14e3825b71149b26148ad53842f5b9998d60c1b384",
+              "osm-6aa44383772486c86f67973a89add8782d2981693734965c07eb897ca1825510",
+              "osm-44b75a220be69928c3589293e6b95203182ad52d75e9dcc537da1c50a74def9d",
+              "osm-dd50c1d99cf429f9f6051d9a1f350daf96cdffd488b7bf82ce8b6d189a095bfc",
+              "osm-dfd34013188410744b20d8f4cc81d28b0607d811db3e6b727e6aef13010c0784",
+              "osm-59c14b0908a6bcc05cbea25a430dcdb5943f6b619f5c31427f02ae3479d3f8b6",
+              "osm-017d962ee868a518d0d34ebb1f4f4660e32e316e5df238ae075bf92b5dd863c5",
+              "osm-a4efc18a7da5fbd2d4b2e3aedfd80866e34cd2b1131b6e373a4c62dc40ac1a10",
+              "osm-e085a6d3f13cbda18886c65876ec7e7d6934245e5c3f7433d140174618a5ce9b",
+              "osm-05e13cc0f920fed6022827fdae9ecc74aca99abb64493eae1216bfd363bf12d5",
+              "osm-33a00595b5c486dac3326311d269bd3f474ec63ab4bd1636defc0b455be2879d",
+              "osm-90e4f6cc3854b5a91d20649d165f3fa3cbf5fed6969682ece5186278afd81b09",
+              "osm-97d28459047c56c8e9422cb695d8a75dfea8bf076eeff95c24c92b3cb96a1741",
+              "osm-a44320684d2ed07b756d71ead2d7c67f8c7d58445145668651be5296ddbb1d57",
+              "osm-b982e107b7d8b785a51e8dd7d567a8031d53de1633367265c1211e00aa56ee5c",
+              "osm-8482084aaa50b99203b7de48558640b3aae52efcf2a72939cc43774db1f91fab",
+              "osm-694d391df6b526d67fdcce4c4c50b9675738e70a004a63dbc5f0f4f1dcf17cc9",
+              "osm-34e75872cc5e1cb19b1eb10728c7c76e161eda6beb4186f2dedbd2b6633f3cea",
+              "osm-416bf21f08737875422f0b2ff49fc28f7e4c3fe4dbfc4fa598f95aae0025a705",
+              "osm-b90de7f29ef1f959f114456cf3761ce29c2b1fd5f1c89eb55e4e50ce8fad095a",
+              "osm-d947cc1fc0ca3a1206a959de75fb18e0ce7134627d7e157fcdc1e3216622d819"
+            ]
+          },
+          "taskId": "evacuate-chico"
+        },
+        {
+          "resourceId": "exercise-engine-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-1b200758887a947c968d3631d85224333adca74b2a053594aa7e6f680d7f10ba",
+              "osm-4d1bd86ef9798b772121f26e17a4d87cdd3ac52db776ebbfe1be9499ee15d812",
+              "osm-632af1bd9927162d5a185ab4f05b62a90ab6b6604ee4db36dc356d84ad3ba115",
+              "osm-0ffc957d1599a867543716cfaca35d80404ae9048f306a2479c1cba6a7afa064",
+              "osm-ad4e75dfbdae3c8722346ae32f27cc92ddc6c1c655f0851c4aec837ff72f5f21",
+              "osm-add71968d06cdeccdea685a93af0e52c897d4a438faebd658fdc228b7cf0fbbf",
+              "osm-2ffb02fd68d5e4932877eecd92476e5507506bbbd0f8effc717e0b8a40791ecd",
+              "osm-8c9dcdd1d36dd1775211ab2f28439b828b57ecffacd5b823ddd165f6dcfd52e4",
+              "osm-14d52ceb3365ddb33bbb548db2e693189c75d3bc9e06c8c4924fe7ddb35ae1a2",
+              "osm-74c468fc4ba327dae6af4bef72172129a5d6ffb5910384892851b4997b60202a",
+              "osm-65038fa9c0f8d50613107968c4a45af5f25664c48069ea96cc45c1b0e2c332c1",
+              "osm-8c190c710b5065ec988ec6b12f2ac6ddc96d014020f18588a7d9c78cab6a858b",
+              "osm-2edc641878cb02350c473b97ce7186fb6adab1bec1a52df5f073352fa6838f57"
+            ]
+          },
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "resourceId": "exercise-medical-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-cbb53b24fd78cdb8c6f241c0a384a4c4de62e79aff4953fb9785c2bcc2acb5eb",
+              "osm-85059fe146cb146de539e98783b28ff776238a8bc95fa043bd4d74f931c1cf08",
+              "osm-659eb853228a16a8063a58060f17e4d26451052ddea2c644aaad9b253cf7acaf",
+              "osm-634d8ccef79f75ca5843864e47321312516ae873788c4ef057430c5c3b5334e7",
+              "osm-5c11c56ef58a179f1cdb308ccf4624b87108ad1ad3f4d6e6b575dcaeb578149a",
+              "osm-4708aad50516bdc3c5709808d4207426ef8cc695de7e0f6e860f4e44a6bf492b",
+              "osm-033662f2851d19f0d436a28c02e536b63aef1646a1db91df1bac527b8c146311",
+              "osm-6840b40be3de61514b1f4597f00aea3a046a504181df85f535556ee70a246a62",
+              "osm-98974e7a1c369eef901b671767d14eebaf8a0f367788c12b1d5b68d9182c0afb",
+              "osm-98cfdf77f90ed0ec1e802cc7ea36a1e0de692027ebeacee33f6ef84d365a19a5",
+              "osm-f813811ddcb370fcff40a2068b57fd612c710e92906425e2708b13cdd44ff13c",
+              "osm-b2cd48feac556b32aeb839314d09670e364a4bb411d9d9a89cec1d8f496e9266",
+              "osm-1eabce12eae50e5c6755b9977a28d1b58eb7333eaede4ae9b37a1cae8a6e9828",
+              "osm-b8fb2885686f7c2dc58bc7115179f8a94fa27f3e5a4a85711f4023a290b2bc2f",
+              "osm-6a11f8f251df357d4ddade3dcc479019b79222f8a598a17b81c192c29cb9843a",
+              "osm-6b890db133937d52123fbc614b10c48afa25b986de8a30c8ec596151c37f1a44",
+              "osm-a2428509d2a1aba9588a9b063e0f5b556691981fbcb6f1554720360cc67f6b27",
+              "osm-3d49bb2a3ec5ed67a349fd7aaee944225235f1b147ccd82e0e2b187489bfe5cf",
+              "osm-5a36f2c46ad182c42e2aec5de9b2128b09cf138d1dff8ac635b5e98698576af5",
+              "osm-92224727a6f6d8b4aeaa6a8f97853e50f7a9a451957de75d698d64fcc09408fc",
+              "osm-18347f39a0b48eea203f16c0666311d377e5b6fb023cd123ed3625a988abfac6",
+              "osm-9b339113b5fb4c5b64fa59e61305630cb692edf7a048abc52c6f68e7201dec83",
+              "osm-7f2b3603a46c6885f053c2700fea1503cbfec3d90ff0bd1383768594e7e806ab",
+              "osm-dcc7c4aab12b19da4c648174d6b609d65ddbeaa4c78ea30454fbc42c8a395ce8",
+              "osm-1a2d7594cc3486d9873b6ff8465f95bb8eeca342dc6cb6a3b565cf347de3a0a8",
+              "osm-6485cc2c178e23b84fd09b28776c818cc18334d8aab86027c9cdb3cc10728291",
+              "osm-d272b662489b4b0cae41f09c487d6a0d584f3c2038fcf5f62cecee205ecc3836",
+              "osm-506541e538d9cfef262da265a774160dd70b0759568f6687dbea4cc6b5dfa241",
+              "osm-1614835fe5d615f15dfaa2005d4067fd5bf8000346d1e8898339a31713f0cfed",
+              "osm-8264211bc59521d520e54cf22158f432c38a40169ad4580b04b774bfa9c28c4e",
+              "osm-b5c84eaa8b30358f91bc0dc41d488aa5a15ca69325d6c47755ff8f46e203b7ca",
+              "osm-93fc28933b8b8ea96f7aaf38c3183beff14cfaf44d9b1770f3cf342ba14f486f",
+              "osm-ed2858b7134293026d76a3a1ad7ae5017cbb5d43439e0ea36d0fed76dedbe52f",
+              "osm-81651f26084af1660501a3d484c73b96ce5b87a8449afdfba4bd3711f06c3f83",
+              "osm-c2b19ad08e9d6c6d19e400faad4e9b8c7bbfc04c51c8b9d040446fe586f7cbef",
+              "osm-277c889648bb6e422e75a0173433e4dd25f29d1656680a7a2a1ffd5e48fe3a73"
+            ]
+          },
+          "taskId": "support-feather-river"
+        },
+        {
+          "resourceId": "exercise-road-crew-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-1b200758887a947c968d3631d85224333adca74b2a053594aa7e6f680d7f10ba",
+              "osm-4d1bd86ef9798b772121f26e17a4d87cdd3ac52db776ebbfe1be9499ee15d812",
+              "osm-632af1bd9927162d5a185ab4f05b62a90ab6b6604ee4db36dc356d84ad3ba115",
+              "osm-0ffc957d1599a867543716cfaca35d80404ae9048f306a2479c1cba6a7afa064",
+              "osm-ad4e75dfbdae3c8722346ae32f27cc92ddc6c1c655f0851c4aec837ff72f5f21",
+              "osm-add71968d06cdeccdea685a93af0e52c897d4a438faebd658fdc228b7cf0fbbf",
+              "osm-2ffb02fd68d5e4932877eecd92476e5507506bbbd0f8effc717e0b8a40791ecd",
+              "osm-8c9dcdd1d36dd1775211ab2f28439b828b57ecffacd5b823ddd165f6dcfd52e4",
+              "osm-14d52ceb3365ddb33bbb548db2e693189c75d3bc9e06c8c4924fe7ddb35ae1a2",
+              "osm-74c468fc4ba327dae6af4bef72172129a5d6ffb5910384892851b4997b60202a",
+              "osm-65038fa9c0f8d50613107968c4a45af5f25664c48069ea96cc45c1b0e2c332c1",
+              "osm-8c190c710b5065ec988ec6b12f2ac6ddc96d014020f18588a7d9c78cab6a858b",
+              "osm-2edc641878cb02350c473b97ce7186fb6adab1bec1a52df5f073352fa6838f57"
+            ]
+          },
+          "taskId": "clear-primary-corridor"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-engine-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "resource-contention: task=evacuate-paradise; eligible assignments=exercise-bus-1->evacuate-chico consume needed capacity"
+      ],
+      "causalCodes": [
+        "wind.changed",
+        "incident.task-added",
+        "route.closed",
+        "assignment.changed"
+      ],
+      "consequences": {
+        "corridorCleared": false
+      },
+      "coveredTaskIds": [
+        "clear-primary-corridor",
+        "evacuate-chico",
+        "protect-paradise-substation",
+        "support-feather-river"
+      ],
+      "inputHash": "86437267433517b1f9e177332747e751c514b05b51c1e3bf9ceaf4053e3914a5",
+      "objectiveComponents": {
+        "objectiveValue": 97,
+        "travelCost": 37,
+        "uncoveredTaskPenalty": 60
+      },
+      "operatorOverride": null,
+      "tasks": [
+        {
+          "penalty": 141,
+          "taskId": "clear-primary-corridor"
+        },
+        {
+          "penalty": 1020,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 60,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 66,
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "penalty": 31,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-paradise"
+      ]
+    },
+    "finalOverride": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f",
+              "osm-754e70257e7606a0fd092da6f3bed0c17baacf49c62c32c29e7fb16cc0d566ff",
+              "osm-0ed05f534175513b9e03f2e3b0b30bee47311a2ac3433022051e53d4d3c20449",
+              "osm-5c5b282573ad61df35e2a2c10b8f07cac8a73b464fe2167cf8faab40b924d64f",
+              "osm-4e7ec4d655d213d699eea6d1c0f76d33a34fb359ed774c8591c8a4bdef9a49c1",
+              "osm-e1b5b242c1b816faade7467944ad058a8dc1e258bb8ee7e2dfc218726b9ceb79",
+              "osm-264a5461959e5fc8ec8049a81e4bec69f22cdbdba3432adcd2b197af1665d754",
+              "osm-38883027cbae0f9b92a615eb925ee94ab73c1298eb081373da94cffe5837c0f1",
+              "osm-0f2062296962c55e1b0be3e23d29b9a0b275aa386af2c26476af679139380ddb",
+              "osm-b03b91bc9c751c6c60bed648360a87b8b1f6f3435449a083ba34354d640ead9a",
+              "osm-e48d238e5011ab9727d93dc28086063f23cefeac6a36df989fb6817f661a2f9e",
+              "osm-24e669020f4936c8e98d7e765626704056207949db3c48d89de66f90602eb8bf",
+              "osm-e8e6a4f5e8bb0239334f8f0145b26da08cb1d81da839551ee498ac4ec53da1a4",
+              "osm-67baacb4cc6dd1b407bd08eebeb3b8b0b985b1a02e3f68d521e49e8d84ed472d",
+              "osm-66445e57a3b3c6a3d5d9b0860e23b341cc53755c34d8bd5286538723457faa94",
+              "osm-9a4ed34072b0e8aa59c07e42b9fb4f8c565ad1cf5af937d36614bbac1145ce0e",
+              "osm-502d1732fddcd9beb1b896dd9c003a0ce32eaad56c52b33d6476cf0c386d7f10",
+              "osm-713cfe9449634bbadca7e27e61ee1e0f277b2812c2ccba01ca1290bbb1e1349e",
+              "osm-a16141a8261e0a81fcb9f24ba40ea8e5babfdf2a3d9ef73f8508bec07ee45628",
+              "osm-81d8df228a59d92d7a2cf0b5b091fdade2bee02243a48f8ac7b2914bffb122fa",
+              "osm-e04ebf56b117231428570a61a7a858e032d8de6cddecb4b36d57709fe4993254",
+              "osm-9b6cbc1997248f5d51044c88b069f64a71fda97601e340bcc37dee29bec99bdd",
+              "osm-fdd12b55de0d0daa3b0e66d80bad55c939d8af298ee7d073bfc55661146338e9",
+              "osm-1416641387d860ddb97a94c74fb3e5ec07fb2a01899fd62743402730824d46f6",
+              "osm-c813f468135679fe4fa2e055627251f11ffb42a8c41e284c0fe272f2348a85e1",
+              "osm-c0d1b1cc684266d6a4a8d4faec63eccfabc02a928e747628b3982338004b7974",
+              "osm-a6908c3cc6e5e10442eefe19fb17d2c0f663941a969dfd83ab9b524a28ace9d1",
+              "osm-95202181054619c14e274e5aa5709f751fa30ac28d6a45e8c8901c86afd0d3d6",
+              "osm-0b0e981d73bace2155928f8ee7d05ff1f6b9ade2b35c5efc6d8efc7b5f67941f",
+              "osm-634c69684c40ca1a990ee3e53490d921d4a27403c07f797009275b3143b577eb",
+              "osm-fe4e022a1d7dd6c66100fb01d8e45fd792ff8e7eb5e78537673d8d4513306432",
+              "osm-a1623659593bb5d83d486956364c9355ac595a36fd8411d03c1f3eee2759d444",
+              "osm-5986965770b0a769094f600590d4b28fbc7cc95e25933a0eae179fd0e2098439",
+              "osm-9cf599bfd72cd9153b4ee22157fea621f871a39efe171fa76c44614776bf4543",
+              "osm-c9ef471ef4628ed360bf7652c44bcfe674f83c9c229315ebd4887ee5297ce90e",
+              "osm-a493e94b34979e91af17f39cf3b8703fe42300cd84a25303c7a629430012e195",
+              "osm-9f56debb9c2a60d12e7b9b202d7535fb7a113a41223f20e7b22847c74fa9abba",
+              "osm-a3963af28e4495ba789b43914d2552ff2a8e9b45e36edb8149d441166c8b06f9",
+              "osm-e1a96c2c2c96c2667263c45bb6b8a4bbd9bd8dd0cda2bee5f41f90f80b1ec8b7",
+              "osm-077064d86559ea136f2ac6861c58b7e698012e165cd48e0977b47389e3e5e169",
+              "osm-afbcb937b76e3bd659e20fe8ca1b0ee541a3b56ab16de5e330f580641aa53640",
+              "osm-29c00b6fe45e9e87736bc9ca6177cd2b362cd0008841481ca5ac3d85f68d1eb5",
+              "osm-9d486779bbfce019018d1cb8213faac2528f1f80f0464920069f1cf2cb417381",
+              "osm-a35323012eef92a42b693302cb796c28c1f0a2ba5deee5b3ba0d9c60d4c2b978",
+              "osm-d0691d34054ee4bf1b85ff3ddd1a267b64e6389399f21f5eb23129618d648afc",
+              "osm-aa17756c6e5bcee15649ee14e3825b71149b26148ad53842f5b9998d60c1b384",
+              "osm-6aa44383772486c86f67973a89add8782d2981693734965c07eb897ca1825510",
+              "osm-44b75a220be69928c3589293e6b95203182ad52d75e9dcc537da1c50a74def9d",
+              "osm-dd50c1d99cf429f9f6051d9a1f350daf96cdffd488b7bf82ce8b6d189a095bfc",
+              "osm-dfd34013188410744b20d8f4cc81d28b0607d811db3e6b727e6aef13010c0784",
+              "osm-7d32f8a96386f9d6c16c95838f615a7bffacb50d10d130d2c1d1005574c490db",
+              "osm-6d2886ac7f1e951e48743069a952ee6e7743baae3d0733578d204c778b8994c0",
+              "osm-162ec04964c32a4891a79a29bc081a053150c0a8a7359838176db6aa9049b4aa",
+              "osm-17a27816ed3d150c857ccfa26db51ccad71eaa388aba3c3221132134c74aa768",
+              "osm-706ee7a9c41b8c28d77571ac54fb23e366cf5aafbaf26b3d28fa312bec28192f",
+              "osm-5d694f6bf1f63faaa678d8efad82c2241e3b1b9cdf40236e152829c0961f4aef",
+              "osm-a0f7d56d0503647c59149b7f6cbcb9a749286e29fb40e4c2d13e385aeee46735",
+              "osm-64554171daea2a1178ab13682650dec11d9f72915e7eef466423581606aa05e2",
+              "osm-b7daf19e9933a6f145a6bb283b4413b5e977d8ee72815b4d10bf41bd9d647182",
+              "osm-7dc4832b807ea0cd7fb3a1b189a52cc7d4dca37236a4b289b4beec26cac64eaa",
+              "osm-d6e93f30bac1ada1ecc6f94b7b41fe05d11cf348e58efbd8aecc569b5e21299a",
+              "osm-0d37b7ffa5abe8b0d05b806c765ff7b0f5294092584b0bfe8bb96ed4cbd866e9",
+              "osm-61587027da996e2067cf5e31e4056b04fb8476b916d2d4f7660954220abcffb6",
+              "osm-d5c88e461b0ac52e4c445ec917fad4c8f69240eaa015ee3595f2eb1f62d8647f",
+              "osm-fd60220c7c9243e6fce759c1c44ecb97e53885aeecb0e80ddf628ce4416ae18c",
+              "osm-b97db3acdd8c01e50b4e1ae115b3876e8ebe112af0f6a1fd8aa3bbaed65817d3",
+              "osm-d9a6e9e7340c49cc2be7cd0eab523140963ce1efab1090e22a95932fe0e28444"
+            ]
+          },
+          "taskId": "shelter-capacity-transport"
+        },
+        {
+          "resourceId": "exercise-medical-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-cbb53b24fd78cdb8c6f241c0a384a4c4de62e79aff4953fb9785c2bcc2acb5eb",
+              "osm-85059fe146cb146de539e98783b28ff776238a8bc95fa043bd4d74f931c1cf08",
+              "osm-659eb853228a16a8063a58060f17e4d26451052ddea2c644aaad9b253cf7acaf",
+              "osm-634d8ccef79f75ca5843864e47321312516ae873788c4ef057430c5c3b5334e7",
+              "osm-5c11c56ef58a179f1cdb308ccf4624b87108ad1ad3f4d6e6b575dcaeb578149a",
+              "osm-4708aad50516bdc3c5709808d4207426ef8cc695de7e0f6e860f4e44a6bf492b",
+              "osm-033662f2851d19f0d436a28c02e536b63aef1646a1db91df1bac527b8c146311",
+              "osm-6840b40be3de61514b1f4597f00aea3a046a504181df85f535556ee70a246a62",
+              "osm-98974e7a1c369eef901b671767d14eebaf8a0f367788c12b1d5b68d9182c0afb",
+              "osm-98cfdf77f90ed0ec1e802cc7ea36a1e0de692027ebeacee33f6ef84d365a19a5",
+              "osm-f813811ddcb370fcff40a2068b57fd612c710e92906425e2708b13cdd44ff13c",
+              "osm-b2cd48feac556b32aeb839314d09670e364a4bb411d9d9a89cec1d8f496e9266",
+              "osm-1eabce12eae50e5c6755b9977a28d1b58eb7333eaede4ae9b37a1cae8a6e9828",
+              "osm-b8fb2885686f7c2dc58bc7115179f8a94fa27f3e5a4a85711f4023a290b2bc2f",
+              "osm-6a11f8f251df357d4ddade3dcc479019b79222f8a598a17b81c192c29cb9843a",
+              "osm-6b890db133937d52123fbc614b10c48afa25b986de8a30c8ec596151c37f1a44",
+              "osm-a2428509d2a1aba9588a9b063e0f5b556691981fbcb6f1554720360cc67f6b27",
+              "osm-3d49bb2a3ec5ed67a349fd7aaee944225235f1b147ccd82e0e2b187489bfe5cf",
+              "osm-5a36f2c46ad182c42e2aec5de9b2128b09cf138d1dff8ac635b5e98698576af5",
+              "osm-92224727a6f6d8b4aeaa6a8f97853e50f7a9a451957de75d698d64fcc09408fc",
+              "osm-18347f39a0b48eea203f16c0666311d377e5b6fb023cd123ed3625a988abfac6",
+              "osm-9b339113b5fb4c5b64fa59e61305630cb692edf7a048abc52c6f68e7201dec83",
+              "osm-7f2b3603a46c6885f053c2700fea1503cbfec3d90ff0bd1383768594e7e806ab",
+              "osm-dcc7c4aab12b19da4c648174d6b609d65ddbeaa4c78ea30454fbc42c8a395ce8",
+              "osm-1a2d7594cc3486d9873b6ff8465f95bb8eeca342dc6cb6a3b565cf347de3a0a8",
+              "osm-6485cc2c178e23b84fd09b28776c818cc18334d8aab86027c9cdb3cc10728291",
+              "osm-d272b662489b4b0cae41f09c487d6a0d584f3c2038fcf5f62cecee205ecc3836",
+              "osm-506541e538d9cfef262da265a774160dd70b0759568f6687dbea4cc6b5dfa241",
+              "osm-1614835fe5d615f15dfaa2005d4067fd5bf8000346d1e8898339a31713f0cfed",
+              "osm-8264211bc59521d520e54cf22158f432c38a40169ad4580b04b774bfa9c28c4e",
+              "osm-b5c84eaa8b30358f91bc0dc41d488aa5a15ca69325d6c47755ff8f46e203b7ca",
+              "osm-93fc28933b8b8ea96f7aaf38c3183beff14cfaf44d9b1770f3cf342ba14f486f",
+              "osm-ed2858b7134293026d76a3a1ad7ae5017cbb5d43439e0ea36d0fed76dedbe52f",
+              "osm-81651f26084af1660501a3d484c73b96ce5b87a8449afdfba4bd3711f06c3f83",
+              "osm-c2b19ad08e9d6c6d19e400faad4e9b8c7bbfc04c51c8b9d040446fe586f7cbef",
+              "osm-277c889648bb6e422e75a0173433e4dd25f29d1656680a7a2a1ffd5e48fe3a73"
+            ]
+          },
+          "taskId": "support-feather-river"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-engine-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "resource-contention: task=evacuate-chico; eligible assignments=exercise-bus-1->shelter-capacity-transport consume needed capacity",
+        "resource-contention: task=evacuate-paradise; eligible assignments=exercise-bus-1->shelter-capacity-transport consume needed capacity"
+      ],
+      "causalCodes": [
+        "assignment.changed",
+        "override.locked-assignment",
+        "operator.override-changed-plan"
+      ],
+      "consequences": {
+        "corridorCleared": true
+      },
+      "coveredTaskIds": [
+        "shelter-capacity-transport",
+        "support-feather-river"
+      ],
+      "inputHash": "cc6e11b1a69f732e2c37f67e547bdbb6aaf2f3c4f9d46b751fdcfc3691c35a3c",
+      "objectiveComponents": {
+        "objectiveValue": 1108,
+        "travelCost": 28,
+        "uncoveredTaskPenalty": 1080
+      },
+      "operatorOverride": {
+        "resourceId": "exercise-bus-1",
+        "taskId": "shelter-capacity-transport"
+      },
+      "tasks": [
+        {
+          "penalty": 1020,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 60,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 2,
+          "taskId": "shelter-capacity-transport"
+        },
+        {
+          "penalty": 31,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-chico",
+        "evacuate-paradise"
+      ]
+    },
+    "initialAllocation": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f",
+              "osm-754e70257e7606a0fd092da6f3bed0c17baacf49c62c32c29e7fb16cc0d566ff",
+              "osm-0ed05f534175513b9e03f2e3b0b30bee47311a2ac3433022051e53d4d3c20449",
+              "osm-5c5b282573ad61df35e2a2c10b8f07cac8a73b464fe2167cf8faab40b924d64f",
+              "osm-4e7ec4d655d213d699eea6d1c0f76d33a34fb359ed774c8591c8a4bdef9a49c1",
+              "osm-e1b5b242c1b816faade7467944ad058a8dc1e258bb8ee7e2dfc218726b9ceb79",
+              "osm-264a5461959e5fc8ec8049a81e4bec69f22cdbdba3432adcd2b197af1665d754",
+              "osm-38883027cbae0f9b92a615eb925ee94ab73c1298eb081373da94cffe5837c0f1",
+              "osm-0f2062296962c55e1b0be3e23d29b9a0b275aa386af2c26476af679139380ddb",
+              "osm-b03b91bc9c751c6c60bed648360a87b8b1f6f3435449a083ba34354d640ead9a",
+              "osm-e48d238e5011ab9727d93dc28086063f23cefeac6a36df989fb6817f661a2f9e",
+              "osm-24e669020f4936c8e98d7e765626704056207949db3c48d89de66f90602eb8bf",
+              "osm-e8e6a4f5e8bb0239334f8f0145b26da08cb1d81da839551ee498ac4ec53da1a4",
+              "osm-67baacb4cc6dd1b407bd08eebeb3b8b0b985b1a02e3f68d521e49e8d84ed472d",
+              "osm-66445e57a3b3c6a3d5d9b0860e23b341cc53755c34d8bd5286538723457faa94",
+              "osm-9a4ed34072b0e8aa59c07e42b9fb4f8c565ad1cf5af937d36614bbac1145ce0e",
+              "osm-502d1732fddcd9beb1b896dd9c003a0ce32eaad56c52b33d6476cf0c386d7f10",
+              "osm-713cfe9449634bbadca7e27e61ee1e0f277b2812c2ccba01ca1290bbb1e1349e",
+              "osm-a16141a8261e0a81fcb9f24ba40ea8e5babfdf2a3d9ef73f8508bec07ee45628",
+              "osm-81d8df228a59d92d7a2cf0b5b091fdade2bee02243a48f8ac7b2914bffb122fa",
+              "osm-e04ebf56b117231428570a61a7a858e032d8de6cddecb4b36d57709fe4993254",
+              "osm-9b6cbc1997248f5d51044c88b069f64a71fda97601e340bcc37dee29bec99bdd",
+              "osm-fdd12b55de0d0daa3b0e66d80bad55c939d8af298ee7d073bfc55661146338e9",
+              "osm-1416641387d860ddb97a94c74fb3e5ec07fb2a01899fd62743402730824d46f6",
+              "osm-c813f468135679fe4fa2e055627251f11ffb42a8c41e284c0fe272f2348a85e1",
+              "osm-c0d1b1cc684266d6a4a8d4faec63eccfabc02a928e747628b3982338004b7974",
+              "osm-a6908c3cc6e5e10442eefe19fb17d2c0f663941a969dfd83ab9b524a28ace9d1",
+              "osm-95202181054619c14e274e5aa5709f751fa30ac28d6a45e8c8901c86afd0d3d6",
+              "osm-0b0e981d73bace2155928f8ee7d05ff1f6b9ade2b35c5efc6d8efc7b5f67941f",
+              "osm-634c69684c40ca1a990ee3e53490d921d4a27403c07f797009275b3143b577eb",
+              "osm-fe4e022a1d7dd6c66100fb01d8e45fd792ff8e7eb5e78537673d8d4513306432",
+              "osm-a1623659593bb5d83d486956364c9355ac595a36fd8411d03c1f3eee2759d444",
+              "osm-5986965770b0a769094f600590d4b28fbc7cc95e25933a0eae179fd0e2098439",
+              "osm-9cf599bfd72cd9153b4ee22157fea621f871a39efe171fa76c44614776bf4543",
+              "osm-c9ef471ef4628ed360bf7652c44bcfe674f83c9c229315ebd4887ee5297ce90e",
+              "osm-a493e94b34979e91af17f39cf3b8703fe42300cd84a25303c7a629430012e195",
+              "osm-9f56debb9c2a60d12e7b9b202d7535fb7a113a41223f20e7b22847c74fa9abba",
+              "osm-a3963af28e4495ba789b43914d2552ff2a8e9b45e36edb8149d441166c8b06f9",
+              "osm-e1a96c2c2c96c2667263c45bb6b8a4bbd9bd8dd0cda2bee5f41f90f80b1ec8b7",
+              "osm-077064d86559ea136f2ac6861c58b7e698012e165cd48e0977b47389e3e5e169",
+              "osm-afbcb937b76e3bd659e20fe8ca1b0ee541a3b56ab16de5e330f580641aa53640",
+              "osm-29c00b6fe45e9e87736bc9ca6177cd2b362cd0008841481ca5ac3d85f68d1eb5",
+              "osm-9d486779bbfce019018d1cb8213faac2528f1f80f0464920069f1cf2cb417381",
+              "osm-a35323012eef92a42b693302cb796c28c1f0a2ba5deee5b3ba0d9c60d4c2b978",
+              "osm-d0691d34054ee4bf1b85ff3ddd1a267b64e6389399f21f5eb23129618d648afc",
+              "osm-aa17756c6e5bcee15649ee14e3825b71149b26148ad53842f5b9998d60c1b384",
+              "osm-6aa44383772486c86f67973a89add8782d2981693734965c07eb897ca1825510",
+              "osm-44b75a220be69928c3589293e6b95203182ad52d75e9dcc537da1c50a74def9d",
+              "osm-dd50c1d99cf429f9f6051d9a1f350daf96cdffd488b7bf82ce8b6d189a095bfc",
+              "osm-dfd34013188410744b20d8f4cc81d28b0607d811db3e6b727e6aef13010c0784",
+              "osm-59c14b0908a6bcc05cbea25a430dcdb5943f6b619f5c31427f02ae3479d3f8b6",
+              "osm-017d962ee868a518d0d34ebb1f4f4660e32e316e5df238ae075bf92b5dd863c5",
+              "osm-a4efc18a7da5fbd2d4b2e3aedfd80866e34cd2b1131b6e373a4c62dc40ac1a10",
+              "osm-e085a6d3f13cbda18886c65876ec7e7d6934245e5c3f7433d140174618a5ce9b",
+              "osm-05e13cc0f920fed6022827fdae9ecc74aca99abb64493eae1216bfd363bf12d5",
+              "osm-33a00595b5c486dac3326311d269bd3f474ec63ab4bd1636defc0b455be2879d",
+              "osm-90e4f6cc3854b5a91d20649d165f3fa3cbf5fed6969682ece5186278afd81b09",
+              "osm-97d28459047c56c8e9422cb695d8a75dfea8bf076eeff95c24c92b3cb96a1741",
+              "osm-a44320684d2ed07b756d71ead2d7c67f8c7d58445145668651be5296ddbb1d57",
+              "osm-b982e107b7d8b785a51e8dd7d567a8031d53de1633367265c1211e00aa56ee5c",
+              "osm-8482084aaa50b99203b7de48558640b3aae52efcf2a72939cc43774db1f91fab",
+              "osm-694d391df6b526d67fdcce4c4c50b9675738e70a004a63dbc5f0f4f1dcf17cc9",
+              "osm-34e75872cc5e1cb19b1eb10728c7c76e161eda6beb4186f2dedbd2b6633f3cea",
+              "osm-416bf21f08737875422f0b2ff49fc28f7e4c3fe4dbfc4fa598f95aae0025a705",
+              "osm-b90de7f29ef1f959f114456cf3761ce29c2b1fd5f1c89eb55e4e50ce8fad095a",
+              "osm-d947cc1fc0ca3a1206a959de75fb18e0ce7134627d7e157fcdc1e3216622d819"
+            ]
+          },
+          "taskId": "evacuate-chico"
+        },
+        {
+          "resourceId": "exercise-engine-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f",
+              "osm-94866d18d8fe63db271ed01d00a739b76898916a4497793abc6ba9f81dc88286",
+              "osm-cfcd7e37b8733ddaa3e1ee0bad4e24939bb7082e7274383d182b3af415e8bdc3",
+              "osm-2ffb02fd68d5e4932877eecd92476e5507506bbbd0f8effc717e0b8a40791ecd",
+              "osm-8c9dcdd1d36dd1775211ab2f28439b828b57ecffacd5b823ddd165f6dcfd52e4",
+              "osm-14d52ceb3365ddb33bbb548db2e693189c75d3bc9e06c8c4924fe7ddb35ae1a2",
+              "osm-74c468fc4ba327dae6af4bef72172129a5d6ffb5910384892851b4997b60202a",
+              "osm-65038fa9c0f8d50613107968c4a45af5f25664c48069ea96cc45c1b0e2c332c1",
+              "osm-8c190c710b5065ec988ec6b12f2ac6ddc96d014020f18588a7d9c78cab6a858b",
+              "osm-2edc641878cb02350c473b97ce7186fb6adab1bec1a52df5f073352fa6838f57"
+            ]
+          },
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "resourceId": "exercise-medical-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-cbb53b24fd78cdb8c6f241c0a384a4c4de62e79aff4953fb9785c2bcc2acb5eb",
+              "osm-85059fe146cb146de539e98783b28ff776238a8bc95fa043bd4d74f931c1cf08",
+              "osm-659eb853228a16a8063a58060f17e4d26451052ddea2c644aaad9b253cf7acaf",
+              "osm-634d8ccef79f75ca5843864e47321312516ae873788c4ef057430c5c3b5334e7",
+              "osm-5c11c56ef58a179f1cdb308ccf4624b87108ad1ad3f4d6e6b575dcaeb578149a",
+              "osm-4708aad50516bdc3c5709808d4207426ef8cc695de7e0f6e860f4e44a6bf492b",
+              "osm-033662f2851d19f0d436a28c02e536b63aef1646a1db91df1bac527b8c146311",
+              "osm-6840b40be3de61514b1f4597f00aea3a046a504181df85f535556ee70a246a62",
+              "osm-98974e7a1c369eef901b671767d14eebaf8a0f367788c12b1d5b68d9182c0afb",
+              "osm-98cfdf77f90ed0ec1e802cc7ea36a1e0de692027ebeacee33f6ef84d365a19a5",
+              "osm-f813811ddcb370fcff40a2068b57fd612c710e92906425e2708b13cdd44ff13c",
+              "osm-b2cd48feac556b32aeb839314d09670e364a4bb411d9d9a89cec1d8f496e9266",
+              "osm-1eabce12eae50e5c6755b9977a28d1b58eb7333eaede4ae9b37a1cae8a6e9828",
+              "osm-b8fb2885686f7c2dc58bc7115179f8a94fa27f3e5a4a85711f4023a290b2bc2f",
+              "osm-6a11f8f251df357d4ddade3dcc479019b79222f8a598a17b81c192c29cb9843a",
+              "osm-6b890db133937d52123fbc614b10c48afa25b986de8a30c8ec596151c37f1a44",
+              "osm-a2428509d2a1aba9588a9b063e0f5b556691981fbcb6f1554720360cc67f6b27",
+              "osm-3d49bb2a3ec5ed67a349fd7aaee944225235f1b147ccd82e0e2b187489bfe5cf",
+              "osm-5a36f2c46ad182c42e2aec5de9b2128b09cf138d1dff8ac635b5e98698576af5",
+              "osm-92224727a6f6d8b4aeaa6a8f97853e50f7a9a451957de75d698d64fcc09408fc",
+              "osm-18347f39a0b48eea203f16c0666311d377e5b6fb023cd123ed3625a988abfac6",
+              "osm-9b339113b5fb4c5b64fa59e61305630cb692edf7a048abc52c6f68e7201dec83",
+              "osm-7f2b3603a46c6885f053c2700fea1503cbfec3d90ff0bd1383768594e7e806ab",
+              "osm-dcc7c4aab12b19da4c648174d6b609d65ddbeaa4c78ea30454fbc42c8a395ce8",
+              "osm-1a2d7594cc3486d9873b6ff8465f95bb8eeca342dc6cb6a3b565cf347de3a0a8",
+              "osm-6485cc2c178e23b84fd09b28776c818cc18334d8aab86027c9cdb3cc10728291",
+              "osm-d272b662489b4b0cae41f09c487d6a0d584f3c2038fcf5f62cecee205ecc3836",
+              "osm-506541e538d9cfef262da265a774160dd70b0759568f6687dbea4cc6b5dfa241",
+              "osm-1614835fe5d615f15dfaa2005d4067fd5bf8000346d1e8898339a31713f0cfed",
+              "osm-8264211bc59521d520e54cf22158f432c38a40169ad4580b04b774bfa9c28c4e",
+              "osm-b5c84eaa8b30358f91bc0dc41d488aa5a15ca69325d6c47755ff8f46e203b7ca",
+              "osm-93fc28933b8b8ea96f7aaf38c3183beff14cfaf44d9b1770f3cf342ba14f486f",
+              "osm-ed2858b7134293026d76a3a1ad7ae5017cbb5d43439e0ea36d0fed76dedbe52f",
+              "osm-81651f26084af1660501a3d484c73b96ce5b87a8449afdfba4bd3711f06c3f83",
+              "osm-c2b19ad08e9d6c6d19e400faad4e9b8c7bbfc04c51c8b9d040446fe586f7cbef",
+              "osm-277c889648bb6e422e75a0173433e4dd25f29d1656680a7a2a1ffd5e48fe3a73"
+            ]
+          },
+          "taskId": "support-feather-river"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-engine-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "resource-contention: task=evacuate-paradise; eligible assignments=exercise-bus-1->evacuate-chico consume needed capacity"
+      ],
+      "causalCodes": [],
+      "consequences": {
+        "corridorCleared": false
+      },
+      "coveredTaskIds": [
+        "evacuate-chico",
+        "protect-paradise-substation",
+        "support-feather-river"
+      ],
+      "inputHash": "7a1a9a6c8d1dbdb0a9522e48f7f38b3d68e3bf825d85bb6d06fdae848596e769",
+      "objectiveComponents": {
+        "objectiveValue": 91,
+        "travelCost": 31,
+        "uncoveredTaskPenalty": 60
+      },
+      "operatorOverride": null,
+      "tasks": [
+        {
+          "penalty": 1020,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 60,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 66,
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "penalty": 31,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-paradise"
+      ]
+    },
+    "shelterFieldReport": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f",
+              "osm-754e70257e7606a0fd092da6f3bed0c17baacf49c62c32c29e7fb16cc0d566ff",
+              "osm-0ed05f534175513b9e03f2e3b0b30bee47311a2ac3433022051e53d4d3c20449",
+              "osm-5c5b282573ad61df35e2a2c10b8f07cac8a73b464fe2167cf8faab40b924d64f",
+              "osm-4e7ec4d655d213d699eea6d1c0f76d33a34fb359ed774c8591c8a4bdef9a49c1",
+              "osm-e1b5b242c1b816faade7467944ad058a8dc1e258bb8ee7e2dfc218726b9ceb79",
+              "osm-264a5461959e5fc8ec8049a81e4bec69f22cdbdba3432adcd2b197af1665d754",
+              "osm-38883027cbae0f9b92a615eb925ee94ab73c1298eb081373da94cffe5837c0f1",
+              "osm-0f2062296962c55e1b0be3e23d29b9a0b275aa386af2c26476af679139380ddb",
+              "osm-b03b91bc9c751c6c60bed648360a87b8b1f6f3435449a083ba34354d640ead9a",
+              "osm-e48d238e5011ab9727d93dc28086063f23cefeac6a36df989fb6817f661a2f9e",
+              "osm-24e669020f4936c8e98d7e765626704056207949db3c48d89de66f90602eb8bf",
+              "osm-e8e6a4f5e8bb0239334f8f0145b26da08cb1d81da839551ee498ac4ec53da1a4",
+              "osm-67baacb4cc6dd1b407bd08eebeb3b8b0b985b1a02e3f68d521e49e8d84ed472d",
+              "osm-66445e57a3b3c6a3d5d9b0860e23b341cc53755c34d8bd5286538723457faa94",
+              "osm-9a4ed34072b0e8aa59c07e42b9fb4f8c565ad1cf5af937d36614bbac1145ce0e",
+              "osm-502d1732fddcd9beb1b896dd9c003a0ce32eaad56c52b33d6476cf0c386d7f10",
+              "osm-713cfe9449634bbadca7e27e61ee1e0f277b2812c2ccba01ca1290bbb1e1349e",
+              "osm-a16141a8261e0a81fcb9f24ba40ea8e5babfdf2a3d9ef73f8508bec07ee45628",
+              "osm-81d8df228a59d92d7a2cf0b5b091fdade2bee02243a48f8ac7b2914bffb122fa",
+              "osm-e04ebf56b117231428570a61a7a858e032d8de6cddecb4b36d57709fe4993254",
+              "osm-9b6cbc1997248f5d51044c88b069f64a71fda97601e340bcc37dee29bec99bdd",
+              "osm-fdd12b55de0d0daa3b0e66d80bad55c939d8af298ee7d073bfc55661146338e9",
+              "osm-1416641387d860ddb97a94c74fb3e5ec07fb2a01899fd62743402730824d46f6",
+              "osm-c813f468135679fe4fa2e055627251f11ffb42a8c41e284c0fe272f2348a85e1",
+              "osm-c0d1b1cc684266d6a4a8d4faec63eccfabc02a928e747628b3982338004b7974",
+              "osm-a6908c3cc6e5e10442eefe19fb17d2c0f663941a969dfd83ab9b524a28ace9d1",
+              "osm-95202181054619c14e274e5aa5709f751fa30ac28d6a45e8c8901c86afd0d3d6",
+              "osm-0b0e981d73bace2155928f8ee7d05ff1f6b9ade2b35c5efc6d8efc7b5f67941f",
+              "osm-634c69684c40ca1a990ee3e53490d921d4a27403c07f797009275b3143b577eb",
+              "osm-fe4e022a1d7dd6c66100fb01d8e45fd792ff8e7eb5e78537673d8d4513306432",
+              "osm-a1623659593bb5d83d486956364c9355ac595a36fd8411d03c1f3eee2759d444",
+              "osm-5986965770b0a769094f600590d4b28fbc7cc95e25933a0eae179fd0e2098439",
+              "osm-9cf599bfd72cd9153b4ee22157fea621f871a39efe171fa76c44614776bf4543",
+              "osm-c9ef471ef4628ed360bf7652c44bcfe674f83c9c229315ebd4887ee5297ce90e",
+              "osm-a493e94b34979e91af17f39cf3b8703fe42300cd84a25303c7a629430012e195",
+              "osm-9f56debb9c2a60d12e7b9b202d7535fb7a113a41223f20e7b22847c74fa9abba",
+              "osm-a3963af28e4495ba789b43914d2552ff2a8e9b45e36edb8149d441166c8b06f9",
+              "osm-e1a96c2c2c96c2667263c45bb6b8a4bbd9bd8dd0cda2bee5f41f90f80b1ec8b7",
+              "osm-077064d86559ea136f2ac6861c58b7e698012e165cd48e0977b47389e3e5e169",
+              "osm-afbcb937b76e3bd659e20fe8ca1b0ee541a3b56ab16de5e330f580641aa53640",
+              "osm-29c00b6fe45e9e87736bc9ca6177cd2b362cd0008841481ca5ac3d85f68d1eb5",
+              "osm-9d486779bbfce019018d1cb8213faac2528f1f80f0464920069f1cf2cb417381",
+              "osm-a35323012eef92a42b693302cb796c28c1f0a2ba5deee5b3ba0d9c60d4c2b978",
+              "osm-d0691d34054ee4bf1b85ff3ddd1a267b64e6389399f21f5eb23129618d648afc",
+              "osm-aa17756c6e5bcee15649ee14e3825b71149b26148ad53842f5b9998d60c1b384",
+              "osm-6aa44383772486c86f67973a89add8782d2981693734965c07eb897ca1825510",
+              "osm-44b75a220be69928c3589293e6b95203182ad52d75e9dcc537da1c50a74def9d",
+              "osm-dd50c1d99cf429f9f6051d9a1f350daf96cdffd488b7bf82ce8b6d189a095bfc",
+              "osm-dfd34013188410744b20d8f4cc81d28b0607d811db3e6b727e6aef13010c0784",
+              "osm-59c14b0908a6bcc05cbea25a430dcdb5943f6b619f5c31427f02ae3479d3f8b6",
+              "osm-017d962ee868a518d0d34ebb1f4f4660e32e316e5df238ae075bf92b5dd863c5",
+              "osm-a4efc18a7da5fbd2d4b2e3aedfd80866e34cd2b1131b6e373a4c62dc40ac1a10",
+              "osm-e085a6d3f13cbda18886c65876ec7e7d6934245e5c3f7433d140174618a5ce9b",
+              "osm-05e13cc0f920fed6022827fdae9ecc74aca99abb64493eae1216bfd363bf12d5",
+              "osm-33a00595b5c486dac3326311d269bd3f474ec63ab4bd1636defc0b455be2879d",
+              "osm-90e4f6cc3854b5a91d20649d165f3fa3cbf5fed6969682ece5186278afd81b09",
+              "osm-97d28459047c56c8e9422cb695d8a75dfea8bf076eeff95c24c92b3cb96a1741",
+              "osm-a44320684d2ed07b756d71ead2d7c67f8c7d58445145668651be5296ddbb1d57",
+              "osm-b982e107b7d8b785a51e8dd7d567a8031d53de1633367265c1211e00aa56ee5c",
+              "osm-8482084aaa50b99203b7de48558640b3aae52efcf2a72939cc43774db1f91fab",
+              "osm-694d391df6b526d67fdcce4c4c50b9675738e70a004a63dbc5f0f4f1dcf17cc9",
+              "osm-34e75872cc5e1cb19b1eb10728c7c76e161eda6beb4186f2dedbd2b6633f3cea",
+              "osm-416bf21f08737875422f0b2ff49fc28f7e4c3fe4dbfc4fa598f95aae0025a705",
+              "osm-b90de7f29ef1f959f114456cf3761ce29c2b1fd5f1c89eb55e4e50ce8fad095a",
+              "osm-d947cc1fc0ca3a1206a959de75fb18e0ce7134627d7e157fcdc1e3216622d819"
+            ]
+          },
+          "taskId": "evacuate-chico"
+        },
+        {
+          "resourceId": "exercise-medical-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-cbb53b24fd78cdb8c6f241c0a384a4c4de62e79aff4953fb9785c2bcc2acb5eb",
+              "osm-85059fe146cb146de539e98783b28ff776238a8bc95fa043bd4d74f931c1cf08",
+              "osm-659eb853228a16a8063a58060f17e4d26451052ddea2c644aaad9b253cf7acaf",
+              "osm-634d8ccef79f75ca5843864e47321312516ae873788c4ef057430c5c3b5334e7",
+              "osm-5c11c56ef58a179f1cdb308ccf4624b87108ad1ad3f4d6e6b575dcaeb578149a",
+              "osm-4708aad50516bdc3c5709808d4207426ef8cc695de7e0f6e860f4e44a6bf492b",
+              "osm-033662f2851d19f0d436a28c02e536b63aef1646a1db91df1bac527b8c146311",
+              "osm-6840b40be3de61514b1f4597f00aea3a046a504181df85f535556ee70a246a62",
+              "osm-98974e7a1c369eef901b671767d14eebaf8a0f367788c12b1d5b68d9182c0afb",
+              "osm-98cfdf77f90ed0ec1e802cc7ea36a1e0de692027ebeacee33f6ef84d365a19a5",
+              "osm-f813811ddcb370fcff40a2068b57fd612c710e92906425e2708b13cdd44ff13c",
+              "osm-b2cd48feac556b32aeb839314d09670e364a4bb411d9d9a89cec1d8f496e9266",
+              "osm-1eabce12eae50e5c6755b9977a28d1b58eb7333eaede4ae9b37a1cae8a6e9828",
+              "osm-b8fb2885686f7c2dc58bc7115179f8a94fa27f3e5a4a85711f4023a290b2bc2f",
+              "osm-6a11f8f251df357d4ddade3dcc479019b79222f8a598a17b81c192c29cb9843a",
+              "osm-6b890db133937d52123fbc614b10c48afa25b986de8a30c8ec596151c37f1a44",
+              "osm-a2428509d2a1aba9588a9b063e0f5b556691981fbcb6f1554720360cc67f6b27",
+              "osm-3d49bb2a3ec5ed67a349fd7aaee944225235f1b147ccd82e0e2b187489bfe5cf",
+              "osm-5a36f2c46ad182c42e2aec5de9b2128b09cf138d1dff8ac635b5e98698576af5",
+              "osm-92224727a6f6d8b4aeaa6a8f97853e50f7a9a451957de75d698d64fcc09408fc",
+              "osm-18347f39a0b48eea203f16c0666311d377e5b6fb023cd123ed3625a988abfac6",
+              "osm-9b339113b5fb4c5b64fa59e61305630cb692edf7a048abc52c6f68e7201dec83",
+              "osm-7f2b3603a46c6885f053c2700fea1503cbfec3d90ff0bd1383768594e7e806ab",
+              "osm-dcc7c4aab12b19da4c648174d6b609d65ddbeaa4c78ea30454fbc42c8a395ce8",
+              "osm-1a2d7594cc3486d9873b6ff8465f95bb8eeca342dc6cb6a3b565cf347de3a0a8",
+              "osm-6485cc2c178e23b84fd09b28776c818cc18334d8aab86027c9cdb3cc10728291",
+              "osm-d272b662489b4b0cae41f09c487d6a0d584f3c2038fcf5f62cecee205ecc3836",
+              "osm-506541e538d9cfef262da265a774160dd70b0759568f6687dbea4cc6b5dfa241",
+              "osm-1614835fe5d615f15dfaa2005d4067fd5bf8000346d1e8898339a31713f0cfed",
+              "osm-8264211bc59521d520e54cf22158f432c38a40169ad4580b04b774bfa9c28c4e",
+              "osm-b5c84eaa8b30358f91bc0dc41d488aa5a15ca69325d6c47755ff8f46e203b7ca",
+              "osm-93fc28933b8b8ea96f7aaf38c3183beff14cfaf44d9b1770f3cf342ba14f486f",
+              "osm-ed2858b7134293026d76a3a1ad7ae5017cbb5d43439e0ea36d0fed76dedbe52f",
+              "osm-81651f26084af1660501a3d484c73b96ce5b87a8449afdfba4bd3711f06c3f83",
+              "osm-c2b19ad08e9d6c6d19e400faad4e9b8c7bbfc04c51c8b9d040446fe586f7cbef",
+              "osm-277c889648bb6e422e75a0173433e4dd25f29d1656680a7a2a1ffd5e48fe3a73"
+            ]
+          },
+          "taskId": "support-feather-river"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-engine-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=shelter-capacity-transport; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=shelter-capacity-transport; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=shelter-capacity-transport; resource lacks capability=evacuation-transport",
+        "resource-contention: task=evacuate-paradise; eligible assignments=exercise-bus-1->evacuate-chico consume needed capacity",
+        "resource-contention: task=shelter-capacity-transport; eligible assignments=exercise-bus-1->evacuate-chico consume needed capacity"
+      ],
+      "causalCodes": [
+        "wind.changed",
+        "incident.task-added",
+        "incident.task-removed",
+        "incident.task-removed",
+        "route.reopened",
+        "assignment.changed",
+        "assignment.changed"
+      ],
+      "consequences": {
+        "corridorCleared": true
+      },
+      "coveredTaskIds": [
+        "evacuate-chico",
+        "support-feather-river"
+      ],
+      "inputHash": "de60ad504e4007e93a550f8fefacc8472278ef50d67572277daed9f06b582127",
+      "objectiveComponents": {
+        "objectiveValue": 90,
+        "travelCost": 28,
+        "uncoveredTaskPenalty": 62
+      },
+      "operatorOverride": null,
+      "tasks": [
+        {
+          "penalty": 1020,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 60,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 2,
+          "taskId": "shelter-capacity-transport"
+        },
+        {
+          "penalty": 31,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-paradise",
+        "shelter-capacity-transport"
+      ]
+    }
+  },
+  "protect-critical-services": {
+    "auditEventTypes": [
+      "exercise.session-created",
+      "exercise.objective-selected",
+      "exercise.plan-generated",
+      "exercise.checkpoint-advanced",
+      "exercise.plan-generated",
+      "exercise.checkpoint-advanced",
+      "exercise.plan-generated",
+      "exercise.override-applied"
+    ],
+    "cascadingDisruption": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-1b200758887a947c968d3631d85224333adca74b2a053594aa7e6f680d7f10ba",
+              "osm-4d1bd86ef9798b772121f26e17a4d87cdd3ac52db776ebbfe1be9499ee15d812",
+              "osm-632af1bd9927162d5a185ab4f05b62a90ab6b6604ee4db36dc356d84ad3ba115",
+              "osm-0ffc957d1599a867543716cfaca35d80404ae9048f306a2479c1cba6a7afa064",
+              "osm-ad4e75dfbdae3c8722346ae32f27cc92ddc6c1c655f0851c4aec837ff72f5f21",
+              "osm-add71968d06cdeccdea685a93af0e52c897d4a438faebd658fdc228b7cf0fbbf",
+              "osm-2ffb02fd68d5e4932877eecd92476e5507506bbbd0f8effc717e0b8a40791ecd",
+              "osm-8c9dcdd1d36dd1775211ab2f28439b828b57ecffacd5b823ddd165f6dcfd52e4",
+              "osm-14d52ceb3365ddb33bbb548db2e693189c75d3bc9e06c8c4924fe7ddb35ae1a2",
+              "osm-74c468fc4ba327dae6af4bef72172129a5d6ffb5910384892851b4997b60202a",
+              "osm-65038fa9c0f8d50613107968c4a45af5f25664c48069ea96cc45c1b0e2c332c1",
+              "osm-8c190c710b5065ec988ec6b12f2ac6ddc96d014020f18588a7d9c78cab6a858b",
+              "osm-c862499226cac637fbf338cd87beb924821609a6ab56b8e0726e0e6c42d5ffce",
+              "osm-7b2bdef3c647e51784e6c3917e38d381cdcd327ce40873ddc75fed2e4409479b",
+              "osm-51db650ce2e2a17e8d50388ccc3ef3a00e7402d5905d0149c1b62fc15c7b06aa",
+              "osm-de0bf2fc0ab3142a9fe12b0295d166b81b796873d4f78f8d6eed61d74ae692d4",
+              "osm-526f3585c1abe383026ea602aa7b78bd17def442ddf01671d5001d295d70dc4c",
+              "osm-ac25d0d4d23b92e6dc346422922e7a55fa87cb5e2e727916c9e5bcb66b19f61a",
+              "osm-26f379f216aeb659bf3c3c6006f4ccb2e571546716175da8ff61a73ce38b409f",
+              "osm-9239edcbdf851030de966294a075c0d5abff35ccc22e7fa531d33a5e90125faf",
+              "osm-978f92d8652f893a8b9a778399c7cf43c9759184368a634e7300a639c5642990",
+              "osm-9c23ef1ae2023e72fee2a7f5a8834fc04a733a962aadb73b5bc6fba58749fe2a",
+              "osm-87f4a93480b95a50d3948de60d5d970979c1ddb91364e524503203b71b33ad2a",
+              "osm-67baacb4cc6dd1b407bd08eebeb3b8b0b985b1a02e3f68d521e49e8d84ed472d",
+              "osm-66445e57a3b3c6a3d5d9b0860e23b341cc53755c34d8bd5286538723457faa94",
+              "osm-9a4ed34072b0e8aa59c07e42b9fb4f8c565ad1cf5af937d36614bbac1145ce0e",
+              "osm-502d1732fddcd9beb1b896dd9c003a0ce32eaad56c52b33d6476cf0c386d7f10",
+              "osm-713cfe9449634bbadca7e27e61ee1e0f277b2812c2ccba01ca1290bbb1e1349e",
+              "osm-a16141a8261e0a81fcb9f24ba40ea8e5babfdf2a3d9ef73f8508bec07ee45628",
+              "osm-81d8df228a59d92d7a2cf0b5b091fdade2bee02243a48f8ac7b2914bffb122fa",
+              "osm-e04ebf56b117231428570a61a7a858e032d8de6cddecb4b36d57709fe4993254",
+              "osm-9b6cbc1997248f5d51044c88b069f64a71fda97601e340bcc37dee29bec99bdd",
+              "osm-fdd12b55de0d0daa3b0e66d80bad55c939d8af298ee7d073bfc55661146338e9",
+              "osm-1416641387d860ddb97a94c74fb3e5ec07fb2a01899fd62743402730824d46f6",
+              "osm-c813f468135679fe4fa2e055627251f11ffb42a8c41e284c0fe272f2348a85e1",
+              "osm-c0d1b1cc684266d6a4a8d4faec63eccfabc02a928e747628b3982338004b7974",
+              "osm-a6908c3cc6e5e10442eefe19fb17d2c0f663941a969dfd83ab9b524a28ace9d1",
+              "osm-95202181054619c14e274e5aa5709f751fa30ac28d6a45e8c8901c86afd0d3d6",
+              "osm-0b0e981d73bace2155928f8ee7d05ff1f6b9ade2b35c5efc6d8efc7b5f67941f",
+              "osm-634c69684c40ca1a990ee3e53490d921d4a27403c07f797009275b3143b577eb",
+              "osm-fe4e022a1d7dd6c66100fb01d8e45fd792ff8e7eb5e78537673d8d4513306432",
+              "osm-a1623659593bb5d83d486956364c9355ac595a36fd8411d03c1f3eee2759d444",
+              "osm-5986965770b0a769094f600590d4b28fbc7cc95e25933a0eae179fd0e2098439",
+              "osm-9cf599bfd72cd9153b4ee22157fea621f871a39efe171fa76c44614776bf4543",
+              "osm-c9ef471ef4628ed360bf7652c44bcfe674f83c9c229315ebd4887ee5297ce90e",
+              "osm-a493e94b34979e91af17f39cf3b8703fe42300cd84a25303c7a629430012e195",
+              "osm-9f56debb9c2a60d12e7b9b202d7535fb7a113a41223f20e7b22847c74fa9abba",
+              "osm-a3963af28e4495ba789b43914d2552ff2a8e9b45e36edb8149d441166c8b06f9",
+              "osm-e1a96c2c2c96c2667263c45bb6b8a4bbd9bd8dd0cda2bee5f41f90f80b1ec8b7",
+              "osm-077064d86559ea136f2ac6861c58b7e698012e165cd48e0977b47389e3e5e169",
+              "osm-afbcb937b76e3bd659e20fe8ca1b0ee541a3b56ab16de5e330f580641aa53640",
+              "osm-29c00b6fe45e9e87736bc9ca6177cd2b362cd0008841481ca5ac3d85f68d1eb5",
+              "osm-9d486779bbfce019018d1cb8213faac2528f1f80f0464920069f1cf2cb417381",
+              "osm-a35323012eef92a42b693302cb796c28c1f0a2ba5deee5b3ba0d9c60d4c2b978",
+              "osm-d0691d34054ee4bf1b85ff3ddd1a267b64e6389399f21f5eb23129618d648afc",
+              "osm-aa17756c6e5bcee15649ee14e3825b71149b26148ad53842f5b9998d60c1b384",
+              "osm-6aa44383772486c86f67973a89add8782d2981693734965c07eb897ca1825510",
+              "osm-44b75a220be69928c3589293e6b95203182ad52d75e9dcc537da1c50a74def9d",
+              "osm-dd50c1d99cf429f9f6051d9a1f350daf96cdffd488b7bf82ce8b6d189a095bfc",
+              "osm-dfd34013188410744b20d8f4cc81d28b0607d811db3e6b727e6aef13010c0784",
+              "osm-59c14b0908a6bcc05cbea25a430dcdb5943f6b619f5c31427f02ae3479d3f8b6",
+              "osm-017d962ee868a518d0d34ebb1f4f4660e32e316e5df238ae075bf92b5dd863c5",
+              "osm-a4efc18a7da5fbd2d4b2e3aedfd80866e34cd2b1131b6e373a4c62dc40ac1a10",
+              "osm-e085a6d3f13cbda18886c65876ec7e7d6934245e5c3f7433d140174618a5ce9b",
+              "osm-05e13cc0f920fed6022827fdae9ecc74aca99abb64493eae1216bfd363bf12d5",
+              "osm-33a00595b5c486dac3326311d269bd3f474ec63ab4bd1636defc0b455be2879d",
+              "osm-90e4f6cc3854b5a91d20649d165f3fa3cbf5fed6969682ece5186278afd81b09",
+              "osm-97d28459047c56c8e9422cb695d8a75dfea8bf076eeff95c24c92b3cb96a1741",
+              "osm-a44320684d2ed07b756d71ead2d7c67f8c7d58445145668651be5296ddbb1d57",
+              "osm-b982e107b7d8b785a51e8dd7d567a8031d53de1633367265c1211e00aa56ee5c",
+              "osm-8482084aaa50b99203b7de48558640b3aae52efcf2a72939cc43774db1f91fab",
+              "osm-694d391df6b526d67fdcce4c4c50b9675738e70a004a63dbc5f0f4f1dcf17cc9",
+              "osm-34e75872cc5e1cb19b1eb10728c7c76e161eda6beb4186f2dedbd2b6633f3cea",
+              "osm-416bf21f08737875422f0b2ff49fc28f7e4c3fe4dbfc4fa598f95aae0025a705",
+              "osm-b90de7f29ef1f959f114456cf3761ce29c2b1fd5f1c89eb55e4e50ce8fad095a",
+              "osm-d947cc1fc0ca3a1206a959de75fb18e0ce7134627d7e157fcdc1e3216622d819"
+            ]
+          },
+          "taskId": "evacuate-chico"
+        },
+        {
+          "resourceId": "exercise-engine-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-1b200758887a947c968d3631d85224333adca74b2a053594aa7e6f680d7f10ba",
+              "osm-4d1bd86ef9798b772121f26e17a4d87cdd3ac52db776ebbfe1be9499ee15d812",
+              "osm-632af1bd9927162d5a185ab4f05b62a90ab6b6604ee4db36dc356d84ad3ba115",
+              "osm-0ffc957d1599a867543716cfaca35d80404ae9048f306a2479c1cba6a7afa064",
+              "osm-ad4e75dfbdae3c8722346ae32f27cc92ddc6c1c655f0851c4aec837ff72f5f21",
+              "osm-add71968d06cdeccdea685a93af0e52c897d4a438faebd658fdc228b7cf0fbbf",
+              "osm-2ffb02fd68d5e4932877eecd92476e5507506bbbd0f8effc717e0b8a40791ecd",
+              "osm-8c9dcdd1d36dd1775211ab2f28439b828b57ecffacd5b823ddd165f6dcfd52e4",
+              "osm-14d52ceb3365ddb33bbb548db2e693189c75d3bc9e06c8c4924fe7ddb35ae1a2",
+              "osm-74c468fc4ba327dae6af4bef72172129a5d6ffb5910384892851b4997b60202a",
+              "osm-65038fa9c0f8d50613107968c4a45af5f25664c48069ea96cc45c1b0e2c332c1",
+              "osm-8c190c710b5065ec988ec6b12f2ac6ddc96d014020f18588a7d9c78cab6a858b",
+              "osm-2edc641878cb02350c473b97ce7186fb6adab1bec1a52df5f073352fa6838f57"
+            ]
+          },
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "resourceId": "exercise-medical-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-cbb53b24fd78cdb8c6f241c0a384a4c4de62e79aff4953fb9785c2bcc2acb5eb",
+              "osm-85059fe146cb146de539e98783b28ff776238a8bc95fa043bd4d74f931c1cf08",
+              "osm-659eb853228a16a8063a58060f17e4d26451052ddea2c644aaad9b253cf7acaf",
+              "osm-634d8ccef79f75ca5843864e47321312516ae873788c4ef057430c5c3b5334e7",
+              "osm-5c11c56ef58a179f1cdb308ccf4624b87108ad1ad3f4d6e6b575dcaeb578149a",
+              "osm-4708aad50516bdc3c5709808d4207426ef8cc695de7e0f6e860f4e44a6bf492b",
+              "osm-033662f2851d19f0d436a28c02e536b63aef1646a1db91df1bac527b8c146311",
+              "osm-6840b40be3de61514b1f4597f00aea3a046a504181df85f535556ee70a246a62",
+              "osm-98974e7a1c369eef901b671767d14eebaf8a0f367788c12b1d5b68d9182c0afb",
+              "osm-98cfdf77f90ed0ec1e802cc7ea36a1e0de692027ebeacee33f6ef84d365a19a5",
+              "osm-f813811ddcb370fcff40a2068b57fd612c710e92906425e2708b13cdd44ff13c",
+              "osm-b2cd48feac556b32aeb839314d09670e364a4bb411d9d9a89cec1d8f496e9266",
+              "osm-1eabce12eae50e5c6755b9977a28d1b58eb7333eaede4ae9b37a1cae8a6e9828",
+              "osm-b8fb2885686f7c2dc58bc7115179f8a94fa27f3e5a4a85711f4023a290b2bc2f",
+              "osm-6a11f8f251df357d4ddade3dcc479019b79222f8a598a17b81c192c29cb9843a",
+              "osm-6b890db133937d52123fbc614b10c48afa25b986de8a30c8ec596151c37f1a44",
+              "osm-a2428509d2a1aba9588a9b063e0f5b556691981fbcb6f1554720360cc67f6b27",
+              "osm-3d49bb2a3ec5ed67a349fd7aaee944225235f1b147ccd82e0e2b187489bfe5cf",
+              "osm-5a36f2c46ad182c42e2aec5de9b2128b09cf138d1dff8ac635b5e98698576af5",
+              "osm-92224727a6f6d8b4aeaa6a8f97853e50f7a9a451957de75d698d64fcc09408fc",
+              "osm-18347f39a0b48eea203f16c0666311d377e5b6fb023cd123ed3625a988abfac6",
+              "osm-9b339113b5fb4c5b64fa59e61305630cb692edf7a048abc52c6f68e7201dec83",
+              "osm-7f2b3603a46c6885f053c2700fea1503cbfec3d90ff0bd1383768594e7e806ab",
+              "osm-dcc7c4aab12b19da4c648174d6b609d65ddbeaa4c78ea30454fbc42c8a395ce8",
+              "osm-1a2d7594cc3486d9873b6ff8465f95bb8eeca342dc6cb6a3b565cf347de3a0a8",
+              "osm-6485cc2c178e23b84fd09b28776c818cc18334d8aab86027c9cdb3cc10728291",
+              "osm-d272b662489b4b0cae41f09c487d6a0d584f3c2038fcf5f62cecee205ecc3836",
+              "osm-506541e538d9cfef262da265a774160dd70b0759568f6687dbea4cc6b5dfa241",
+              "osm-1614835fe5d615f15dfaa2005d4067fd5bf8000346d1e8898339a31713f0cfed",
+              "osm-8264211bc59521d520e54cf22158f432c38a40169ad4580b04b774bfa9c28c4e",
+              "osm-b5c84eaa8b30358f91bc0dc41d488aa5a15ca69325d6c47755ff8f46e203b7ca",
+              "osm-93fc28933b8b8ea96f7aaf38c3183beff14cfaf44d9b1770f3cf342ba14f486f",
+              "osm-ed2858b7134293026d76a3a1ad7ae5017cbb5d43439e0ea36d0fed76dedbe52f",
+              "osm-81651f26084af1660501a3d484c73b96ce5b87a8449afdfba4bd3711f06c3f83",
+              "osm-c2b19ad08e9d6c6d19e400faad4e9b8c7bbfc04c51c8b9d040446fe586f7cbef",
+              "osm-277c889648bb6e422e75a0173433e4dd25f29d1656680a7a2a1ffd5e48fe3a73"
+            ]
+          },
+          "taskId": "support-feather-river"
+        },
+        {
+          "resourceId": "exercise-road-crew-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-1b200758887a947c968d3631d85224333adca74b2a053594aa7e6f680d7f10ba",
+              "osm-4d1bd86ef9798b772121f26e17a4d87cdd3ac52db776ebbfe1be9499ee15d812",
+              "osm-632af1bd9927162d5a185ab4f05b62a90ab6b6604ee4db36dc356d84ad3ba115",
+              "osm-0ffc957d1599a867543716cfaca35d80404ae9048f306a2479c1cba6a7afa064",
+              "osm-ad4e75dfbdae3c8722346ae32f27cc92ddc6c1c655f0851c4aec837ff72f5f21",
+              "osm-add71968d06cdeccdea685a93af0e52c897d4a438faebd658fdc228b7cf0fbbf",
+              "osm-2ffb02fd68d5e4932877eecd92476e5507506bbbd0f8effc717e0b8a40791ecd",
+              "osm-8c9dcdd1d36dd1775211ab2f28439b828b57ecffacd5b823ddd165f6dcfd52e4",
+              "osm-14d52ceb3365ddb33bbb548db2e693189c75d3bc9e06c8c4924fe7ddb35ae1a2",
+              "osm-74c468fc4ba327dae6af4bef72172129a5d6ffb5910384892851b4997b60202a",
+              "osm-65038fa9c0f8d50613107968c4a45af5f25664c48069ea96cc45c1b0e2c332c1",
+              "osm-8c190c710b5065ec988ec6b12f2ac6ddc96d014020f18588a7d9c78cab6a858b",
+              "osm-2edc641878cb02350c473b97ce7186fb6adab1bec1a52df5f073352fa6838f57"
+            ]
+          },
+          "taskId": "clear-primary-corridor"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-engine-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "resource-contention: task=evacuate-paradise; eligible assignments=exercise-bus-1->evacuate-chico consume needed capacity"
+      ],
+      "causalCodes": [
+        "wind.changed",
+        "incident.task-added",
+        "route.closed",
+        "assignment.changed"
+      ],
+      "consequences": {
+        "corridorCleared": false
+      },
+      "coveredTaskIds": [
+        "clear-primary-corridor",
+        "evacuate-chico",
+        "protect-paradise-substation",
+        "support-feather-river"
+      ],
+      "inputHash": "118b1932768d0e18f5a6a9f90d592fde89fcbd2e546fc646577cf10d1d232cd8",
+      "objectiveComponents": {
+        "objectiveValue": 81,
+        "travelCost": 37,
+        "uncoveredTaskPenalty": 44
+      },
+      "operatorOverride": null,
+      "tasks": [
+        {
+          "penalty": 304,
+          "taskId": "clear-primary-corridor"
+        },
+        {
+          "penalty": 121,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 44,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 154,
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "penalty": 160,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-paradise"
+      ]
+    },
+    "finalOverride": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f",
+              "osm-754e70257e7606a0fd092da6f3bed0c17baacf49c62c32c29e7fb16cc0d566ff",
+              "osm-0ed05f534175513b9e03f2e3b0b30bee47311a2ac3433022051e53d4d3c20449",
+              "osm-5c5b282573ad61df35e2a2c10b8f07cac8a73b464fe2167cf8faab40b924d64f",
+              "osm-4e7ec4d655d213d699eea6d1c0f76d33a34fb359ed774c8591c8a4bdef9a49c1",
+              "osm-e1b5b242c1b816faade7467944ad058a8dc1e258bb8ee7e2dfc218726b9ceb79",
+              "osm-264a5461959e5fc8ec8049a81e4bec69f22cdbdba3432adcd2b197af1665d754",
+              "osm-38883027cbae0f9b92a615eb925ee94ab73c1298eb081373da94cffe5837c0f1",
+              "osm-0f2062296962c55e1b0be3e23d29b9a0b275aa386af2c26476af679139380ddb",
+              "osm-b03b91bc9c751c6c60bed648360a87b8b1f6f3435449a083ba34354d640ead9a",
+              "osm-e48d238e5011ab9727d93dc28086063f23cefeac6a36df989fb6817f661a2f9e",
+              "osm-24e669020f4936c8e98d7e765626704056207949db3c48d89de66f90602eb8bf",
+              "osm-e8e6a4f5e8bb0239334f8f0145b26da08cb1d81da839551ee498ac4ec53da1a4",
+              "osm-67baacb4cc6dd1b407bd08eebeb3b8b0b985b1a02e3f68d521e49e8d84ed472d",
+              "osm-66445e57a3b3c6a3d5d9b0860e23b341cc53755c34d8bd5286538723457faa94",
+              "osm-9a4ed34072b0e8aa59c07e42b9fb4f8c565ad1cf5af937d36614bbac1145ce0e",
+              "osm-502d1732fddcd9beb1b896dd9c003a0ce32eaad56c52b33d6476cf0c386d7f10",
+              "osm-713cfe9449634bbadca7e27e61ee1e0f277b2812c2ccba01ca1290bbb1e1349e",
+              "osm-a16141a8261e0a81fcb9f24ba40ea8e5babfdf2a3d9ef73f8508bec07ee45628",
+              "osm-81d8df228a59d92d7a2cf0b5b091fdade2bee02243a48f8ac7b2914bffb122fa",
+              "osm-e04ebf56b117231428570a61a7a858e032d8de6cddecb4b36d57709fe4993254",
+              "osm-9b6cbc1997248f5d51044c88b069f64a71fda97601e340bcc37dee29bec99bdd",
+              "osm-fdd12b55de0d0daa3b0e66d80bad55c939d8af298ee7d073bfc55661146338e9",
+              "osm-1416641387d860ddb97a94c74fb3e5ec07fb2a01899fd62743402730824d46f6",
+              "osm-c813f468135679fe4fa2e055627251f11ffb42a8c41e284c0fe272f2348a85e1",
+              "osm-c0d1b1cc684266d6a4a8d4faec63eccfabc02a928e747628b3982338004b7974",
+              "osm-a6908c3cc6e5e10442eefe19fb17d2c0f663941a969dfd83ab9b524a28ace9d1",
+              "osm-95202181054619c14e274e5aa5709f751fa30ac28d6a45e8c8901c86afd0d3d6",
+              "osm-0b0e981d73bace2155928f8ee7d05ff1f6b9ade2b35c5efc6d8efc7b5f67941f",
+              "osm-634c69684c40ca1a990ee3e53490d921d4a27403c07f797009275b3143b577eb",
+              "osm-fe4e022a1d7dd6c66100fb01d8e45fd792ff8e7eb5e78537673d8d4513306432",
+              "osm-a1623659593bb5d83d486956364c9355ac595a36fd8411d03c1f3eee2759d444",
+              "osm-5986965770b0a769094f600590d4b28fbc7cc95e25933a0eae179fd0e2098439",
+              "osm-9cf599bfd72cd9153b4ee22157fea621f871a39efe171fa76c44614776bf4543",
+              "osm-c9ef471ef4628ed360bf7652c44bcfe674f83c9c229315ebd4887ee5297ce90e",
+              "osm-a493e94b34979e91af17f39cf3b8703fe42300cd84a25303c7a629430012e195",
+              "osm-9f56debb9c2a60d12e7b9b202d7535fb7a113a41223f20e7b22847c74fa9abba",
+              "osm-a3963af28e4495ba789b43914d2552ff2a8e9b45e36edb8149d441166c8b06f9",
+              "osm-e1a96c2c2c96c2667263c45bb6b8a4bbd9bd8dd0cda2bee5f41f90f80b1ec8b7",
+              "osm-077064d86559ea136f2ac6861c58b7e698012e165cd48e0977b47389e3e5e169",
+              "osm-afbcb937b76e3bd659e20fe8ca1b0ee541a3b56ab16de5e330f580641aa53640",
+              "osm-29c00b6fe45e9e87736bc9ca6177cd2b362cd0008841481ca5ac3d85f68d1eb5",
+              "osm-9d486779bbfce019018d1cb8213faac2528f1f80f0464920069f1cf2cb417381",
+              "osm-a35323012eef92a42b693302cb796c28c1f0a2ba5deee5b3ba0d9c60d4c2b978",
+              "osm-d0691d34054ee4bf1b85ff3ddd1a267b64e6389399f21f5eb23129618d648afc",
+              "osm-aa17756c6e5bcee15649ee14e3825b71149b26148ad53842f5b9998d60c1b384",
+              "osm-6aa44383772486c86f67973a89add8782d2981693734965c07eb897ca1825510",
+              "osm-44b75a220be69928c3589293e6b95203182ad52d75e9dcc537da1c50a74def9d",
+              "osm-dd50c1d99cf429f9f6051d9a1f350daf96cdffd488b7bf82ce8b6d189a095bfc",
+              "osm-dfd34013188410744b20d8f4cc81d28b0607d811db3e6b727e6aef13010c0784",
+              "osm-7d32f8a96386f9d6c16c95838f615a7bffacb50d10d130d2c1d1005574c490db",
+              "osm-6d2886ac7f1e951e48743069a952ee6e7743baae3d0733578d204c778b8994c0",
+              "osm-162ec04964c32a4891a79a29bc081a053150c0a8a7359838176db6aa9049b4aa",
+              "osm-17a27816ed3d150c857ccfa26db51ccad71eaa388aba3c3221132134c74aa768",
+              "osm-706ee7a9c41b8c28d77571ac54fb23e366cf5aafbaf26b3d28fa312bec28192f",
+              "osm-5d694f6bf1f63faaa678d8efad82c2241e3b1b9cdf40236e152829c0961f4aef",
+              "osm-a0f7d56d0503647c59149b7f6cbcb9a749286e29fb40e4c2d13e385aeee46735",
+              "osm-64554171daea2a1178ab13682650dec11d9f72915e7eef466423581606aa05e2",
+              "osm-b7daf19e9933a6f145a6bb283b4413b5e977d8ee72815b4d10bf41bd9d647182",
+              "osm-7dc4832b807ea0cd7fb3a1b189a52cc7d4dca37236a4b289b4beec26cac64eaa",
+              "osm-d6e93f30bac1ada1ecc6f94b7b41fe05d11cf348e58efbd8aecc569b5e21299a",
+              "osm-0d37b7ffa5abe8b0d05b806c765ff7b0f5294092584b0bfe8bb96ed4cbd866e9",
+              "osm-61587027da996e2067cf5e31e4056b04fb8476b916d2d4f7660954220abcffb6",
+              "osm-d5c88e461b0ac52e4c445ec917fad4c8f69240eaa015ee3595f2eb1f62d8647f",
+              "osm-fd60220c7c9243e6fce759c1c44ecb97e53885aeecb0e80ddf628ce4416ae18c",
+              "osm-b97db3acdd8c01e50b4e1ae115b3876e8ebe112af0f6a1fd8aa3bbaed65817d3",
+              "osm-d9a6e9e7340c49cc2be7cd0eab523140963ce1efab1090e22a95932fe0e28444"
+            ]
+          },
+          "taskId": "shelter-capacity-transport"
+        },
+        {
+          "resourceId": "exercise-medical-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-cbb53b24fd78cdb8c6f241c0a384a4c4de62e79aff4953fb9785c2bcc2acb5eb",
+              "osm-85059fe146cb146de539e98783b28ff776238a8bc95fa043bd4d74f931c1cf08",
+              "osm-659eb853228a16a8063a58060f17e4d26451052ddea2c644aaad9b253cf7acaf",
+              "osm-634d8ccef79f75ca5843864e47321312516ae873788c4ef057430c5c3b5334e7",
+              "osm-5c11c56ef58a179f1cdb308ccf4624b87108ad1ad3f4d6e6b575dcaeb578149a",
+              "osm-4708aad50516bdc3c5709808d4207426ef8cc695de7e0f6e860f4e44a6bf492b",
+              "osm-033662f2851d19f0d436a28c02e536b63aef1646a1db91df1bac527b8c146311",
+              "osm-6840b40be3de61514b1f4597f00aea3a046a504181df85f535556ee70a246a62",
+              "osm-98974e7a1c369eef901b671767d14eebaf8a0f367788c12b1d5b68d9182c0afb",
+              "osm-98cfdf77f90ed0ec1e802cc7ea36a1e0de692027ebeacee33f6ef84d365a19a5",
+              "osm-f813811ddcb370fcff40a2068b57fd612c710e92906425e2708b13cdd44ff13c",
+              "osm-b2cd48feac556b32aeb839314d09670e364a4bb411d9d9a89cec1d8f496e9266",
+              "osm-1eabce12eae50e5c6755b9977a28d1b58eb7333eaede4ae9b37a1cae8a6e9828",
+              "osm-b8fb2885686f7c2dc58bc7115179f8a94fa27f3e5a4a85711f4023a290b2bc2f",
+              "osm-6a11f8f251df357d4ddade3dcc479019b79222f8a598a17b81c192c29cb9843a",
+              "osm-6b890db133937d52123fbc614b10c48afa25b986de8a30c8ec596151c37f1a44",
+              "osm-a2428509d2a1aba9588a9b063e0f5b556691981fbcb6f1554720360cc67f6b27",
+              "osm-3d49bb2a3ec5ed67a349fd7aaee944225235f1b147ccd82e0e2b187489bfe5cf",
+              "osm-5a36f2c46ad182c42e2aec5de9b2128b09cf138d1dff8ac635b5e98698576af5",
+              "osm-92224727a6f6d8b4aeaa6a8f97853e50f7a9a451957de75d698d64fcc09408fc",
+              "osm-18347f39a0b48eea203f16c0666311d377e5b6fb023cd123ed3625a988abfac6",
+              "osm-9b339113b5fb4c5b64fa59e61305630cb692edf7a048abc52c6f68e7201dec83",
+              "osm-7f2b3603a46c6885f053c2700fea1503cbfec3d90ff0bd1383768594e7e806ab",
+              "osm-dcc7c4aab12b19da4c648174d6b609d65ddbeaa4c78ea30454fbc42c8a395ce8",
+              "osm-1a2d7594cc3486d9873b6ff8465f95bb8eeca342dc6cb6a3b565cf347de3a0a8",
+              "osm-6485cc2c178e23b84fd09b28776c818cc18334d8aab86027c9cdb3cc10728291",
+              "osm-d272b662489b4b0cae41f09c487d6a0d584f3c2038fcf5f62cecee205ecc3836",
+              "osm-506541e538d9cfef262da265a774160dd70b0759568f6687dbea4cc6b5dfa241",
+              "osm-1614835fe5d615f15dfaa2005d4067fd5bf8000346d1e8898339a31713f0cfed",
+              "osm-8264211bc59521d520e54cf22158f432c38a40169ad4580b04b774bfa9c28c4e",
+              "osm-b5c84eaa8b30358f91bc0dc41d488aa5a15ca69325d6c47755ff8f46e203b7ca",
+              "osm-93fc28933b8b8ea96f7aaf38c3183beff14cfaf44d9b1770f3cf342ba14f486f",
+              "osm-ed2858b7134293026d76a3a1ad7ae5017cbb5d43439e0ea36d0fed76dedbe52f",
+              "osm-81651f26084af1660501a3d484c73b96ce5b87a8449afdfba4bd3711f06c3f83",
+              "osm-c2b19ad08e9d6c6d19e400faad4e9b8c7bbfc04c51c8b9d040446fe586f7cbef",
+              "osm-277c889648bb6e422e75a0173433e4dd25f29d1656680a7a2a1ffd5e48fe3a73"
+            ]
+          },
+          "taskId": "support-feather-river"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-engine-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-chico; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "resource-contention: task=evacuate-chico; eligible assignments=exercise-bus-1->shelter-capacity-transport consume needed capacity",
+        "resource-contention: task=evacuate-paradise; eligible assignments=exercise-bus-1->shelter-capacity-transport consume needed capacity"
+      ],
+      "causalCodes": [
+        "assignment.changed",
+        "override.locked-assignment",
+        "operator.override-changed-plan"
+      ],
+      "consequences": {
+        "corridorCleared": true
+      },
+      "coveredTaskIds": [
+        "shelter-capacity-transport",
+        "support-feather-river"
+      ],
+      "inputHash": "8bc4fd18ea274054981a387ede1c9a82c45ae572b27a96fe28076385163a9eaa",
+      "objectiveComponents": {
+        "objectiveValue": 193,
+        "travelCost": 28,
+        "uncoveredTaskPenalty": 165
+      },
+      "operatorOverride": {
+        "resourceId": "exercise-bus-1",
+        "taskId": "shelter-capacity-transport"
+      },
+      "tasks": [
+        {
+          "penalty": 121,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 44,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 102,
+          "taskId": "shelter-capacity-transport"
+        },
+        {
+          "penalty": 160,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-chico",
+        "evacuate-paradise"
+      ]
+    },
+    "initialAllocation": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f",
+              "osm-754e70257e7606a0fd092da6f3bed0c17baacf49c62c32c29e7fb16cc0d566ff",
+              "osm-0ed05f534175513b9e03f2e3b0b30bee47311a2ac3433022051e53d4d3c20449",
+              "osm-5c5b282573ad61df35e2a2c10b8f07cac8a73b464fe2167cf8faab40b924d64f",
+              "osm-4e7ec4d655d213d699eea6d1c0f76d33a34fb359ed774c8591c8a4bdef9a49c1",
+              "osm-e1b5b242c1b816faade7467944ad058a8dc1e258bb8ee7e2dfc218726b9ceb79",
+              "osm-264a5461959e5fc8ec8049a81e4bec69f22cdbdba3432adcd2b197af1665d754",
+              "osm-38883027cbae0f9b92a615eb925ee94ab73c1298eb081373da94cffe5837c0f1",
+              "osm-0f2062296962c55e1b0be3e23d29b9a0b275aa386af2c26476af679139380ddb",
+              "osm-b03b91bc9c751c6c60bed648360a87b8b1f6f3435449a083ba34354d640ead9a",
+              "osm-e48d238e5011ab9727d93dc28086063f23cefeac6a36df989fb6817f661a2f9e",
+              "osm-24e669020f4936c8e98d7e765626704056207949db3c48d89de66f90602eb8bf",
+              "osm-e8e6a4f5e8bb0239334f8f0145b26da08cb1d81da839551ee498ac4ec53da1a4",
+              "osm-67baacb4cc6dd1b407bd08eebeb3b8b0b985b1a02e3f68d521e49e8d84ed472d",
+              "osm-66445e57a3b3c6a3d5d9b0860e23b341cc53755c34d8bd5286538723457faa94",
+              "osm-9a4ed34072b0e8aa59c07e42b9fb4f8c565ad1cf5af937d36614bbac1145ce0e",
+              "osm-502d1732fddcd9beb1b896dd9c003a0ce32eaad56c52b33d6476cf0c386d7f10",
+              "osm-713cfe9449634bbadca7e27e61ee1e0f277b2812c2ccba01ca1290bbb1e1349e",
+              "osm-a16141a8261e0a81fcb9f24ba40ea8e5babfdf2a3d9ef73f8508bec07ee45628",
+              "osm-81d8df228a59d92d7a2cf0b5b091fdade2bee02243a48f8ac7b2914bffb122fa",
+              "osm-e04ebf56b117231428570a61a7a858e032d8de6cddecb4b36d57709fe4993254",
+              "osm-9b6cbc1997248f5d51044c88b069f64a71fda97601e340bcc37dee29bec99bdd",
+              "osm-fdd12b55de0d0daa3b0e66d80bad55c939d8af298ee7d073bfc55661146338e9",
+              "osm-1416641387d860ddb97a94c74fb3e5ec07fb2a01899fd62743402730824d46f6",
+              "osm-c813f468135679fe4fa2e055627251f11ffb42a8c41e284c0fe272f2348a85e1",
+              "osm-c0d1b1cc684266d6a4a8d4faec63eccfabc02a928e747628b3982338004b7974",
+              "osm-a6908c3cc6e5e10442eefe19fb17d2c0f663941a969dfd83ab9b524a28ace9d1",
+              "osm-95202181054619c14e274e5aa5709f751fa30ac28d6a45e8c8901c86afd0d3d6",
+              "osm-0b0e981d73bace2155928f8ee7d05ff1f6b9ade2b35c5efc6d8efc7b5f67941f",
+              "osm-634c69684c40ca1a990ee3e53490d921d4a27403c07f797009275b3143b577eb",
+              "osm-fe4e022a1d7dd6c66100fb01d8e45fd792ff8e7eb5e78537673d8d4513306432",
+              "osm-a1623659593bb5d83d486956364c9355ac595a36fd8411d03c1f3eee2759d444",
+              "osm-5986965770b0a769094f600590d4b28fbc7cc95e25933a0eae179fd0e2098439",
+              "osm-9cf599bfd72cd9153b4ee22157fea621f871a39efe171fa76c44614776bf4543",
+              "osm-c9ef471ef4628ed360bf7652c44bcfe674f83c9c229315ebd4887ee5297ce90e",
+              "osm-a493e94b34979e91af17f39cf3b8703fe42300cd84a25303c7a629430012e195",
+              "osm-9f56debb9c2a60d12e7b9b202d7535fb7a113a41223f20e7b22847c74fa9abba",
+              "osm-a3963af28e4495ba789b43914d2552ff2a8e9b45e36edb8149d441166c8b06f9",
+              "osm-e1a96c2c2c96c2667263c45bb6b8a4bbd9bd8dd0cda2bee5f41f90f80b1ec8b7",
+              "osm-077064d86559ea136f2ac6861c58b7e698012e165cd48e0977b47389e3e5e169",
+              "osm-afbcb937b76e3bd659e20fe8ca1b0ee541a3b56ab16de5e330f580641aa53640",
+              "osm-29c00b6fe45e9e87736bc9ca6177cd2b362cd0008841481ca5ac3d85f68d1eb5",
+              "osm-9d486779bbfce019018d1cb8213faac2528f1f80f0464920069f1cf2cb417381",
+              "osm-a35323012eef92a42b693302cb796c28c1f0a2ba5deee5b3ba0d9c60d4c2b978",
+              "osm-d0691d34054ee4bf1b85ff3ddd1a267b64e6389399f21f5eb23129618d648afc",
+              "osm-aa17756c6e5bcee15649ee14e3825b71149b26148ad53842f5b9998d60c1b384",
+              "osm-6aa44383772486c86f67973a89add8782d2981693734965c07eb897ca1825510",
+              "osm-44b75a220be69928c3589293e6b95203182ad52d75e9dcc537da1c50a74def9d",
+              "osm-dd50c1d99cf429f9f6051d9a1f350daf96cdffd488b7bf82ce8b6d189a095bfc",
+              "osm-dfd34013188410744b20d8f4cc81d28b0607d811db3e6b727e6aef13010c0784",
+              "osm-59c14b0908a6bcc05cbea25a430dcdb5943f6b619f5c31427f02ae3479d3f8b6",
+              "osm-017d962ee868a518d0d34ebb1f4f4660e32e316e5df238ae075bf92b5dd863c5",
+              "osm-a4efc18a7da5fbd2d4b2e3aedfd80866e34cd2b1131b6e373a4c62dc40ac1a10",
+              "osm-e085a6d3f13cbda18886c65876ec7e7d6934245e5c3f7433d140174618a5ce9b",
+              "osm-05e13cc0f920fed6022827fdae9ecc74aca99abb64493eae1216bfd363bf12d5",
+              "osm-33a00595b5c486dac3326311d269bd3f474ec63ab4bd1636defc0b455be2879d",
+              "osm-90e4f6cc3854b5a91d20649d165f3fa3cbf5fed6969682ece5186278afd81b09",
+              "osm-97d28459047c56c8e9422cb695d8a75dfea8bf076eeff95c24c92b3cb96a1741",
+              "osm-a44320684d2ed07b756d71ead2d7c67f8c7d58445145668651be5296ddbb1d57",
+              "osm-b982e107b7d8b785a51e8dd7d567a8031d53de1633367265c1211e00aa56ee5c",
+              "osm-8482084aaa50b99203b7de48558640b3aae52efcf2a72939cc43774db1f91fab",
+              "osm-694d391df6b526d67fdcce4c4c50b9675738e70a004a63dbc5f0f4f1dcf17cc9",
+              "osm-34e75872cc5e1cb19b1eb10728c7c76e161eda6beb4186f2dedbd2b6633f3cea",
+              "osm-416bf21f08737875422f0b2ff49fc28f7e4c3fe4dbfc4fa598f95aae0025a705",
+              "osm-b90de7f29ef1f959f114456cf3761ce29c2b1fd5f1c89eb55e4e50ce8fad095a",
+              "osm-d947cc1fc0ca3a1206a959de75fb18e0ce7134627d7e157fcdc1e3216622d819"
+            ]
+          },
+          "taskId": "evacuate-chico"
+        },
+        {
+          "resourceId": "exercise-engine-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f",
+              "osm-94866d18d8fe63db271ed01d00a739b76898916a4497793abc6ba9f81dc88286",
+              "osm-cfcd7e37b8733ddaa3e1ee0bad4e24939bb7082e7274383d182b3af415e8bdc3",
+              "osm-2ffb02fd68d5e4932877eecd92476e5507506bbbd0f8effc717e0b8a40791ecd",
+              "osm-8c9dcdd1d36dd1775211ab2f28439b828b57ecffacd5b823ddd165f6dcfd52e4",
+              "osm-14d52ceb3365ddb33bbb548db2e693189c75d3bc9e06c8c4924fe7ddb35ae1a2",
+              "osm-74c468fc4ba327dae6af4bef72172129a5d6ffb5910384892851b4997b60202a",
+              "osm-65038fa9c0f8d50613107968c4a45af5f25664c48069ea96cc45c1b0e2c332c1",
+              "osm-8c190c710b5065ec988ec6b12f2ac6ddc96d014020f18588a7d9c78cab6a858b",
+              "osm-2edc641878cb02350c473b97ce7186fb6adab1bec1a52df5f073352fa6838f57"
+            ]
+          },
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "resourceId": "exercise-medical-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-cbb53b24fd78cdb8c6f241c0a384a4c4de62e79aff4953fb9785c2bcc2acb5eb",
+              "osm-85059fe146cb146de539e98783b28ff776238a8bc95fa043bd4d74f931c1cf08",
+              "osm-659eb853228a16a8063a58060f17e4d26451052ddea2c644aaad9b253cf7acaf",
+              "osm-634d8ccef79f75ca5843864e47321312516ae873788c4ef057430c5c3b5334e7",
+              "osm-5c11c56ef58a179f1cdb308ccf4624b87108ad1ad3f4d6e6b575dcaeb578149a",
+              "osm-4708aad50516bdc3c5709808d4207426ef8cc695de7e0f6e860f4e44a6bf492b",
+              "osm-033662f2851d19f0d436a28c02e536b63aef1646a1db91df1bac527b8c146311",
+              "osm-6840b40be3de61514b1f4597f00aea3a046a504181df85f535556ee70a246a62",
+              "osm-98974e7a1c369eef901b671767d14eebaf8a0f367788c12b1d5b68d9182c0afb",
+              "osm-98cfdf77f90ed0ec1e802cc7ea36a1e0de692027ebeacee33f6ef84d365a19a5",
+              "osm-f813811ddcb370fcff40a2068b57fd612c710e92906425e2708b13cdd44ff13c",
+              "osm-b2cd48feac556b32aeb839314d09670e364a4bb411d9d9a89cec1d8f496e9266",
+              "osm-1eabce12eae50e5c6755b9977a28d1b58eb7333eaede4ae9b37a1cae8a6e9828",
+              "osm-b8fb2885686f7c2dc58bc7115179f8a94fa27f3e5a4a85711f4023a290b2bc2f",
+              "osm-6a11f8f251df357d4ddade3dcc479019b79222f8a598a17b81c192c29cb9843a",
+              "osm-6b890db133937d52123fbc614b10c48afa25b986de8a30c8ec596151c37f1a44",
+              "osm-a2428509d2a1aba9588a9b063e0f5b556691981fbcb6f1554720360cc67f6b27",
+              "osm-3d49bb2a3ec5ed67a349fd7aaee944225235f1b147ccd82e0e2b187489bfe5cf",
+              "osm-5a36f2c46ad182c42e2aec5de9b2128b09cf138d1dff8ac635b5e98698576af5",
+              "osm-92224727a6f6d8b4aeaa6a8f97853e50f7a9a451957de75d698d64fcc09408fc",
+              "osm-18347f39a0b48eea203f16c0666311d377e5b6fb023cd123ed3625a988abfac6",
+              "osm-9b339113b5fb4c5b64fa59e61305630cb692edf7a048abc52c6f68e7201dec83",
+              "osm-7f2b3603a46c6885f053c2700fea1503cbfec3d90ff0bd1383768594e7e806ab",
+              "osm-dcc7c4aab12b19da4c648174d6b609d65ddbeaa4c78ea30454fbc42c8a395ce8",
+              "osm-1a2d7594cc3486d9873b6ff8465f95bb8eeca342dc6cb6a3b565cf347de3a0a8",
+              "osm-6485cc2c178e23b84fd09b28776c818cc18334d8aab86027c9cdb3cc10728291",
+              "osm-d272b662489b4b0cae41f09c487d6a0d584f3c2038fcf5f62cecee205ecc3836",
+              "osm-506541e538d9cfef262da265a774160dd70b0759568f6687dbea4cc6b5dfa241",
+              "osm-1614835fe5d615f15dfaa2005d4067fd5bf8000346d1e8898339a31713f0cfed",
+              "osm-8264211bc59521d520e54cf22158f432c38a40169ad4580b04b774bfa9c28c4e",
+              "osm-b5c84eaa8b30358f91bc0dc41d488aa5a15ca69325d6c47755ff8f46e203b7ca",
+              "osm-93fc28933b8b8ea96f7aaf38c3183beff14cfaf44d9b1770f3cf342ba14f486f",
+              "osm-ed2858b7134293026d76a3a1ad7ae5017cbb5d43439e0ea36d0fed76dedbe52f",
+              "osm-81651f26084af1660501a3d484c73b96ce5b87a8449afdfba4bd3711f06c3f83",
+              "osm-c2b19ad08e9d6c6d19e400faad4e9b8c7bbfc04c51c8b9d040446fe586f7cbef",
+              "osm-277c889648bb6e422e75a0173433e4dd25f29d1656680a7a2a1ffd5e48fe3a73"
+            ]
+          },
+          "taskId": "support-feather-river"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-engine-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "resource-contention: task=evacuate-paradise; eligible assignments=exercise-bus-1->evacuate-chico consume needed capacity"
+      ],
+      "causalCodes": [],
+      "consequences": {
+        "corridorCleared": false
+      },
+      "coveredTaskIds": [
+        "evacuate-chico",
+        "protect-paradise-substation",
+        "support-feather-river"
+      ],
+      "inputHash": "f0eb1cb86052b27023c15b62617204dff4e6cdcb9e37905c52428ff2954d0dde",
+      "objectiveComponents": {
+        "objectiveValue": 75,
+        "travelCost": 31,
+        "uncoveredTaskPenalty": 44
+      },
+      "operatorOverride": null,
+      "tasks": [
+        {
+          "penalty": 121,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 44,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 154,
+          "taskId": "protect-paradise-substation"
+        },
+        {
+          "penalty": 160,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-paradise"
+      ]
+    },
+    "shelterFieldReport": {
+      "assignments": [
+        {
+          "resourceId": "exercise-bus-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f",
+              "osm-754e70257e7606a0fd092da6f3bed0c17baacf49c62c32c29e7fb16cc0d566ff",
+              "osm-0ed05f534175513b9e03f2e3b0b30bee47311a2ac3433022051e53d4d3c20449",
+              "osm-5c5b282573ad61df35e2a2c10b8f07cac8a73b464fe2167cf8faab40b924d64f",
+              "osm-4e7ec4d655d213d699eea6d1c0f76d33a34fb359ed774c8591c8a4bdef9a49c1",
+              "osm-e1b5b242c1b816faade7467944ad058a8dc1e258bb8ee7e2dfc218726b9ceb79",
+              "osm-264a5461959e5fc8ec8049a81e4bec69f22cdbdba3432adcd2b197af1665d754",
+              "osm-38883027cbae0f9b92a615eb925ee94ab73c1298eb081373da94cffe5837c0f1",
+              "osm-0f2062296962c55e1b0be3e23d29b9a0b275aa386af2c26476af679139380ddb",
+              "osm-b03b91bc9c751c6c60bed648360a87b8b1f6f3435449a083ba34354d640ead9a",
+              "osm-e48d238e5011ab9727d93dc28086063f23cefeac6a36df989fb6817f661a2f9e",
+              "osm-24e669020f4936c8e98d7e765626704056207949db3c48d89de66f90602eb8bf",
+              "osm-e8e6a4f5e8bb0239334f8f0145b26da08cb1d81da839551ee498ac4ec53da1a4",
+              "osm-67baacb4cc6dd1b407bd08eebeb3b8b0b985b1a02e3f68d521e49e8d84ed472d",
+              "osm-66445e57a3b3c6a3d5d9b0860e23b341cc53755c34d8bd5286538723457faa94",
+              "osm-9a4ed34072b0e8aa59c07e42b9fb4f8c565ad1cf5af937d36614bbac1145ce0e",
+              "osm-502d1732fddcd9beb1b896dd9c003a0ce32eaad56c52b33d6476cf0c386d7f10",
+              "osm-713cfe9449634bbadca7e27e61ee1e0f277b2812c2ccba01ca1290bbb1e1349e",
+              "osm-a16141a8261e0a81fcb9f24ba40ea8e5babfdf2a3d9ef73f8508bec07ee45628",
+              "osm-81d8df228a59d92d7a2cf0b5b091fdade2bee02243a48f8ac7b2914bffb122fa",
+              "osm-e04ebf56b117231428570a61a7a858e032d8de6cddecb4b36d57709fe4993254",
+              "osm-9b6cbc1997248f5d51044c88b069f64a71fda97601e340bcc37dee29bec99bdd",
+              "osm-fdd12b55de0d0daa3b0e66d80bad55c939d8af298ee7d073bfc55661146338e9",
+              "osm-1416641387d860ddb97a94c74fb3e5ec07fb2a01899fd62743402730824d46f6",
+              "osm-c813f468135679fe4fa2e055627251f11ffb42a8c41e284c0fe272f2348a85e1",
+              "osm-c0d1b1cc684266d6a4a8d4faec63eccfabc02a928e747628b3982338004b7974",
+              "osm-a6908c3cc6e5e10442eefe19fb17d2c0f663941a969dfd83ab9b524a28ace9d1",
+              "osm-95202181054619c14e274e5aa5709f751fa30ac28d6a45e8c8901c86afd0d3d6",
+              "osm-0b0e981d73bace2155928f8ee7d05ff1f6b9ade2b35c5efc6d8efc7b5f67941f",
+              "osm-634c69684c40ca1a990ee3e53490d921d4a27403c07f797009275b3143b577eb",
+              "osm-fe4e022a1d7dd6c66100fb01d8e45fd792ff8e7eb5e78537673d8d4513306432",
+              "osm-a1623659593bb5d83d486956364c9355ac595a36fd8411d03c1f3eee2759d444",
+              "osm-5986965770b0a769094f600590d4b28fbc7cc95e25933a0eae179fd0e2098439",
+              "osm-9cf599bfd72cd9153b4ee22157fea621f871a39efe171fa76c44614776bf4543",
+              "osm-c9ef471ef4628ed360bf7652c44bcfe674f83c9c229315ebd4887ee5297ce90e",
+              "osm-a493e94b34979e91af17f39cf3b8703fe42300cd84a25303c7a629430012e195",
+              "osm-9f56debb9c2a60d12e7b9b202d7535fb7a113a41223f20e7b22847c74fa9abba",
+              "osm-a3963af28e4495ba789b43914d2552ff2a8e9b45e36edb8149d441166c8b06f9",
+              "osm-e1a96c2c2c96c2667263c45bb6b8a4bbd9bd8dd0cda2bee5f41f90f80b1ec8b7",
+              "osm-077064d86559ea136f2ac6861c58b7e698012e165cd48e0977b47389e3e5e169",
+              "osm-afbcb937b76e3bd659e20fe8ca1b0ee541a3b56ab16de5e330f580641aa53640",
+              "osm-29c00b6fe45e9e87736bc9ca6177cd2b362cd0008841481ca5ac3d85f68d1eb5",
+              "osm-9d486779bbfce019018d1cb8213faac2528f1f80f0464920069f1cf2cb417381",
+              "osm-a35323012eef92a42b693302cb796c28c1f0a2ba5deee5b3ba0d9c60d4c2b978",
+              "osm-d0691d34054ee4bf1b85ff3ddd1a267b64e6389399f21f5eb23129618d648afc",
+              "osm-aa17756c6e5bcee15649ee14e3825b71149b26148ad53842f5b9998d60c1b384",
+              "osm-6aa44383772486c86f67973a89add8782d2981693734965c07eb897ca1825510",
+              "osm-44b75a220be69928c3589293e6b95203182ad52d75e9dcc537da1c50a74def9d",
+              "osm-dd50c1d99cf429f9f6051d9a1f350daf96cdffd488b7bf82ce8b6d189a095bfc",
+              "osm-dfd34013188410744b20d8f4cc81d28b0607d811db3e6b727e6aef13010c0784",
+              "osm-59c14b0908a6bcc05cbea25a430dcdb5943f6b619f5c31427f02ae3479d3f8b6",
+              "osm-017d962ee868a518d0d34ebb1f4f4660e32e316e5df238ae075bf92b5dd863c5",
+              "osm-a4efc18a7da5fbd2d4b2e3aedfd80866e34cd2b1131b6e373a4c62dc40ac1a10",
+              "osm-e085a6d3f13cbda18886c65876ec7e7d6934245e5c3f7433d140174618a5ce9b",
+              "osm-05e13cc0f920fed6022827fdae9ecc74aca99abb64493eae1216bfd363bf12d5",
+              "osm-33a00595b5c486dac3326311d269bd3f474ec63ab4bd1636defc0b455be2879d",
+              "osm-90e4f6cc3854b5a91d20649d165f3fa3cbf5fed6969682ece5186278afd81b09",
+              "osm-97d28459047c56c8e9422cb695d8a75dfea8bf076eeff95c24c92b3cb96a1741",
+              "osm-a44320684d2ed07b756d71ead2d7c67f8c7d58445145668651be5296ddbb1d57",
+              "osm-b982e107b7d8b785a51e8dd7d567a8031d53de1633367265c1211e00aa56ee5c",
+              "osm-8482084aaa50b99203b7de48558640b3aae52efcf2a72939cc43774db1f91fab",
+              "osm-694d391df6b526d67fdcce4c4c50b9675738e70a004a63dbc5f0f4f1dcf17cc9",
+              "osm-34e75872cc5e1cb19b1eb10728c7c76e161eda6beb4186f2dedbd2b6633f3cea",
+              "osm-416bf21f08737875422f0b2ff49fc28f7e4c3fe4dbfc4fa598f95aae0025a705",
+              "osm-b90de7f29ef1f959f114456cf3761ce29c2b1fd5f1c89eb55e4e50ce8fad095a",
+              "osm-d947cc1fc0ca3a1206a959de75fb18e0ce7134627d7e157fcdc1e3216622d819"
+            ]
+          },
+          "taskId": "evacuate-chico"
+        },
+        {
+          "resourceId": "exercise-medical-1",
+          "route": {
+            "edgeIds": [
+              "osm-9d48c6ef9a48a3850838102d0490796fc38dca7c140d929080726ce271dba1a2",
+              "osm-406d028b47233b141925a2384d1058e87594624bc18725098c615b84d76859a5",
+              "osm-0b7e7f901c081d112a530f446d98d475cdd150eacc90e06ccd5b246f61a840db",
+              "osm-cbb53b24fd78cdb8c6f241c0a384a4c4de62e79aff4953fb9785c2bcc2acb5eb",
+              "osm-85059fe146cb146de539e98783b28ff776238a8bc95fa043bd4d74f931c1cf08",
+              "osm-659eb853228a16a8063a58060f17e4d26451052ddea2c644aaad9b253cf7acaf",
+              "osm-634d8ccef79f75ca5843864e47321312516ae873788c4ef057430c5c3b5334e7",
+              "osm-5c11c56ef58a179f1cdb308ccf4624b87108ad1ad3f4d6e6b575dcaeb578149a",
+              "osm-4708aad50516bdc3c5709808d4207426ef8cc695de7e0f6e860f4e44a6bf492b",
+              "osm-033662f2851d19f0d436a28c02e536b63aef1646a1db91df1bac527b8c146311",
+              "osm-6840b40be3de61514b1f4597f00aea3a046a504181df85f535556ee70a246a62",
+              "osm-98974e7a1c369eef901b671767d14eebaf8a0f367788c12b1d5b68d9182c0afb",
+              "osm-98cfdf77f90ed0ec1e802cc7ea36a1e0de692027ebeacee33f6ef84d365a19a5",
+              "osm-f813811ddcb370fcff40a2068b57fd612c710e92906425e2708b13cdd44ff13c",
+              "osm-b2cd48feac556b32aeb839314d09670e364a4bb411d9d9a89cec1d8f496e9266",
+              "osm-1eabce12eae50e5c6755b9977a28d1b58eb7333eaede4ae9b37a1cae8a6e9828",
+              "osm-b8fb2885686f7c2dc58bc7115179f8a94fa27f3e5a4a85711f4023a290b2bc2f",
+              "osm-6a11f8f251df357d4ddade3dcc479019b79222f8a598a17b81c192c29cb9843a",
+              "osm-6b890db133937d52123fbc614b10c48afa25b986de8a30c8ec596151c37f1a44",
+              "osm-a2428509d2a1aba9588a9b063e0f5b556691981fbcb6f1554720360cc67f6b27",
+              "osm-3d49bb2a3ec5ed67a349fd7aaee944225235f1b147ccd82e0e2b187489bfe5cf",
+              "osm-5a36f2c46ad182c42e2aec5de9b2128b09cf138d1dff8ac635b5e98698576af5",
+              "osm-92224727a6f6d8b4aeaa6a8f97853e50f7a9a451957de75d698d64fcc09408fc",
+              "osm-18347f39a0b48eea203f16c0666311d377e5b6fb023cd123ed3625a988abfac6",
+              "osm-9b339113b5fb4c5b64fa59e61305630cb692edf7a048abc52c6f68e7201dec83",
+              "osm-7f2b3603a46c6885f053c2700fea1503cbfec3d90ff0bd1383768594e7e806ab",
+              "osm-dcc7c4aab12b19da4c648174d6b609d65ddbeaa4c78ea30454fbc42c8a395ce8",
+              "osm-1a2d7594cc3486d9873b6ff8465f95bb8eeca342dc6cb6a3b565cf347de3a0a8",
+              "osm-6485cc2c178e23b84fd09b28776c818cc18334d8aab86027c9cdb3cc10728291",
+              "osm-d272b662489b4b0cae41f09c487d6a0d584f3c2038fcf5f62cecee205ecc3836",
+              "osm-506541e538d9cfef262da265a774160dd70b0759568f6687dbea4cc6b5dfa241",
+              "osm-1614835fe5d615f15dfaa2005d4067fd5bf8000346d1e8898339a31713f0cfed",
+              "osm-8264211bc59521d520e54cf22158f432c38a40169ad4580b04b774bfa9c28c4e",
+              "osm-b5c84eaa8b30358f91bc0dc41d488aa5a15ca69325d6c47755ff8f46e203b7ca",
+              "osm-93fc28933b8b8ea96f7aaf38c3183beff14cfaf44d9b1770f3cf342ba14f486f",
+              "osm-ed2858b7134293026d76a3a1ad7ae5017cbb5d43439e0ea36d0fed76dedbe52f",
+              "osm-81651f26084af1660501a3d484c73b96ce5b87a8449afdfba4bd3711f06c3f83",
+              "osm-c2b19ad08e9d6c6d19e400faad4e9b8c7bbfc04c51c8b9d040446fe586f7cbef",
+              "osm-277c889648bb6e422e75a0173433e4dd25f29d1656680a7a2a1ffd5e48fe3a73"
+            ]
+          },
+          "taskId": "support-feather-river"
+        }
+      ],
+      "bindingConstraints": [
+        "compatibility: resource=exercise-engine-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-engine-1; task=shelter-capacity-transport; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-medical-1; task=shelter-capacity-transport; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=evacuate-paradise; resource lacks capability=evacuation-transport",
+        "compatibility: resource=exercise-road-crew-1; task=shelter-capacity-transport; resource lacks capability=evacuation-transport",
+        "resource-contention: task=evacuate-paradise; eligible assignments=exercise-bus-1->evacuate-chico consume needed capacity",
+        "resource-contention: task=shelter-capacity-transport; eligible assignments=exercise-bus-1->evacuate-chico consume needed capacity"
+      ],
+      "causalCodes": [
+        "wind.changed",
+        "incident.task-added",
+        "incident.task-removed",
+        "incident.task-removed",
+        "route.reopened",
+        "assignment.changed",
+        "assignment.changed"
+      ],
+      "consequences": {
+        "corridorCleared": true
+      },
+      "coveredTaskIds": [
+        "evacuate-chico",
+        "support-feather-river"
+      ],
+      "inputHash": "413f4b0e53a5c6da052397fe9c80b5080b0182b20ca3273699c7dc4bc16b14af",
+      "objectiveComponents": {
+        "objectiveValue": 174,
+        "travelCost": 28,
+        "uncoveredTaskPenalty": 146
+      },
+      "operatorOverride": null,
+      "tasks": [
+        {
+          "penalty": 121,
+          "taskId": "evacuate-chico"
+        },
+        {
+          "penalty": 44,
+          "taskId": "evacuate-paradise"
+        },
+        {
+          "penalty": 102,
+          "taskId": "shelter-capacity-transport"
+        },
+        {
+          "penalty": 160,
+          "taskId": "support-feather-river"
+        }
+      ],
+      "uncoveredTaskIds": [
+        "evacuate-paradise",
+        "shelter-capacity-transport"
+      ]
+    }
+  }
+}

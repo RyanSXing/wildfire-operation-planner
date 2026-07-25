@@ -8,6 +8,7 @@ from wildfireops.domain.observations import NormalizedObservation, WeatherObserv
 from wildfireops.geospatial.clustering import ClusteringConfig, cluster_detections
 from wildfireops.geospatial.exposure import ExposureConfig
 from wildfireops.geospatial.road_graph import RoadGraph, nearest_road_node
+from wildfireops.replay.exercise import load_exercise_definition
 from wildfireops.replay.loader import ReplayLoader
 
 
@@ -94,3 +95,37 @@ def test_committed_park_fire_package_is_complete() -> None:
     assert graph.graph_version == loader.manifest.road_graph.graph_version
     longitude, latitude = loader.static_data.assets[0].geometry_geojson["coordinates"]
     assert nearest_road_node(graph, longitude, latitude) in graph._graph
+
+
+def test_committed_park_fire_exercise_is_complete() -> None:
+    package = Path(__file__).parents[4] / "data/replay/park-fire"
+    loader = ReplayLoader(package)
+    definition = load_exercise_definition(loader)
+
+    assert definition is not None
+    assert definition.exercise_id == "park-fire-decision"
+    assert len(definition.checkpoints) == 3
+    assert set(definition.objectives) == {
+        "fastest-response",
+        "protect-critical-services",
+        "maximize-population-coverage",
+    }
+    assert {item.resource_type for item in definition.resources} == {
+        "engine",
+        "evacuation-bus",
+        "medical-team",
+        "road-crew",
+    }
+    assert all(item.provenance == "exercise" for item in definition.resources)
+    assert any(
+        incident.provenance == "exercise"
+        for checkpoint in definition.checkpoints
+        for incident in checkpoint.incidents
+    )
+    assert loader.manifest.road_graph is not None
+    graph = RoadGraph.load(package / loader.manifest.road_graph.filename)
+    assert all(
+        nearest_road_node(graph, asset.position.longitude, asset.position.latitude)
+        in graph._graph
+        for asset in definition.assets
+    )
