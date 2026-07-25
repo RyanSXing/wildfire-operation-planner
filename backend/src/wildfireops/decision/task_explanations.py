@@ -30,7 +30,8 @@ _ORDER = {
     "task.uncovered-deadline": 104,
     "task.uncovered-capacity": 105,
     "task.uncovered-contention": 106,
-    "task.uncovered-objective-tradeoff": 107,
+    "task.uncovered-feasible-incumbent": 107,
+    "task.uncovered-objective-tradeoff": 108,
 }
 
 
@@ -208,6 +209,22 @@ def _uncovered_reason(
         and not isinstance(required, bool)
         and unassigned_capacity >= required
     ):
+        if status == "FEASIBLE":
+            return _change(
+                "task.uncovered-feasible-incumbent",
+                f"{task_id} remains uncovered in the feasible incumbent; "
+                "optimality is not proven.",
+                {
+                    "taskId": task_id,
+                    "status": status,
+                    "optimalityProven": False,
+                    "requiredCapacity": required,
+                    "unassignedEligibleCapacity": unassigned_capacity,
+                    "resourceIds": tuple(
+                        sorted(str(item.get("resourceId")) for item in unassigned)
+                    ),
+                },
+            )
         return _objective_tradeoff_reason(task_id, task, unassigned, planning)
     assigned_ids = {
         str(item.get("resourceId"))

@@ -179,6 +179,89 @@ def test_objective_tradeoff_reports_a_tie_without_calling_it_more_expensive() ->
     assert "more expensive" not in reason.summary
 
 
+def test_feasible_incumbent_does_not_claim_an_objective_tradeoff() -> None:
+    explanation = explain_task_plan(
+        None,
+        {
+            "objective": "fastest-response",
+            "algorithm": {"objectiveWeights": {"travelWeight": 1}},
+            "status": "FEASIBLE",
+            "tasks": [
+                {"taskId": "task-a", "requiredCapacity": 1, "penalty": 50},
+                {"taskId": "task-b", "requiredCapacity": 1, "penalty": 200},
+            ],
+            "assignments": [{"resourceId": "r1", "taskId": "task-b"}],
+            "coveredTaskIds": ["task-b"],
+            "uncoveredTaskIds": ["task-a"],
+            "candidateFacts": [
+                {
+                    "resourceId": "r1",
+                    "taskId": "task-a",
+                    "capacity": 1,
+                    "available": True,
+                    "capabilityCompatible": True,
+                    "routeReachable": True,
+                    "travelMinutes": 1,
+                    "deadlineMinutes": 120,
+                    "eligible": True,
+                },
+                {
+                    "resourceId": "r2",
+                    "taskId": "task-a",
+                    "capacity": 1,
+                    "available": True,
+                    "capabilityCompatible": True,
+                    "routeReachable": True,
+                    "travelMinutes": 80,
+                    "deadlineMinutes": 120,
+                    "eligible": True,
+                },
+                {
+                    "resourceId": "r1",
+                    "taskId": "task-b",
+                    "capacity": 1,
+                    "available": True,
+                    "capabilityCompatible": True,
+                    "routeReachable": True,
+                    "travelMinutes": 100,
+                    "deadlineMinutes": 120,
+                    "eligible": True,
+                },
+                {
+                    "resourceId": "r2",
+                    "taskId": "task-b",
+                    "capacity": 1,
+                    "available": True,
+                    "capabilityCompatible": True,
+                    "routeReachable": True,
+                    "travelMinutes": 1,
+                    "deadlineMinutes": 120,
+                    "eligible": True,
+                },
+            ],
+        },
+    )
+
+    reason = explanation.changes[1]
+    assert reason.code == "task.uncovered-feasible-incumbent"
+    assert reason.summary == (
+        "task-a remains uncovered in the feasible incumbent; optimality is not proven."
+    )
+    assert reason.evidence == {
+        "taskId": "task-a",
+        "status": "FEASIBLE",
+        "optimalityProven": False,
+        "requiredCapacity": 1,
+        "unassignedEligibleCapacity": 1,
+        "resourceIds": ("r2",),
+    }
+    assert "objective" not in reason.summary
+    assert all(
+        item.code != "task.uncovered-objective-tradeoff"
+        for item in explanation.changes
+    )
+
+
 def test_uncovered_reason_uses_candidate_evidence_not_scores() -> None:
     explanation = explain_task_plan(
         None,
