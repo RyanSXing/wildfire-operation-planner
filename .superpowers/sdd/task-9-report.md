@@ -60,3 +60,31 @@ incomplete, concurrent, solver-lock, and forced-internal-failure requests.
 The solver is deterministic but still bounded to its existing two-second
 budget; a future change to solver semantics needs to preserve the same
 read-only response contract.
+
+## Review follow-up
+
+- Replaced the hardcoded checkpoint-key mapper in action eligibility with the
+  actual key from the loaded definition. The committed Park Fire journey now
+  asserts that plans for `initial-allocation` and `cascading-disruption` permit
+  advance.
+- Sandbox canonical input now records the wind preset and sorted resolved task
+  priority preset/multiplier entries; equal wind values under different names
+  therefore produce different hashes.
+- Sandbox multipliers are strict positive signed-int64 values at load time.
+  Replay validation also rejects priority products and worst-case task penalty
+  aggregates outside CP-SAT signed-int64 range, with checkpoint/task paths.
+- Sandbox responses are deep-frozen before returning. The route thaws only for
+  Pydantic response validation.
+- The sandbox provider requests SQLAlchemy `AUTOCOMMIT` isolation without an
+  explicit transaction block. The committed-fixture integration test observes
+  no explicit `BEGIN`/`COMMIT` SQL and verifies database-wide counts remain
+  unchanged.
+
+Follow-up verification:
+
+```text
+93 focused tests passed
+738 unit + architecture tests passed (3 known multiprocessing fork warnings)
+ruff: All checks passed
+mypy: Success: no issues found in 5 source files
+```

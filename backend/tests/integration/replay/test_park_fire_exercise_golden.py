@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from wildfireops.application.commands import CommandServiceProvider
@@ -154,8 +154,10 @@ async def _journey(client: AsyncClient, objective: str) -> dict[str, object]:
         200,
     )
     initial = await _plan(client, session, f"{objective}-initial")
+    assert initial["session"]["allowedActions"] == ["select-objective", "advance"]
     cascade_session = await _advance(client, initial["session"], f"{objective}-advance-1")
     cascade = await _plan(client, cascade_session, f"{objective}-cascade")
+    assert cascade["session"]["allowedActions"] == ["select-objective", "advance"]
     final_session = await _advance(client, cascade["session"], f"{objective}-advance-2")
     final = await _plan(client, final_session, f"{objective}-final")
     override = await _request(
@@ -197,6 +199,123 @@ async def _journey(client: AsyncClient, objective: str) -> dict[str, object]:
         "completedSession": _session_semantics(approved, aliases),
         "audit": [_audit_semantics(item, aliases) for item in audit["items"]],
     }
+
+
+async def _completed_session(client: AsyncClient) -> dict[str, Any]:
+    session = await _request(
+        client.post(
+            "/api/exercises/park-fire-decision/sessions",
+            headers={"Idempotency-Key": "sandbox-create"},
+        ),
+        201,
+    )
+    session = await _request(
+        client.post(
+            f"/api/exercise-sessions/{session['id']}/objective",
+            headers={"Idempotency-Key": "sandbox-objective"},
+            json={"objective": "fastest-response", "expectedVersion": session["version"]},
+        ),
+        200,
+    )
+    initial = await _plan(client, session, "sandbox-initial")
+    cascade = await _plan(
+        client, await _advance(client, initial["session"], "sandbox-advance-1"), "sandbox-cascade"
+    )
+    final = await _plan(
+        client, await _advance(client, cascade["session"], "sandbox-advance-2"), "sandbox-final"
+    )
+    override = await _request(
+        client.post(
+            f"/api/exercise-sessions/{session['id']}/overrides",
+            headers={"Idempotency-Key": "sandbox-override"},
+            json={
+                "resourceId": "exercise-bus-1",
+                "taskId": "shelter-capacity-transport",
+                "expectedVersion": final["session"]["version"],
+            },
+        ),
+        201,
+    )
+    return await _request(
+        client.post(
+            f"/api/exercise-sessions/{session['id']}/decisions",
+            headers={"Idempotency-Key": "sandbox-approve"},
+            json={
+                "expectedVersion": override["session"]["version"],
+                "note": "Approve fixture sandbox journey.",
+            },
+        ),
+        201,
+    )
+
+
+@pytest.mark.asyncio
+async def test_park_fire_completed_sandbox_is_autocommit_read_only(
+    exercise_app: FastAPI,
+) -> None:
+    statements: list[str] = []
+
+    def record(
+        connection: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: object,
+    ) -> None:
+        del connection, cursor, parameters, context, executemany
+        statements.append(statement)
+
+    event.listen(exercise_app.state.engine.sync_engine, "before_cursor_execute", record)
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=exercise_app), base_url="http://test"
+        ) as client:
+            completed = await _completed_session(client)
+            session_id = completed["id"]
+            async with exercise_app.state.engine.connect() as connection:
+                before = (
+                    await connection.execute(
+                        text(
+                            "SELECT (SELECT count(*) FROM exercise_plan_runs), "
+                            "(SELECT count(*) FROM exercise_events), "
+                            "(SELECT count(*) FROM exercise_sessions), "
+                            "(SELECT count(*) FROM idempotency_keys)"
+                        )
+                    )
+                ).one()
+            response = await client.post(
+                f"/api/exercise-sessions/{session_id}/sandbox-plans",
+                json={
+                    "expectedVersion": completed["version"],
+                    "checkpointKey": "initial-allocation",
+                    "objective": "fastest-response",
+                    "windPreset": "historical-calm",
+                    "lockedAssignments": [
+                        {"resourceId": "exercise-bus-1", "taskId": "evacuate-paradise"},
+                        {"resourceId": "exercise-medical-1", "taskId": "support-feather-river"},
+                    ],
+                },
+            )
+            async with exercise_app.state.engine.connect() as connection:
+                after = (
+                    await connection.execute(
+                        text(
+                            "SELECT (SELECT count(*) FROM exercise_plan_runs), "
+                            "(SELECT count(*) FROM exercise_events), "
+                            "(SELECT count(*) FROM exercise_sessions), "
+                            "(SELECT count(*) FROM idempotency_keys)"
+                        )
+                    )
+                ).one()
+    finally:
+        event.remove(exercise_app.state.engine.sync_engine, "before_cursor_execute", record)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["output"]["status"] == "OPTIMAL"
+    assert response.json()["input"]["sandboxControls"]["windPreset"] == "historical-calm"
+    assert before == after
+    assert not any(statement.strip().upper() in {"BEGIN", "COMMIT"} for statement in statements)
 
 
 async def _plan(client: AsyncClient, session: dict[str, Any], key: str) -> dict[str, Any]:

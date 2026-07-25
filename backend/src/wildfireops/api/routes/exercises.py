@@ -153,7 +153,7 @@ async def generate_sandbox_plan(
             ),
         ),
     )
-    return SandboxPlanResponse.model_validate(result)
+    return SandboxPlanResponse.model_validate(_json_object(result))
 
 
 @router.post(

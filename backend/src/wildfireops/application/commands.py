@@ -137,6 +137,9 @@ class CommandServiceProvider:
         if graph is None:
             raise ExerciseCommandInvalid("exercise graph is unavailable")
         async with self._session_factory() as session:
+            await session.connection(
+                execution_options={"isolation_level": "AUTOCOMMIT"}
+            )
             repository = ExerciseRepository(session)
             yield ExercisePlanningService(
                 definition=definition,

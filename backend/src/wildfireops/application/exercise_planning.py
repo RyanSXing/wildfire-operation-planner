@@ -654,7 +654,7 @@ class ExercisePlanningService:
 
     async def generate_sandbox_plan(
         self, session_id: UUID, controls: SandboxPlanControls
-    ) -> dict[str, object]:
+    ) -> Mapping[str, object]:
         session = await self._repository.get_session(session_id)
         if session is None:
             raise ExerciseSessionNotFound("exercise session was not found")
@@ -732,18 +732,23 @@ class ExercisePlanningService:
             )
             for item in materialized.resources
         )
-        tasks = tuple(
-            replace(
-                item,
-                uncovered_penalty=(
-                    item.uncovered_penalty
-                    * allowed.priority_multipliers[
-                        controls.task_priority_presets.get(item.task_id, "standard")
-                    ]
-                ),
+        try:
+            tasks = tuple(
+                replace(
+                    item,
+                    uncovered_penalty=(
+                        item.uncovered_penalty
+                        * allowed.priority_multipliers[
+                            controls.task_priority_presets.get(item.task_id, "standard")
+                        ]
+                    ),
+                )
+                for item in materialized.tasks
             )
-            for item in materialized.tasks
-        )
+        except ValueError as error:
+            raise ExerciseCommandInvalid(
+                str(error), fields=("taskPriorityPresets",)
+            ) from error
         sandbox = replace(
             materialized,
             resources=resources,
@@ -762,6 +767,21 @@ class ExercisePlanningService:
             sandbox.closed_edge_ids,
         )
         payload = self._payload(sandbox, routes, session.consequences, controls.locked_assignments)
+        payload["sandboxControls"] = {
+            "windPreset": controls.wind_preset,
+            "taskPriorityPresets": [
+                {
+                    "taskId": task.task_id,
+                    "preset": controls.task_priority_presets.get(
+                        task.task_id, "standard"
+                    ),
+                    "multiplier": allowed.priority_multipliers[
+                        controls.task_priority_presets.get(task.task_id, "standard")
+                    ],
+                }
+                for task in sorted(sandbox.tasks, key=lambda item: item.task_id)
+            ],
+        }
         try:
             solved = solve_task_plan(
                 TaskOptimizationRequest(
@@ -791,13 +811,15 @@ class ExercisePlanningService:
             "riskVersion": "not-applicable",
             "riskReason": "task planning consumes no risk model",
         }
-        return {
-            "sandbox": True,
-            "sessionVersion": session.version,
-            "inputHash": input_hash,
-            "input": payload,
-            "output": output,
-        }
+        return freeze_json_object(
+            {
+                "sandbox": True,
+                "sessionVersion": session.version,
+                "inputHash": input_hash,
+                "input": payload,
+                "output": output,
+            }
+        )
 
     async def apply_override(
         self,

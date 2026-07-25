@@ -892,7 +892,11 @@ async def session_projection(
     )
     return {
         **_session_state(projected),
-        "allowedActions": _allowed_actions(projected, latest),
+        "allowedActions": _allowed_actions(
+            projected,
+            latest,
+            definition.checkpoints[projected.checkpoint_index].checkpoint_key,
+        ),
         "currentCheckpoint": definition.checkpoints[
             projected.checkpoint_index
         ].model_dump(mode="json", by_alias=True),
@@ -900,15 +904,10 @@ async def session_projection(
     }
 
 
-def session_checkpoint_key(index: int) -> str:
-    try:
-        return {0: "initial", 1: "cascade", 2: "field-report"}[index]
-    except KeyError:
-        raise RuntimeError("invalid exercise checkpoint index") from None
-
-
 def _allowed_actions(
-    session: ExerciseSession, latest: ExercisePlanRun | None
+    session: ExerciseSession,
+    latest: ExercisePlanRun | None,
+    checkpoint_key: str,
 ) -> tuple[str, ...]:
     if session.status == "expired":
         return ("start-new-exercise",)
@@ -920,7 +919,7 @@ def _allowed_actions(
         actionable = (
             latest is not None
             and latest.checkpoint_key
-            == session_checkpoint_key(session.checkpoint_index)
+            == checkpoint_key
             and latest.input_data.get("objective") == session.objective
             and latest.output_data.get("status") in {"FEASIBLE", "OPTIMAL"}
         )
@@ -931,7 +930,7 @@ def _allowed_actions(
         )
     if (
         latest is None
-        or latest.checkpoint_key != "field-report"
+        or latest.checkpoint_key != checkpoint_key
         or latest.input_data.get("objective") != session.objective
         or latest.output_data.get("status") not in {"FEASIBLE", "OPTIMAL"}
     ):

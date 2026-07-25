@@ -4,12 +4,13 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from hashlib import sha256
 from types import MappingProxyType
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictInt,
     ValidationError,
     field_validator,
     model_validator,
@@ -169,7 +170,7 @@ class SandboxControls(ExerciseModel):
     wind_presets: Mapping[str, ExerciseDisruption]
     priority_multipliers: Mapping[
         Literal["standard", "elevated", "urgent"],
-        int,
+        Annotated[StrictInt, Field(gt=0, le=2**63 - 1)],
     ]
 
     @field_validator("closure_edge_ids", mode="before")
@@ -321,6 +322,30 @@ def _validate_definition_references(
         raise ReplayPackageCorrupt(
             "exercise.json: sandbox priority multipliers must be positive"
         )
+    maximum_multiplier = max(definition.sandbox.priority_multipliers.values())
+    for checkpoint_index, checkpoint in enumerate(definition.checkpoints):
+        total_penalty = 0
+        for task_index, task in enumerate(checkpoint.tasks):
+            penalty = max(
+                weights.base_priority_weight * task.base_priority
+                + weights.critical_service_weight * int(task.critical_service)
+                + weights.population_weight
+                * (task.affected_population // weights.population_divisor)
+                for weights in definition.objectives.values()
+            )
+            if penalty > (2**63 - 1) // maximum_multiplier:
+                raise ReplayPackageCorrupt(
+                    "exercise.json: "
+                    f"checkpoints[{checkpoint_index}].tasks[{task_index}].basePriority: "
+                    "CP-SAT integer range exceeded"
+                )
+            total_penalty += penalty * maximum_multiplier
+            if total_penalty > 2**63 - 1:
+                raise ReplayPackageCorrupt(
+                    "exercise.json: "
+                    f"checkpoints[{checkpoint_index}].tasks[{task_index}].basePriority: "
+                    "CP-SAT integer range exceeded"
+                )
     if not definition.sandbox.wind_presets:
         raise ReplayPackageCorrupt(
             "exercise.json: sandbox requires at least one wind preset"

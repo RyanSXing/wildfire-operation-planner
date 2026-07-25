@@ -259,6 +259,38 @@ def test_definition_reports_duplicate_sandbox_closure_source_indices(
     )
 
 
+@pytest.mark.parametrize("value", [True, 1.5, "2", 2**63])
+def test_definition_rejects_non_strict_or_overflowing_sandbox_multiplier(
+    exercise_package: Path, value: object
+) -> None:
+    rewrite_exercise(
+        exercise_package,
+        lambda body: body["sandbox"]["priorityMultipliers"].update(standard=value),
+    )
+
+    with pytest.raises(ReplayPackageCorrupt) as error:
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+    assert "sandbox.priorityMultipliers.standard" in str(error.value)
+
+
+def test_definition_rejects_sandbox_priority_cp_sat_overflow(
+    exercise_package: Path,
+) -> None:
+    rewrite_exercise(
+        exercise_package,
+        lambda body: body["checkpoints"][0]["tasks"][0].update(
+            basePriority=2**62
+        ),
+    )
+
+    with pytest.raises(ReplayPackageCorrupt) as error:
+        load_exercise_definition(ReplayLoader(exercise_package))
+
+    assert "checkpoints[0].tasks[0].basePriority" in str(error.value)
+    assert "CP-SAT integer range exceeded" in str(error.value)
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [

@@ -763,10 +763,15 @@ async def test_sandbox_plan_is_completed_session_read_only_and_versioned() -> No
             "strong-northeast": {
                 "windSpeedMps": 12,
                 "windDirectionDegrees": 45,
-            }
+            },
+            "same-wind": {
+                "windSpeedMps": 12,
+                "windDirectionDegrees": 45,
+            },
         },
         "priorityMultipliers": {"standard": 1, "elevated": 2, "urgent": 3},
     }
+    exercise_data["resources"][0]["available"] = False
     repository = FakeExerciseRepository()
     service, _ = planning_service(
         repository, ExerciseDefinition.model_validate(exercise_data)
@@ -788,7 +793,7 @@ async def test_sandbox_plan_is_completed_session_read_only_and_versioned() -> No
             objective="maximize-population-coverage",
             closed_edge_ids=(),
             wind_preset="strong-northeast",
-            unavailable_resource_ids=frozenset({"engine-1"}),
+            unavailable_resource_ids=frozenset({"bus-1"}),
             task_priority_presets={"park-task": "urgent"},
             locked_assignments=(),
         ),
@@ -800,6 +805,34 @@ async def test_sandbox_plan_is_completed_session_read_only_and_versioned() -> No
     assert result["output"]["versions"]["sources"] == result["input"]["sourceVersions"]
     assert result["output"]["versions"]["riskVersion"] == "not-applicable"
     assert result["output"]["status"] in {"FEASIBLE", "OPTIMAL"}
+    assert {
+        item["resourceId"]: item["available"] for item in result["input"]["resources"]
+    } == {"bus-1": False, "engine-1": False}
+    assert result["input"]["sandboxControls"] == {
+        "windPreset": "strong-northeast",
+        "taskPriorityPresets": (
+            {"taskId": "park-task", "preset": "urgent", "multiplier": 3},
+            {"taskId": "spot-task", "preset": "standard", "multiplier": 1},
+        ),
+    }
+    same_wind = await service.generate_sandbox_plan(
+        current.id,
+        SandboxPlanControls(
+            expected_version=current.version,
+            checkpoint_key="cascade",
+            objective="maximize-population-coverage",
+            closed_edge_ids=(),
+            wind_preset="same-wind",
+            unavailable_resource_ids=frozenset({"bus-1"}),
+            task_priority_presets={"park-task": "urgent"},
+            locked_assignments=(),
+        ),
+    )
+    assert same_wind["inputHash"] != result["inputHash"]
+    with pytest.raises(TypeError):
+        result["input"]["sandboxControls"]["windPreset"] = "mutated"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        result["output"]["versions"]["sources"]["exercise"] = "mutated"  # type: ignore[index]
     assert (
         len(repository.plans),
         len(repository.events),
