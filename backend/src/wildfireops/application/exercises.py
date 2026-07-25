@@ -43,6 +43,24 @@ _PROJECTION_KEYS = _STATE_KEYS | {
     "currentCheckpoint",
     "latestPlan",
 }
+_ACTION_OPTIONS = {
+    "expired": frozenset({("start-new-exercise",)}),
+    "completed": frozenset({("view-debrief",)}),
+    "objective": frozenset({("select-objective",)}),
+    "checkpoint": frozenset(
+        {
+            ("select-objective", "advance"),
+            ("select-objective", "generate-plan"),
+        }
+    ),
+    "final": frozenset(
+        {
+            ("select-objective", "generate-plan"),
+            ("approve-plan",),
+            ("select-objective", "apply-override"),
+        }
+    ),
+}
 
 
 @dataclass(slots=True)
@@ -213,8 +231,8 @@ def _validate_replay_snapshot(
     if not isinstance(snapshot, MappingProxyType) or set(snapshot) != _PROJECTION_KEYS:
         raise RuntimeError("exercise replay response is invalid")
     actions = snapshot["allowedActions"]
-    if not isinstance(actions, tuple) or not all(
-        isinstance(action, str) and action.strip() for action in actions
+    if not isinstance(actions, tuple) or actions not in _allowed_action_options(
+        session
     ):
         raise RuntimeError("exercise replay response is invalid")
     checkpoint = snapshot["currentCheckpoint"]
@@ -231,6 +249,16 @@ def _validate_replay_snapshot(
     latest_plan = snapshot["latestPlan"]
     if latest_plan is not None and not isinstance(latest_plan, MappingProxyType):
         raise RuntimeError("exercise replay response is invalid")
+
+
+def _allowed_action_options(session: ExerciseSession) -> frozenset[tuple[str, ...]]:
+    if session.status == "expired":
+        return _ACTION_OPTIONS["expired"]
+    if session.status == "completed":
+        return _ACTION_OPTIONS["completed"]
+    if session.objective is None:
+        return _ACTION_OPTIONS["objective"]
+    return _ACTION_OPTIONS["checkpoint" if session.checkpoint_index < 2 else "final"]
 
 
 class ExerciseSessionService:

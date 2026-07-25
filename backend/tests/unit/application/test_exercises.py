@@ -417,6 +417,49 @@ async def test_replay_rejects_malformed_full_projection(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "actions",
+    [
+        (),
+        ("unknown",),
+        (" select-objective", "generate-plan"),
+        ("select-objective", "select-objective"),
+        ("view-debrief",),
+    ],
+)
+async def test_replay_rejects_actions_impossible_for_session_state(
+    actions: tuple[str, ...],
+) -> None:
+    repository = FakeExerciseRepository()
+    commands = service(repository)
+    session = await commands.create(idempotency_key="create")
+    await commands.select_objective(
+        session.id, "fastest-response", expected_version=1, idempotency_key="objective"
+    )
+    event = repository.events[-1]
+    repository.events[-1] = replace(
+        event,
+        inputs=freeze_json_object(
+            {
+                **event.inputs,
+                "_responseProjection": {
+                    **event.inputs["_responseProjection"],
+                    "allowedActions": actions,
+                },
+            }
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="exercise replay response is invalid"):
+        await commands.select_objective(
+            session.id,
+            "fastest-response",
+            expected_version=1,
+            idempotency_key="objective",
+        )
+
+
+@pytest.mark.asyncio
 async def test_mismatched_definition_session_is_unavailable_to_commands_and_queries() -> (
     None
 ):

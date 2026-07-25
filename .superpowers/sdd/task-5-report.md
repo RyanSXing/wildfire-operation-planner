@@ -122,3 +122,21 @@ uv run mypy src/wildfireops/application/exercises.py src/wildfireops/persistence
 ```
 
 Result: focused suite `43 passed`; Ruff and mypy passed.
+
+## Replay action options
+
+RED: added empty, unknown, padded, duplicate, and impossible replay action
+tuples. Each passed the prior generic nonblank-string validation.
+
+GREEN: one state-options helper now accepts only the exact tuples emitted by
+`_allowed_actions`, narrowed for expired, completed, no-objective, active
+pre-final, and final-checkpoint session states.
+
+```bash
+cd backend
+WILDFIREOPS_DATABASE_URL='postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test' uv run pytest tests/unit/application/test_exercises.py tests/integration/persistence/test_exercises.py -q
+uv run ruff check src/wildfireops/application/exercises.py src/wildfireops/persistence/exercises.py tests/unit/application/test_exercises.py tests/integration/persistence/test_exercises.py
+uv run mypy src/wildfireops/application/exercises.py src/wildfireops/persistence/exercises.py
+```
+
+Result: focused suite `48 passed`; Ruff and mypy passed.
