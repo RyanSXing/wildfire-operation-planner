@@ -100,9 +100,14 @@ def test_assignment_change_names_old_and_new_task() -> None:
 
 def test_reordered_json_inputs_produce_same_explanation() -> None:
     previous = {
+        "closedEdgeIds": ["edge-old-a", "edge-old-b"],
         "tasks": [
             {"taskId": "park", "incidentId": "park-fire"},
             {"taskId": "hospital", "penalty": 300},
+        ],
+        "resources": [
+            {"resourceId": "bus-1", "available": True},
+            {"resourceId": "engine-1", "available": True},
         ],
         "assignments": [
             {"resourceId": "bus-1", "taskId": "park"},
@@ -110,9 +115,14 @@ def test_reordered_json_inputs_produce_same_explanation() -> None:
         ],
     }
     current = {
+        "closedEdgeIds": ["edge-new-a", "edge-new-b"],
         "tasks": [
             {"taskId": "spot", "incidentId": "spot-fire"},
             {"taskId": "hospital", "penalty": 900},
+        ],
+        "resources": [
+            {"resourceId": "bus-1", "available": False},
+            {"resourceId": "engine-1", "available": True},
         ],
         "assignments": [
             {"resourceId": "bus-1", "taskId": "spot"},
@@ -123,12 +133,16 @@ def test_reordered_json_inputs_produce_same_explanation() -> None:
     assert explain_task_plan(previous, current) == explain_task_plan(
         {
             **previous,
+            "closedEdgeIds": list(reversed(previous["closedEdgeIds"])),
             "tasks": list(reversed(previous["tasks"])),
+            "resources": list(reversed(previous["resources"])),
             "assignments": list(reversed(previous["assignments"])),
         },
         {
             **current,
+            "closedEdgeIds": list(reversed(current["closedEdgeIds"])),
             "tasks": list(reversed(current["tasks"])),
+            "resources": list(reversed(current["resources"])),
             "assignments": list(reversed(current["assignments"])),
         },
     )
@@ -154,3 +168,109 @@ def test_rejects_duplicate_row_keys() -> None:
 def test_rejects_non_json_evidence() -> None:
     with pytest.raises(ValueError, match="unsupported JSON value"):
         explain_task_plan({"wind": {"speedMps": nan}}, {"wind": {}})
+
+
+def test_every_change_has_exact_summary_and_evidence() -> None:
+    explanation = explain_task_plan(
+        {
+            "objective": "fastest-response",
+            "wind": {"speedMps": 6.7},
+            "closedEdgeIds": ["edge-reopened"],
+            "tasks": [
+                {"taskId": "removed", "incidentId": "park-fire"},
+                {"taskId": "hospital", "penalty": 300},
+            ],
+            "resources": [{"resourceId": "bus-1", "available": True}],
+            "assignments": [{"resourceId": "bus-1", "taskId": "removed"}],
+        },
+        {
+            "objective": "protect-critical-services",
+            "wind": {"speedMps": 9.0},
+            "closedEdgeIds": ["edge-closed"],
+            "tasks": [
+                {"taskId": "added", "incidentId": "spot-fire"},
+                {"taskId": "hospital", "penalty": 900},
+            ],
+            "resources": [{"resourceId": "bus-1", "available": False}],
+            "assignments": [{"resourceId": "bus-1", "taskId": "added"}],
+        },
+    )
+
+    assert [
+        (item.code, item.summary, item.evidence) for item in explanation.changes
+    ] == [
+        (
+            "objective.changed",
+            "The planning objective changed.",
+            {"before": "fastest-response", "after": "protect-critical-services"},
+        ),
+        (
+            "wind.changed",
+            "Wind conditions changed.",
+            {"before": {"speedMps": 6.7}, "after": {"speedMps": 9.0}},
+        ),
+        (
+            "incident.task-added",
+            "A new incident task was added.",
+            {"taskId": "added", "incidentId": "spot-fire"},
+        ),
+        (
+            "incident.task-removed",
+            "An incident task was removed.",
+            {"taskId": "removed", "incidentId": "park-fire"},
+        ),
+        (
+            "task.priority-changed",
+            "A task priority changed.",
+            {"taskId": "hospital", "before": 300, "after": 900},
+        ),
+        ("route.closed", "A corridor closed.", {"edgeId": "edge-closed"}),
+        ("route.reopened", "A corridor reopened.", {"edgeId": "edge-reopened"}),
+        (
+            "resource.unavailable",
+            "A resource became unavailable.",
+            {"resourceId": "bus-1"},
+        ),
+        (
+            "assignment.changed",
+            "A resource assignment changed.",
+            {
+                "resourceId": "bus-1",
+                "beforeTaskId": "removed",
+                "afterTaskId": "added",
+            },
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "assignment",
+    [
+        {"resourceId": "bus-1"},
+        {"resourceId": "bus-1", "taskId": ""},
+        {"resourceId": "bus-1", "taskId": " "},
+        {"resourceId": "bus-1", "taskId": []},
+    ],
+)
+def test_rejects_malformed_assignment_task_id(assignment: object) -> None:
+    with pytest.raises(
+        ValueError,
+        match="assignments.taskId must be a nonblank string",
+    ):
+        explain_task_plan({"assignments": [assignment]}, {"assignments": []})
+
+
+@pytest.mark.parametrize(
+    ("closed_edge_ids", "message"),
+    [
+        ([""], "closedEdgeIds entries must be nonblank strings"),
+        ([" "], "closedEdgeIds entries must be nonblank strings"),
+        (["edge-32", "edge-32"], "duplicate closedEdgeIds entry: edge-32"),
+    ],
+)
+def test_rejects_invalid_closed_edge_ids(
+    closed_edge_ids: object,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        explain_task_plan({"closedEdgeIds": []}, {"closedEdgeIds": closed_edge_ids})

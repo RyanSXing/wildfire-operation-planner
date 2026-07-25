@@ -162,8 +162,8 @@ def _assignment_changes(
     previous: FrozenJsonObject,
     current: FrozenJsonObject,
 ) -> list[PlanChange]:
-    before = _rows(previous.get("assignments"), "assignments", "resourceId")
-    after = _rows(current.get("assignments"), "assignments", "resourceId")
+    before = _rows(previous.get("assignments"), "assignments", "resourceId", "taskId")
+    after = _rows(current.get("assignments"), "assignments", "resourceId", "taskId")
     return [
         _change(
             "assignment.changed",
@@ -189,7 +189,7 @@ def _planning_input(value: object, field: str) -> FrozenJsonObject:
 def _validate_collections(value: FrozenJsonObject) -> None:
     _rows(value.get("tasks"), "tasks", "taskId")
     _rows(value.get("resources"), "resources", "resourceId")
-    _rows(value.get("assignments"), "assignments", "resourceId")
+    _rows(value.get("assignments"), "assignments", "resourceId", "taskId")
     _strings(value.get("closedEdgeIds"), "closedEdgeIds")
 
 
@@ -198,15 +198,25 @@ def _strings(value: object, field: str) -> tuple[str, ...]:
         return ()
     if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
         raise ValueError(f"{field} must be a sequence")
-    if any(not isinstance(item, str) for item in value):
-        raise ValueError(f"{field} entries must be strings")
-    return tuple(value)
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"{field} entries must be strings")
+        if not item.strip():
+            raise ValueError(f"{field} entries must be nonblank strings")
+        if item in seen:
+            raise ValueError(f"duplicate {field} entry: {item}")
+        seen.add(item)
+        result.append(item)
+    return tuple(result)
 
 
 def _rows(
     value: object,
     field: str,
     key: str,
+    required_key: str | None = None,
 ) -> dict[str, FrozenJsonObject]:
     if value is None:
         return {}
@@ -221,6 +231,10 @@ def _rows(
             raise ValueError(f"{field}.{key} must be a nonblank string")
         if identifier in result:
             raise ValueError(f"duplicate {field}.{key}: {identifier}")
+        if required_key is not None:
+            required_value = item.get(required_key)
+            if not isinstance(required_value, str) or not required_value.strip():
+                raise ValueError(f"{field}.{required_key} must be a nonblank string")
         result[identifier] = freeze_json_object(item)
     return result
 
