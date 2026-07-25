@@ -318,7 +318,11 @@ The exercise remains inside the existing FastAPI modular monolith and PostgreSQL
 
 ## 11. Exercise definition
 
-An immutable, versioned exercise definition lives beside the replay package. It references pinned historical identities rather than copying historical observations.
+An immutable, versioned exercise definition lives beside the replay package. It
+references pinned historical observations rather than copying them. Public
+facility/community references keep their exact cited source identity, name, and
+coordinates in the manifest-hashed definition so the exercise does not mutate
+the existing Live Monitor asset or resource fixtures.
 
 The definition contains:
 
@@ -577,7 +581,6 @@ The API provides:
 
 Representative routes are:
 
-- `GET /api/exercises`
 - `GET /api/exercises/{exercise_id}`
 - `POST /api/exercises/{exercise_id}/sessions`
 - `GET /api/exercise-sessions/{session_id}`
@@ -589,7 +592,8 @@ Representative routes are:
 - `GET /api/exercise-sessions/{session_id}/audit`
 - `GET /api/exercise-sessions/{session_id}/debrief`
 
-Every mutation requires:
+Session creation requires an `Idempotency-Key` header. Every mutation after
+session creation requires:
 
 - an `Idempotency-Key` header; and
 - the caller's expected session version.
