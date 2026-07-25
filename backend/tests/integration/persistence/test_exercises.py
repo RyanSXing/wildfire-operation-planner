@@ -8,6 +8,7 @@ from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from wildfireops.application.exercises import ExerciseSession
 from wildfireops.config import Settings
 from wildfireops.db import create_engine
 from wildfireops.persistence.decision_models import IdempotencyKeyModel
@@ -37,7 +38,7 @@ async def create_session(
     repository: ExerciseRepository,
     *,
     callsign: str = "EMBER-101",
-) -> ExerciseSessionModel:
+) -> ExerciseSession:
     return await repository.create_session(**session_values(callsign=callsign))
 
 
@@ -90,14 +91,15 @@ async def test_session_defaults_json_and_timestamps_round_trip(
     session = await repository.create_session(
         **session_values(expires_at=expires_at),
     )
-    await db_session.refresh(session)
+    model = await db_session.get(ExerciseSessionModel, session.id)
+    assert model is not None
 
     assert session.checkpoint_index == 0
     assert session.status == "active"
     assert session.version == 1
     assert session.consequences == {}
-    assert session.created_at.tzinfo is not None
-    assert session.updated_at.tzinfo is not None
+    assert model.created_at.tzinfo is not None
+    assert model.updated_at.tzinfo is not None
     assert session.expires_at == expires_at
 
     server_default = (
@@ -209,7 +211,7 @@ async def test_plan_runs_keep_insertion_order_within_one_transaction(
         second.id,
         third.id,
     )
-    assert await repository.latest_plan(session.id, "initial") == third
+    assert (await repository.latest_plan(session.id, "initial")).id == third.id
 
 
 @pytest.mark.asyncio
@@ -306,7 +308,7 @@ async def test_lock_session_serializes_concurrent_commands() -> None:
                     first_has_lock.set()
                     await release_first.wait()
                     locked.version += 1
-                    await session.flush()
+                    await ExerciseRepository(session).save_session(locked)
                     return locked.version
 
         async def increment_second() -> int:
@@ -320,7 +322,7 @@ async def test_lock_session_serializes_concurrent_commands() -> None:
                     assert locked is not None
                     observed_version = locked.version
                     locked.version += 1
-                    await session.flush()
+                    await ExerciseRepository(session).save_session(locked)
                     return observed_version
 
         first_task = asyncio.create_task(increment_first())
@@ -371,7 +373,9 @@ async def test_deleting_session_cascades_plans_and_events(
     )
     await append_event(repository, session.id, resulting_session_version=2)
 
-    await db_session.delete(session)
+    await db_session.execute(
+        delete(ExerciseSessionModel).where(ExerciseSessionModel.id == session.id)
+    )
     await db_session.flush()
 
     assert (
