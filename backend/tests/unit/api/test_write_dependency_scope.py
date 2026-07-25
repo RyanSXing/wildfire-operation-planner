@@ -10,10 +10,13 @@ from starlette.types import Message, Scope
 
 from wildfireops.api.dependencies import (
     get_decision_service,
+    get_exercise_planning_service,
+    get_exercise_session_service,
     get_recommendation_service,
     get_scenario_service,
 )
 from wildfireops.api.routes.decisions import router as decisions_router
+from wildfireops.api.routes.exercises import router as exercises_router
 from wildfireops.api.routes.scenarios import router as scenarios_router
 from wildfireops.decision.commands import StoredDecision
 
@@ -111,6 +114,36 @@ async def test_decision_dependency_commits_before_response_start() -> None:
             decisions_router,
             "/api/recommendations/{recommendation_id}/decisions",
             get_decision_service,
+        ),
+        (
+            exercises_router,
+            "/api/exercises/{exercise_id}/sessions",
+            get_exercise_session_service,
+        ),
+        (
+            exercises_router,
+            "/api/exercise-sessions/{session_id}/objective",
+            get_exercise_session_service,
+        ),
+        (
+            exercises_router,
+            "/api/exercise-sessions/{session_id}/plans",
+            get_exercise_planning_service,
+        ),
+        (
+            exercises_router,
+            "/api/exercise-sessions/{session_id}/advance",
+            get_exercise_session_service,
+        ),
+        (
+            exercises_router,
+            "/api/exercise-sessions/{session_id}/overrides",
+            get_exercise_planning_service,
+        ),
+        (
+            exercises_router,
+            "/api/exercise-sessions/{session_id}/decisions",
+            get_exercise_session_service,
         ),
     ],
 )

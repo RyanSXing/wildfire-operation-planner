@@ -1,6 +1,8 @@
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import AsyncIterator
+from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,10 +16,21 @@ from wildfireops.geospatial.road_graph import RoadGraph
 from wildfireops.persistence.decisions import AuditRepository, DecisionRepository
 from wildfireops.persistence.recommendations import RecommendationRepository
 from wildfireops.persistence.scenarios import ScenarioRepository
+from wildfireops.application.exercise_planning import ExercisePlanningService
+from wildfireops.application.exercises import (
+    ExerciseCommandInvalid,
+    ExerciseNotFound,
+    ExerciseQueryService,
+    ExerciseSessionService,
+)
+from wildfireops.persistence.exercises import ExerciseRepository
+from wildfireops.replay.exercise import ExerciseDefinition, exercise_definition_digest
 
 
 type SessionFactory = Callable[[], AsyncSession]
 type GraphsProvider = Callable[[], Mapping[str, RoadGraph]]
+type Clock = Callable[[], datetime]
+type Callsign = Callable[[], str]
 
 
 class CommandServiceProvider:
@@ -27,10 +40,16 @@ class CommandServiceProvider:
         session_factory: SessionFactory,
         graphs: GraphsProvider,
         settings: Settings,
+        exercise_definition: ExerciseDefinition | None = None,
+        clock: Clock | None = None,
+        callsign: Callsign | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._graphs = graphs
         self._risk_config = _risk_config(settings)
+        self._exercise_definition = exercise_definition
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._callsign = callsign or (lambda: f"EMBER-{uuid4().hex[:8].upper()}")
 
     @asynccontextmanager
     async def scenarios(self) -> AsyncIterator[ScenarioService]:
@@ -67,6 +86,60 @@ class CommandServiceProvider:
     async def audits(self) -> AsyncIterator[AuditQueryService]:
         async with self._session_factory() as session:
             yield AuditQueryService(AuditRepository(session))
+
+    @asynccontextmanager
+    async def exercise_sessions(self) -> AsyncIterator[ExerciseSessionService]:
+        definition = self._exercise_definition
+        if definition is None:
+            raise ExerciseNotFound("exercise is not configured")
+        async with self._session_factory() as session:
+            async with session.begin():
+                yield ExerciseSessionService(
+                    definition=definition,
+                    definition_digest=exercise_definition_digest(definition),
+                    repository=ExerciseRepository(session),
+                    clock=self._clock,
+                    callsign=self._callsign,
+                )
+
+    @asynccontextmanager
+    async def exercise_planning(self) -> AsyncIterator[ExercisePlanningService]:
+        definition = self._exercise_definition
+        if definition is None:
+            raise ExerciseNotFound("exercise is not configured")
+        graph = self._graphs().get(definition.graph_version)
+        if graph is None:
+            raise ExerciseCommandInvalid("exercise graph is unavailable")
+        async with self._session_factory() as session:
+            async with session.begin():
+                repository = ExerciseRepository(session)
+                yield ExercisePlanningService(
+                    definition=definition,
+                    definition_digest=exercise_definition_digest(definition),
+                    graph=graph,
+                    repository=repository,
+                    session_service=ExerciseSessionService(
+                        definition=definition,
+                        definition_digest=exercise_definition_digest(definition),
+                        repository=repository,
+                        clock=self._clock,
+                        callsign=self._callsign,
+                    ),
+                    clock=self._clock,
+                )
+
+    @asynccontextmanager
+    async def exercise_queries(self) -> AsyncIterator[ExerciseQueryService]:
+        definition = self._exercise_definition
+        if definition is None:
+            raise ExerciseNotFound("exercise is not configured")
+        async with self._session_factory() as session:
+            yield ExerciseQueryService(
+                definition=definition,
+                definition_digest=exercise_definition_digest(definition),
+                repository=ExerciseRepository(session),
+                clock=self._clock,
+            )
 
 
 def _risk_config(settings: Settings) -> RiskConfig:

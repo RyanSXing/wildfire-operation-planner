@@ -1,0 +1,422 @@
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+
+import pytest
+import pytest_asyncio
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+
+from tests.unit.application.test_exercise_planning import definition, graph
+from wildfireops.application.commands import CommandServiceProvider
+from wildfireops.config import Settings
+from wildfireops.decision.task_optimizer import TaskOptimizationResult
+from wildfireops.main import create_app
+from wildfireops.replay.exercise import (
+    ExerciseDefinition,
+    _canonicalize,
+    exercise_definition_digest,
+)
+
+
+NOW = datetime(2026, 7, 24, 12, tzinfo=UTC)
+
+
+TEST_DATABASE_URL = "postgresql+asyncpg://wildfireops:wildfireops@localhost:55432/wildfireops_test"
+_RESET = text(
+    "TRUNCATE TABLE exercise_events, exercise_plan_runs, exercise_sessions, "
+    "idempotency_keys CASCADE"
+)
+
+
+@pytest_asyncio.fixture
+async def exercise_app() -> AsyncIterator[FastAPI]:
+    app = create_app(Settings(database_url=TEST_DATABASE_URL))
+    exercise = definition()
+    road_graph = graph()
+    app.state.clock = lambda: NOW
+    app.state.graphs = {road_graph.graph_version: road_graph}
+    app.state.exercise_definition = exercise
+    app.state.command_service_provider = CommandServiceProvider(
+        session_factory=lambda: app.state.session_factory(),
+        graphs=lambda: app.state.graphs,
+        settings=app.state.settings,
+        exercise_definition=exercise,
+        clock=lambda: app.state.clock(),
+        callsign=lambda: "EMBER-101",
+    )
+    try:
+        async with app.state.engine.begin() as connection:
+            await connection.execute(_RESET)
+        yield app
+    finally:
+        async with app.state.engine.begin() as connection:
+            await connection.execute(_RESET)
+        await app.state.engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_and_read_exercise_session(exercise_app: FastAPI) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=exercise_app), base_url="http://test"
+    ) as client:
+        created = await client.post(
+            "/api/exercises/park-fire-decision/sessions",
+            headers={"Idempotency-Key": "create-session-1"},
+        )
+
+        assert created.status_code == 201, created.text
+        body = created.json()
+        assert body["exerciseId"] == "park-fire-decision"
+        assert body["definitionDigest"] == exercise_definition_digest(definition())
+        assert body["status"] == "active"
+        assert body["version"] == 1
+        assert body["allowedActions"] == ["select-objective"]
+
+        replay = await client.post(
+            "/api/exercises/park-fire-decision/sessions",
+            headers={"Idempotency-Key": "create-session-1"},
+        )
+
+        restored = await client.get(f"/api/exercise-sessions/{body['id']}")
+
+    assert replay.status_code == 201, replay.text
+    assert replay.json() == body
+    assert restored.status_code == 200, restored.text
+    assert restored.json() == body
+
+
+async def _create(client: AsyncClient, key: str = "create") -> dict[str, object]:
+    response = await client.post(
+        "/api/exercises/park-fire-decision/sessions",
+        headers={"Idempotency-Key": key},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def _objective(
+    client: AsyncClient, session: dict[str, object], key: str = "objective"
+) -> dict[str, object]:
+    response = await client.post(
+        f"/api/exercise-sessions/{session['id']}/objective",
+        headers={"Idempotency-Key": key},
+        json={"objective": "fastest-response", "expectedVersion": session["version"]},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def _plan(
+    client: AsyncClient, session: dict[str, object], key: str = "plan"
+) -> dict[str, object]:
+    response = await client.post(
+        f"/api/exercise-sessions/{session['id']}/plans",
+        headers={"Idempotency-Key": key},
+        json={"expectedVersion": session["version"]},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def _advance(
+    client: AsyncClient, session: dict[str, object], key: str
+) -> dict[str, object]:
+    response = await client.post(
+        f"/api/exercise-sessions/{session['id']}/advance",
+        headers={"Idempotency-Key": key},
+        json={"expectedVersion": session["version"]},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _journey_definition() -> ExerciseDefinition:
+    value = _canonicalize(definition())
+    assert isinstance(value, dict)
+    clearing = value["checkpoints"][1]["tasks"][1]
+    assert isinstance(clearing, dict)
+    clearing["taskId"] = "clear-primary-corridor"
+    clearing["incidentKey"] = "park-fire"
+    clearing["assetId"] = "park-asset"
+    clearing["basePriority"] = 100
+    return ExerciseDefinition.model_validate(value)
+
+
+@pytest.mark.asyncio
+async def test_metadata_plainly_discloses_historical_and_exercise_provenance(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        response = await client.get("/api/exercises/park-fire-decision")
+
+    assert response.status_code == 200, response.text
+    metadata = response.json()
+    assert metadata["safetyStatement"] == "Exercise only"
+    assert metadata["objectives"] == [
+        "fastest-response",
+        "maximize-population-coverage",
+        "protect-critical-services",
+    ]
+    assert {item["provenance"] for item in metadata["assets"]} == {"historical"}
+    assert {item["provenance"] for item in metadata["resources"]} == {"exercise"}
+
+
+@pytest.mark.asyncio
+async def test_objective_requires_expected_version_and_idempotency_key(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        created = await _create(client)
+        missing_header = await client.post(
+            f"/api/exercise-sessions/{created['id']}/objective",
+            json={"objective": "fastest-response", "expectedVersion": 1},
+        )
+        missing_version = await client.post(
+            f"/api/exercise-sessions/{created['id']}/objective",
+            headers={"Idempotency-Key": "objective"},
+            json={"objective": "fastest-response"},
+        )
+
+    assert missing_header.status_code == 422
+    assert missing_version.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_stale_version_returns_committed_current_state_and_rolls_back_claim(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        created = await _create(client)
+        selected = await _objective(client, created)
+        stale = await client.post(
+            f"/api/exercise-sessions/{created['id']}/objective",
+            headers={"Idempotency-Key": "stale"},
+            json={
+                "objective": "maximize-population-coverage",
+                "expectedVersion": created["version"],
+            },
+        )
+        retry = await client.post(
+            f"/api/exercise-sessions/{created['id']}/objective",
+            headers={"Idempotency-Key": "stale"},
+            json={
+                "objective": "maximize-population-coverage",
+                "expectedVersion": selected["version"],
+            },
+        )
+
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["error"]["details"] == {
+        "currentSession": selected,
+        "allowedActions": ["select-objective", "generate-plan"],
+    }
+    assert retry.status_code == 200, retry.text
+
+
+@pytest.mark.asyncio
+async def test_plan_replay_returns_the_original_status_and_json(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        selected = await _objective(client, await _create(client))
+        first = await _plan(client, selected)
+        replay = await client.post(
+            f"/api/exercise-sessions/{selected['id']}/plans",
+            headers={"Idempotency-Key": "plan"},
+            json={"expectedVersion": selected["version"]},
+        )
+
+    assert replay.status_code == 201, replay.text
+    assert replay.json() == first
+    assert first["plan"]["outputData"]["versions"]["definitionDigest"] == (
+        exercise_definition_digest(definition())
+    )
+
+
+@pytest.mark.asyncio
+async def test_unreachable_task_is_a_stored_uncovered_plan_not_an_api_error(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        selected = await _objective(client, await _create(client))
+        initial = await _plan(client, selected)
+        cascade = await _advance(client, initial["session"], "advance-initial")
+        result = await _plan(client, cascade, "cascade-plan")
+
+    assert "spot-task" in result["plan"]["outputData"]["uncoveredTaskIds"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_plan_keeps_latest_valid_plan_and_cannot_advance(
+    exercise_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unknown(request: object) -> TaskOptimizationResult:
+        tasks = getattr(request, "tasks")
+        resources = getattr(request, "resources")
+        return TaskOptimizationResult(
+            status="UNKNOWN",
+            assignments=(),
+            uncovered_task_ids=tuple(item.task_id for item in tasks),
+            unassigned_resource_ids=tuple(item.resource_id for item in resources),
+            travel_cost=0,
+            uncovered_task_penalty=0,
+            objective_value=0,
+            binding_constraints=("solver-unknown",),
+            runtime_milliseconds=1,
+            algorithm_version="task-allocation-v1",
+        )
+
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        selected = await _objective(client, await _create(client))
+        valid = await _plan(client, selected, "valid-plan")
+        monkeypatch.setattr("wildfireops.application.exercise_planning.solve_task_plan", unknown)
+        failed = await _plan(client, valid["session"], "unknown-plan")
+        advance = await client.post(
+            f"/api/exercise-sessions/{selected['id']}/advance",
+            headers={"Idempotency-Key": "advance"},
+            json={"expectedVersion": failed["session"]["version"]},
+        )
+
+    assert failed["plan"]["outputData"]["status"] == "UNKNOWN"
+    assert failed["session"]["latestPlan"] == valid["plan"]["outputData"]
+    assert advance.status_code == 409
+    assert advance.json()["error"]["details"]["currentSession"] == failed["session"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_override_is_422_without_changing_the_visible_plan(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        selected = await _objective(client, await _create(client))
+        initial = await _plan(client, selected)
+        cascade = await _advance(client, initial["session"], "advance-initial")
+        cascade_plan = await _plan(client, cascade, "cascade-plan")
+        final = await _advance(client, cascade_plan["session"], "advance-cascade")
+        planned = await _plan(client, final, "final-plan")
+        invalid = await client.post(
+            f"/api/exercise-sessions/{final['id']}/overrides",
+            headers={"Idempotency-Key": "bad-override"},
+            json={
+                "resourceId": "engine-1",
+                "taskId": "shelter-capacity-transport",
+                "expectedVersion": planned["session"]["version"],
+            },
+        )
+        restored = await client.get(f"/api/exercise-sessions/{final['id']}")
+
+    assert invalid.status_code == 422, invalid.text
+    assert restored.json()["latestPlan"]["versions"]["inputHash"] == planned["plan"]["inputHash"]
+
+
+@pytest.mark.asyncio
+async def test_expired_session_returns_start_new_exercise_action(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        created = await _create(client)
+        exercise_app.state.clock = lambda: NOW + timedelta(hours=24)
+        expired = await client.post(
+            f"/api/exercise-sessions/{created['id']}/objective",
+            headers={"Idempotency-Key": "expired"},
+            json={"objective": "fastest-response", "expectedVersion": 1},
+        )
+
+    assert expired.status_code == 410, expired.text
+    assert expired.json()["error"]["details"] == {"action": "start-new-exercise"}
+
+
+@pytest.mark.asyncio
+async def test_final_decision_requires_a_note_and_debrief_restores_in_a_new_client(
+    exercise_app: FastAPI,
+) -> None:
+    exercise = _journey_definition()
+    exercise_app.state.exercise_definition = exercise
+    exercise_app.state.command_service_provider = CommandServiceProvider(
+        session_factory=lambda: exercise_app.state.session_factory(),
+        graphs=lambda: exercise_app.state.graphs,
+        settings=exercise_app.state.settings,
+        exercise_definition=exercise,
+        clock=lambda: exercise_app.state.clock(),
+        callsign=lambda: "EMBER-101",
+    )
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        selected = await _objective(client, await _create(client))
+        initial = await _plan(client, selected)
+        cascade = await _advance(client, initial["session"], "advance-initial")
+        cascade_plan = await _plan(client, cascade, "cascade-plan")
+        final = await _advance(client, cascade_plan["session"], "advance-cascade")
+        planned = await _plan(client, final, "final-plan")
+        overridden = await client.post(
+            f"/api/exercise-sessions/{final['id']}/overrides",
+            headers={"Idempotency-Key": "override"},
+            json={
+                "resourceId": "bus-1",
+                "taskId": "shelter-capacity-transport",
+                "expectedVersion": planned["session"]["version"],
+            },
+        )
+        assert overridden.status_code == 201, overridden.text
+        blank = await client.post(
+            f"/api/exercise-sessions/{final['id']}/decisions",
+            headers={"Idempotency-Key": "blank-note"},
+            json={"expectedVersion": overridden.json()["session"]["version"], "note": ""},
+        )
+        approved = await client.post(
+            f"/api/exercise-sessions/{final['id']}/decisions",
+            headers={"Idempotency-Key": "approve"},
+            json={
+                "expectedVersion": overridden.json()["session"]["version"],
+                "displayName": "Operator",
+                "note": "Approve the checked shelter transport.",
+            },
+        )
+        assert approved.status_code == 201, approved.text
+        debrief = await client.get(f"/api/exercise-sessions/{final['id']}/debrief")
+
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as fresh:
+        restored = await fresh.get(f"/api/exercise-sessions/{final['id']}/debrief")
+
+    assert blank.status_code == 422
+    assert debrief.status_code == 200, debrief.text
+    assert restored.status_code == 200, restored.text
+    assert restored.json() == debrief.json()
+
+
+@pytest.mark.asyncio
+async def test_bad_path_header_and_body_values_are_422_not_500(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        invalid_id = await client.get("/api/exercise-sessions/not-a-uuid")
+        created = await _create(client)
+        empty_header = await client.post(
+            f"/api/exercise-sessions/{created['id']}/objective",
+            headers={"Idempotency-Key": " "},
+            json={"objective": "fastest-response", "expectedVersion": 1},
+        )
+        bad_version = await client.post(
+            f"/api/exercise-sessions/{created['id']}/objective",
+            headers={"Idempotency-Key": "valid"},
+            json={"objective": "fastest-response", "expectedVersion": 0},
+        )
+
+    assert invalid_id.status_code == 422
+    assert empty_header.status_code == 422
+    assert bad_version.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_audit_is_session_scoped_and_version_ordered(
+    exercise_app: FastAPI,
+) -> None:
+    async with AsyncClient(transport=ASGITransport(app=exercise_app), base_url="http://test") as client:
+        first = await _objective(client, await _create(client, "first"), "first-objective")
+        second = await _create(client, "second")
+        audit = await client.get(f"/api/exercise-sessions/{first['id']}/audit")
+        other = await client.get(f"/api/exercise-sessions/{second['id']}/audit")
+
+    assert audit.status_code == 200, audit.text
+    assert [item["resultingSessionVersion"] for item in audit.json()["items"]] == [1, 2]
+    assert [item["sessionId"] for item in other.json()["items"]] == [second["id"]]

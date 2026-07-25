@@ -13,6 +13,7 @@ from wildfireops.api.event_bus import EventBus
 from wildfireops.api.postgres_events import relay_postgres_events
 from wildfireops.api.request_metrics import RequestMetricsMiddleware
 from wildfireops.api.routes.events import router as events_router
+from wildfireops.api.routes.exercises import router as exercises_router
 from wildfireops.api.routes.incidents import router as incidents_router
 from wildfireops.api.routes.road_graphs import router as road_graphs_router
 from wildfireops.api.routes.scenarios import router as scenarios_router
@@ -27,6 +28,7 @@ from wildfireops.db import (
 from wildfireops.observability import configure_observability
 from wildfireops.geospatial.road_graph import RoadGraph, RoadGraphInvalid
 from wildfireops.replay.clock import ReplayClock
+from wildfireops.replay.exercise import load_exercise_definition
 from wildfireops.replay.loader import ReplayLoader
 
 
@@ -41,6 +43,7 @@ def create_app(
     resolved = settings or get_settings()
     replay_clock: ReplayClock | None = None
     graphs: dict[str, RoadGraph] = {}
+    exercise_definition = None
     if resolved.replay_package is not None:
         loader = ReplayLoader(resolved.replay_package)
         replay_clock = ReplayClock(loader.manifest.end_at)
@@ -53,6 +56,7 @@ def create_app(
                     "road graph version does not match replay manifest"
                 )
             graphs[graph.graph_version] = graph
+        exercise_definition = load_exercise_definition(loader)
     engine = create_engine(resolved)
 
     @asynccontextmanager
@@ -82,6 +86,7 @@ def create_app(
         else lambda: datetime.now(UTC)
     )
     app.state.graphs = graphs
+    app.state.exercise_definition = exercise_definition
     app.state.read_service_provider = create_read_service_provider(
         session_factory=lambda: app.state.session_factory(),
         settings=resolved,
@@ -93,6 +98,8 @@ def create_app(
         session_factory=lambda: app.state.session_factory(),
         graphs=lambda: app.state.graphs,
         settings=resolved,
+        exercise_definition=exercise_definition,
+        clock=lambda: app.state.clock(),
     )
 
     app.add_middleware(RequestMetricsMiddleware)
@@ -104,6 +111,7 @@ def create_app(
     app.include_router(scenarios_router)
     app.include_router(decisions_router)
     app.include_router(audit_router)
+    app.include_router(exercises_router)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
