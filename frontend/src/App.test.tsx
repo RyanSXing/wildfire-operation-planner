@@ -6,11 +6,11 @@ const shellHarness = vi.hoisted(() => ({
   shouldThrow: false,
 }));
 
-vi.mock("./app/AppShell", async () => {
+vi.mock("./monitor/MonitorWorkspace", async () => {
   const { useQueryClient } = await import("@tanstack/react-query");
 
   return {
-    AppShell() {
+    MonitorWorkspace() {
       shellHarness.clients.add(useQueryClient());
       if (shellHarness.shouldThrow) {
         throw new Error("app-shell-render-secret");

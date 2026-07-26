@@ -212,8 +212,9 @@ test("an operator completes the Park Fire decision exercise end to end", async (
 test("the live monitor stays reachable on its own route", async ({ page }) => {
   await page.goto("/monitor");
   await expect(
-    page.getByRole("complementary", { name: "Incident queue" }),
+    page.getByRole("navigation", { name: "Incident queue" }),
   ).toBeVisible();
+  await expect(page.getByRole("region", { name: "Next step" })).toBeVisible();
 });
 
 async function dismissBriefing(briefing: Locator): Promise<void> {

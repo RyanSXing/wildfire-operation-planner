@@ -2,7 +2,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import "./App.css";
 import { AppProviders } from "./app/AppProviders";
-import { AppShell } from "./app/AppShell";
+import { MonitorWorkspace } from "./monitor/MonitorWorkspace";
 import { ErrorBoundary } from "./app/ErrorBoundary";
 import { ExerciseWorkspace } from "./exercise/ExerciseWorkspace";
 
@@ -19,7 +19,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <AppProviders>
-        {isMonitor ? <AppShell /> : <ExerciseWorkspace />}
+        {isMonitor ? <MonitorWorkspace /> : <ExerciseWorkspace />}
       </AppProviders>
     </ErrorBoundary>
   );
