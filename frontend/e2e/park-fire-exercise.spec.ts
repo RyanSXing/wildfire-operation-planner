@@ -211,6 +211,9 @@ test("an operator completes the Park Fire decision exercise end to end", async (
 
 test("the live monitor stays reachable on its own route", async ({ page }) => {
   await page.goto("/monitor");
+  await page
+    .getByRole("button", { name: /open the command centre/ })
+    .click();
   await expect(
     page.getByRole("navigation", { name: "Incident queue" }),
   ).toBeVisible();

@@ -5,6 +5,11 @@
 
 /* Incident cards sit where the exercise puts its progress steps, so they share
    the rail's rhythm without pretending to be a linear sequence. */
+.wf-rail > .wf-steps:not(.wf-steps--compact) {
+  flex: 1;
+  min-height: 0;
+}
+
 .wf-incident {
   display: block;
   width: 100%;
@@ -212,4 +217,20 @@
 .wf-main > .wf-panel--above-dock {
   bottom: 156px;
   max-height: calc(100% - 220px);
+}
+
+/* The rail carries incidents and progress together, so the step list is
+   compact enough that both fit without scrolling at 1000px. */
+.wf-steps--compact {
+  flex: none;
+  overflow: visible;
+  padding-bottom: 4px;
+}
+
+.wf-steps--compact .wf-step {
+  padding: 7px 10px;
+}
+
+.wf-steps--compact .wf-step__note {
+  font-size: 11px;
 }

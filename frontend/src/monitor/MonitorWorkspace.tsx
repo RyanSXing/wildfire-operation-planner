@@ -1,21 +1,28 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { useMonitorData, EMPTY_COLLECTION } from "../app/useMonitorData";
 import type { IncidentSummary, ScenarioVersionCreateRequest } from "../api/types";
-import { DecisionDialog } from "../features/decisions/DecisionDialog";
 import { ReplayTimeline } from "../features/incidents/ReplayTimeline";
-import { ScenarioEditor } from "../features/scenarios/ScenarioEditor";
 import { useScenarioPlanning } from "../features/scenarios/useScenarioPlanning";
+import { AssumptionsPanel, SignOffPanel } from "./MonitorForms";
 import { MonitorDrawer } from "./MonitorDrawer";
+import {
+  MonitorIntro,
+  MonitorSteps,
+  PlanChangeBriefing,
+} from "./MonitorPanels";
+import { buildMonitorSteps } from "./monitorSteps";
 import type { MonitorTab } from "./monitorTabs";
 import { coverageLine, labelFor } from "./language";
 import "./monitor.css";
 
-const OperationsMap = lazy(() =>
-  import("../features/map/OperationsMap").then((module) => ({
-    default: module.OperationsMap,
-  })),
+// MapLibre stays in its own chunk rather than weighing down the safety gate,
+// which needs no map at all.
+const MonitorMap = lazy(() =>
+  import("./MonitorMap").then((module) => ({ default: module.MonitorMap })),
 );
+
+const ENTERED_KEY = "wildfireops.monitor.entered";
 
 /**
  * The live command centre.
@@ -30,6 +37,18 @@ export function MonitorWorkspace() {
   const [tab, setTab] = useState<MonitorTab>("plan");
   const [scenarioOpen, setScenarioOpen] = useState(false);
   const [selection, setSelection] = useState<string | null>(null);
+  const [entered, setEntered] = useState(() => readEntered());
+  // The rail shows progress even before an incident is picked, so the planning
+  // state it reflects is reported up from the workspace that owns it.
+  const [progress, setProgress] = useState({
+    planned: false,
+    recommended: false,
+    decided: false,
+  });
+  const steps = buildMonitorSteps({
+    hasIncident: data.activeIncidentId !== null,
+    ...progress,
+  });
 
   if (data.incidentsQuery.isPending) {
     return <Splash message="Loading incidents…" />;
@@ -48,11 +67,26 @@ export function MonitorWorkspace() {
     );
   }
 
+  if (!entered) {
+    return (
+      <div className="wf">
+        <MonitorIntro
+          incidents={data.incidents}
+          onStart={() => {
+            writeEntered();
+            setEntered(true);
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="wf">
       <IncidentRail
         incidents={data.incidents}
         activeIncidentId={data.activeIncidentId}
+        steps={steps}
         onSelect={(incidentId) => {
           if (incidentId !== data.activeIncidentId) {
             data.setPlanningSelection(null);
@@ -105,6 +139,7 @@ export function MonitorWorkspace() {
         <PlanningWorkspace
           key={data.currentPanelKey}
           data={data}
+          onProgress={setProgress}
           tab={tab}
           onTabChange={setTab}
           scenarioOpen={scenarioOpen}
@@ -121,6 +156,7 @@ type MonitorData = ReturnType<typeof useMonitorData>;
 
 function PlanningWorkspace({
   data,
+  onProgress,
   tab,
   onTabChange,
   scenarioOpen,
@@ -129,6 +165,11 @@ function PlanningWorkspace({
   onSelectionChange,
 }: {
   data: MonitorData;
+  onProgress: (progress: {
+    planned: boolean;
+    recommended: boolean;
+    decided: boolean;
+  }) => void;
   tab: MonitorTab;
   onTabChange: (tab: MonitorTab) => void;
   scenarioOpen: boolean;
@@ -160,6 +201,36 @@ function PlanningWorkspace({
     recommendation !== null &&
     planning.decidedRecommendationId === recommendation.id;
 
+  const planned = planning.baselineVersion !== null;
+  const recommended = recommendation !== null;
+  useEffect(() => {
+    onProgress({ planned, recommended, decided });
+  }, [decided, onProgress, planned, recommended]);
+
+  // A newly generated allocation is announced rather than left to be spotted.
+  const [acknowledged, setAcknowledged] = useState<string | null>(null);
+  const previousAssignments = useRef<string | null>(null);
+  const signature = recommendation
+    ? recommendation.assignments
+        .map((a) => `${a.resourceId}->${a.destinationId}`)
+        .sort()
+        .join("|")
+    : null;
+  const changedFrom = previousAssignments.current;
+  const briefingChanges =
+    recommendation && signature !== null && changedFrom !== null && changedFrom !== signature
+      ? describeAllocationChange(changedFrom, signature, planning.resourceLabels)
+      : [];
+  const showBriefing =
+    recommendation !== null &&
+    briefingChanges.length > 0 &&
+    acknowledged !== recommendation.id;
+  useEffect(() => {
+    if (signature !== null && !showBriefing) {
+      previousAssignments.current = signature;
+    }
+  }, [showBriefing, signature]);
+
   return (
     <>
       <main className="wf-main">
@@ -170,7 +241,7 @@ function PlanningWorkspace({
             </div>
           }
         >
-          <OperationsMap
+          <MonitorMap
             incidentData={data.mapData.incident}
             detectionsData={data.mapData.detections}
             exposedAssetsData={data.mapData.exposedAssets}
@@ -238,6 +309,7 @@ function PlanningWorkspace({
           <ScenarioPopover
             planning={planning}
             incident={incident}
+            roadNames={roadNames}
             onClose={() => onScenarioOpenChange(false)}
             onSubmit={(request) => {
               onScenarioOpenChange(false);
@@ -265,7 +337,7 @@ function PlanningWorkspace({
                 ✕
               </button>
             </div>
-            <DecisionDialog
+            <SignOffPanel
               key={`decision:${recommendation.id}`}
               recommendation={recommendation}
               freshness={planning.sessionStale ? "stale" : "current"}
@@ -278,12 +350,30 @@ function PlanningWorkspace({
                 id: assetId,
                 label: name,
               }))}
+              coverage={coverageLine(recommendation)}
+              uncovered={recommendation.uncoveredDestinationIds.map(
+                (id) =>
+                  incident.exposedAssets.find((asset) => asset.assetId === id)
+                    ?.name ?? id,
+              )}
               onStale={() => planning.setStaleLatched(true)}
               onDecisionRecorded={() =>
                 planning.setDecidedRecommendationId(recommendation.id)
               }
             />
           </section>
+        )}
+
+        {showBriefing && recommendation && (
+          <PlanChangeBriefing
+            title="The allocation changed"
+            summary={coverageLine(recommendation)}
+            changes={briefingChanges}
+            onDismiss={() => {
+              setAcknowledged(recommendation.id);
+              previousAssignments.current = signature;
+            }}
+          />
         )}
 
         <MonitorDock
@@ -584,10 +674,12 @@ function Dock({
 function ScenarioPopover({
   planning,
   incident,
+  roadNames,
   onClose,
   onSubmit,
 }: {
   planning: Planning;
+  roadNames: ReadonlyMap<string, string>;
   incident: MonitorData["incident"] & {};
   onClose: () => void;
   onSubmit: (request: ScenarioVersionCreateRequest) => void;
@@ -613,7 +705,7 @@ function ScenarioPopover({
         Saving creates a new immutable scenario version. The baseline stays put
         so the two can be compared.
       </p>
-      <ScenarioEditor
+      <AssumptionsPanel
         roadEdges={planning.roadQuery.data?.items ?? []}
         resources={incident!.simulatedResources}
         version={planning.latestVersion}
@@ -621,6 +713,8 @@ function ScenarioPopover({
         disabled={
           planning.commandsDisabled || planning.generateRecommendation.isPending
         }
+        roadNames={roadNames}
+        resourceLabels={planning.resourceLabels}
         onSubmit={onSubmit}
       />
     </section>
@@ -630,10 +724,12 @@ function ScenarioPopover({
 function IncidentRail({
   incidents,
   activeIncidentId,
+  steps,
   onSelect,
 }: {
   incidents: readonly IncidentSummary[];
   activeIncidentId: string | null;
+  steps: ReturnType<typeof buildMonitorSteps>;
   onSelect: (incidentId: string) => void;
 }) {
   return (
@@ -670,6 +766,7 @@ function IncidentRail({
           <li className="wf-step__note">No active incidents are available.</li>
         )}
       </ol>
+      <MonitorSteps steps={steps} />
       <div className="wf-rail__foot">
         <span className="wf-dot-good" />
         <span>
@@ -678,6 +775,67 @@ function IncidentRail({
       </div>
     </nav>
   );
+}
+
+/** Names what moved between two allocations, without printing identifiers. */
+function describeAllocationChange(
+  before: string,
+  after: string,
+  resourceLabels: Readonly<Record<string, string>>,
+): { headline: string; detail: string; tone: string }[] {
+  const parse = (value: string) =>
+    new Map(
+      value
+        .split("|")
+        .filter(Boolean)
+        .map((pair) => pair.split("->") as [string, string]),
+    );
+  const previous = parse(before);
+  const current = parse(after);
+  const changes: { headline: string; detail: string; tone: string }[] = [];
+
+  for (const [resourceId, destinationId] of current) {
+    const was = previous.get(resourceId);
+    if (was === undefined) {
+      changes.push({
+        headline: `${labelFor(resourceLabels, resourceId)} was committed`,
+        detail: "It had no assignment in the previous allocation.",
+        tone: "neutral",
+      });
+    } else if (was !== destinationId) {
+      changes.push({
+        headline: `${labelFor(resourceLabels, resourceId)} was reassigned`,
+        detail: "It is going somewhere else in this allocation.",
+        tone: "caution",
+      });
+    }
+  }
+  for (const [resourceId] of previous) {
+    if (!current.has(resourceId)) {
+      changes.push({
+        headline: `${labelFor(resourceLabels, resourceId)} was released`,
+        detail: "It has no assignment in this allocation.",
+        tone: "caution",
+      });
+    }
+  }
+  return changes;
+}
+
+function readEntered(): boolean {
+  try {
+    return window.sessionStorage.getItem(ENTERED_KEY) === "yes";
+  } catch {
+    return false;
+  }
+}
+
+function writeEntered(): void {
+  try {
+    window.sessionStorage.setItem(ENTERED_KEY, "yes");
+  } catch {
+    // A blocked storage API must not stop the operator entering.
+  }
 }
 
 function Splash({

@@ -10,8 +10,20 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
   // The decision exercise owns "/"; the live command centre is at /monitor.
   await page.goto("/monitor");
 
+  // The safety and provenance gate comes first, exactly as the exercise does.
+  await expect(
+    page.getByRole("heading", { name: "Live command centre" }),
+  ).toBeVisible();
+  await expect(page.getByText(/Do not use for emergency/i)).toBeVisible();
+  await expect(page.getByText(/Simulated/)).toBeVisible();
+  await page
+    .getByRole("button", { name: /open the command centre/ })
+    .click();
+
   // The rail ranks incidents; picking one drives everything else.
   const rail = page.getByRole("navigation", { name: "Incident queue" });
+  await expect(rail).toContainText("YOUR PROGRESS");
+  await expect(rail).toContainText("Observe");
   const incidents = rail.getByRole("button");
   await expect(incidents).not.toHaveCount(0);
   const scores = (await rail.locator(".wf-incident__score").allTextContents()).map(
@@ -69,12 +81,13 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
   await expect(scenario).toBeVisible();
 
   const editor = scenario.getByRole("form", { name: "Scenario version editor" });
-  const firstClosure = editor
-    .getByRole("group", { name: "Road closures" })
-    .getByRole("checkbox")
-    .first();
+  const closures = editor.getByRole("group", { name: "Road closures" });
+  // Each row says what closing it means, rather than showing a bare identifier.
+  await expect(closures).toContainText(/units may route through it/i);
+  const firstClosure = closures.getByRole("checkbox").first();
   await expect(firstClosure).toHaveCount(1);
   await firstClosure.check();
+  await expect(closures).toContainText(/must route around it/i);
   await editor.getByRole("button", { name: "Save scenario version" }).click();
   await expect(scenario).toBeHidden();
 
@@ -98,8 +111,8 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
     name: "Recommendation decision controls",
   });
   await expect(decision).toBeVisible();
-  await decision.getByRole("button", { name: "Reject recommendation" }).click();
-  await page.getByLabel("Decision note").fill("Stage resources for replay exercise");
+  await decision.getByRole("button", { name: /^Reject/ }).click();
+  await page.getByLabel("WHY THIS DECISION").fill("Stage resources for replay exercise");
   await page.getByRole("button", { name: "Submit reject decision" }).click();
 
   // The command bar is what reports the outcome here: recording a decision
@@ -126,6 +139,9 @@ test("planning is locked, and says so, while a replay frame is showing", async (
   page,
 }) => {
   await page.goto("/monitor");
+  await page
+    .getByRole("button", { name: /open the command centre/ })
+    .click();
   const dock = page.getByRole("region", { name: "Next step" });
   await expect(dock).toContainText("Ready to plan");
 
