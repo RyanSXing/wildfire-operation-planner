@@ -50,6 +50,20 @@ export function MonitorWorkspace() {
     ...progress,
   });
 
+  if (!entered) {
+    return (
+      <div className="wf">
+        <MonitorIntro
+          incidents={data.incidents}
+          onStart={() => {
+            writeEntered();
+            setEntered(true);
+          }}
+        />
+      </div>
+    );
+  }
+
   if (data.incidentsQuery.isPending) {
     return <Splash message="Loading incidents…" />;
   }
@@ -64,20 +78,6 @@ export function MonitorWorkspace() {
         tone="alert"
         label="Incident queue unavailable"
       />
-    );
-  }
-
-  if (!entered) {
-    return (
-      <div className="wf">
-        <MonitorIntro
-          incidents={data.incidents}
-          onStart={() => {
-            writeEntered();
-            setEntered(true);
-          }}
-        />
-      </div>
     );
   }
 
@@ -282,6 +282,7 @@ function PlanningWorkspace({
           </div>
         </div>
 
+        {data.frames.length > 1 && (
         <div className="wf-monitor__replay">
           <ReplayTimeline
             startTime={data.startTime}
@@ -304,6 +305,7 @@ function PlanningWorkspace({
             }}
           />
         </div>
+        )}
 
         {scenarioOpen && (
           <ScenarioPopover
@@ -363,6 +365,24 @@ function PlanningWorkspace({
             />
           </section>
         )}
+
+        <div className="wf-legend" aria-label="Map legend">
+          <span>
+            <span className="wf-key-fire" /> Fire detection (satellite)
+          </span>
+          <span>
+            <span className="wf-key-unit" /> Response unit
+          </span>
+          <span>
+            <span className="wf-key-asset" /> Exposed place
+          </span>
+          <span>
+            <span className="wf-key-route" /> Planned route
+          </span>
+          <span>
+            <span className="wf-key-closed">✕</span> Closed road
+          </span>
+        </div>
 
         {showBriefing && recommendation && (
           <PlanChangeBriefing

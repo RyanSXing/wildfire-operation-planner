@@ -145,10 +145,10 @@ test("planning is locked, and says so, while a replay frame is showing", async (
   const dock = page.getByRole("region", { name: "Next step" });
   await expect(dock).toContainText("Ready to plan");
 
+  // An incident without two ordered snapshots has no replay range at all, so
+  // the scrubber is not rendered and planning simply stays available.
   const slider = page.getByRole("slider", { name: /Replay position/ });
-  // An incident without two ordered snapshots has no usable replay range; the
-  // control is disabled rather than absent, and planning stays available.
-  if (await slider.isDisabled()) {
+  if ((await slider.count()) === 0) {
     await expect(dock).toContainText("Ready to plan");
     return;
   }

@@ -18,9 +18,6 @@ const SOURCES = {
   scrim: "wf-scrim",
   incident: "wf-incident",
   detections: "wf-detections",
-  assets: "wf-assets",
-  resources: "wf-resources",
-  unavailable: "wf-unavailable",
   closures: "wf-closures",
   routes: "wf-routes",
 } as const;
@@ -58,12 +55,57 @@ export type MonitorMapProps = {
   view: "current" | "replay";
 };
 
+type MarkerSpec = {
+  id: string;
+  kind: "asset" | "resource";
+  label: string;
+  letter: string;
+  lngLat: [number, number];
+  unavailable?: boolean;
+};
+
+const RESOURCE_LETTERS: Record<string, string> = {
+  engine: "E",
+  crew: "C",
+  dozer: "D",
+  tender: "T",
+  "evacuation-bus": "B",
+  "medical-team": "M",
+  "road-crew": "R",
+};
+
+function markerSpec(
+  feature: OperationsFeatureCollection["features"][number],
+  kind: "asset" | "resource",
+): MarkerSpec | null {
+  if (feature.geometry.type !== "Point") {
+    return null;
+  }
+  const properties = (feature.properties ?? {}) as Record<string, unknown>;
+  const id = String(
+    properties.assetId ?? properties.resourceId ?? properties.id ?? "",
+  );
+  if (id === "") {
+    return null;
+  }
+  const label = String(properties.name ?? properties.label ?? id);
+  const type = String(properties.resourceType ?? "");
+  return {
+    id,
+    kind,
+    label,
+    letter: RESOURCE_LETTERS[type] ?? type.slice(0, 1).toUpperCase() ?? "U",
+    lngLat: feature.geometry.coordinates as [number, number],
+  };
+}
+
 export function MonitorMap(props: MonitorMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const loadedRef = useRef(false);
   const pendingRef = useRef(props);
   pendingRef.current = props;
+  const markersRef = useRef(new Map<string, maplibregl.Marker>());
 
   useEffect(() => {
     const container = containerRef.current;
@@ -175,56 +217,6 @@ export function MonitorMap(props: MonitorMapProps) {
         paint: { "line-color": "#3fd6ef", "line-width": 2.6 },
       });
 
-      map.addSource(SOURCES.assets, {
-        type: "geojson",
-        data: data.exposedAssetsData,
-      });
-      map.addLayer({
-        id: "wf-assets",
-        type: "circle",
-        source: SOURCES.assets,
-        paint: {
-          "circle-color": "rgba(245,176,46,0.25)",
-          "circle-radius": 7,
-          "circle-stroke-color": "#f5b02e",
-          "circle-stroke-width": 2,
-        },
-      });
-
-      map.addSource(SOURCES.resources, {
-        type: "geojson",
-        data: data.simulatedResourcesData,
-      });
-      map.addLayer({
-        id: "wf-resources",
-        type: "circle",
-        source: SOURCES.resources,
-        paint: {
-          "circle-color": "#1e232b",
-          "circle-radius": 7,
-          "circle-stroke-color": "rgba(255,255,255,0.75)",
-          "circle-stroke-width": 2,
-        },
-      });
-
-      // A unit taken out of service is struck through in the fire colour, so it
-      // reads as unavailable rather than merely unassigned.
-      map.addSource(SOURCES.unavailable, {
-        type: "geojson",
-        data: data.unavailableResourcesData,
-      });
-      map.addLayer({
-        id: "wf-unavailable",
-        type: "circle",
-        source: SOURCES.unavailable,
-        paint: {
-          "circle-color": "rgba(255,106,61,0.2)",
-          "circle-radius": 9,
-          "circle-stroke-color": "#ff6a3d",
-          "circle-stroke-width": 2,
-        },
-      });
-
       loadedRef.current = true;
     };
 
@@ -247,8 +239,14 @@ export function MonitorMap(props: MonitorMapProps) {
         : new ResizeObserver(() => map.resize());
     observer?.observe(container);
 
+    const markers = markersRef.current;
+
     return () => {
       observer?.disconnect();
+      for (const marker of markers.values()) {
+        marker.remove();
+      }
+      markers.clear();
       map.off("style.load", initializeLayers);
       map.off("error", handleStyleError);
       loadedRef.current = false;
@@ -256,6 +254,67 @@ export function MonitorMap(props: MonitorMapProps) {
       map.remove();
     };
   }, []);
+
+  // Units and places are markers, not layers, so they carry the same shapes and
+  // accessible names the exercise gives them.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) {
+      return;
+    }
+    const wanted = new Map<string, MarkerSpec>();
+    for (const feature of props.exposedAssetsData.features) {
+      const spec = markerSpec(feature, "asset");
+      if (spec) wanted.set(spec.id, spec);
+    }
+    for (const feature of props.simulatedResourcesData.features) {
+      const spec = markerSpec(feature, "resource");
+      if (spec) wanted.set(spec.id, spec);
+    }
+    for (const feature of props.unavailableResourcesData.features) {
+      const spec = markerSpec(feature, "resource");
+      if (spec) wanted.set(spec.id, { ...spec, unavailable: true });
+    }
+
+    for (const [id, marker] of markersRef.current) {
+      if (!wanted.has(id)) {
+        marker.remove();
+        markersRef.current.delete(id);
+      }
+    }
+    for (const [id, spec] of wanted) {
+      let marker = markersRef.current.get(id);
+      if (!marker) {
+        const element = document.createElement("div");
+        element.className =
+          spec.kind === "asset" ? "wf-marker wf-marker--asset" : "wf-marker";
+        if (spec.kind === "asset") {
+          const diamond = document.createElement("span");
+          diamond.className = "wf-marker__diamond";
+          element.append(diamond);
+        } else {
+          element.textContent = spec.letter;
+        }
+        element.setAttribute("role", "img");
+        marker = new maplibregl.Marker({ element })
+          .setLngLat(spec.lngLat)
+          .addTo(map);
+        markersRef.current.set(id, marker);
+      } else {
+        marker.setLngLat(spec.lngLat);
+      }
+      const element = marker.getElement();
+      element.setAttribute(
+        "aria-label",
+        spec.unavailable ? `${spec.label} — out of service` : spec.label,
+      );
+      element.dataset.uncovered = String(spec.unavailable === true);
+    }
+  }, [
+    props.exposedAssetsData,
+    props.simulatedResourcesData,
+    props.unavailableResourcesData,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -267,9 +326,6 @@ export function MonitorMap(props: MonitorMapProps) {
     };
     set(SOURCES.incident, props.incidentData);
     set(SOURCES.detections, props.detectionsData);
-    set(SOURCES.assets, props.exposedAssetsData);
-    set(SOURCES.resources, props.simulatedResourcesData);
-    set(SOURCES.unavailable, props.unavailableResourcesData);
     set(SOURCES.closures, props.roadClosuresData);
     set(SOURCES.routes, props.routesData);
   }, [props]);

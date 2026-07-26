@@ -6,8 +6,21 @@
 /* Incident cards sit where the exercise puts its progress steps, so they share
    the rail's rhythm without pretending to be a linear sequence. */
 .wf-rail > .wf-steps:not(.wf-steps--compact) {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: 44%;
+}
+
+/* Progress follows the incident list immediately; the remaining space falls
+   below it so the rail does not read as two disconnected halves. */
+.wf-rail > .wf-label:nth-of-type(2) {
+  margin-top: 10px;
+  border-top: 1px solid var(--wf-line-faint);
+  padding-top: 14px;
+}
+
+.wf-rail > .wf-steps--compact {
+  margin-bottom: auto;
 }
 
 .wf-incident {
