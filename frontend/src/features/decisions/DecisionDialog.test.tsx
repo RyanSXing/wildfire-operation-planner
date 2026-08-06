@@ -81,6 +81,55 @@ describe("DecisionDialog", () => {
     );
   });
 
+  it("uses operational labels and safe fallbacks for recorded assignments", async () => {
+    vi.spyOn(apiClient, "createDecision").mockResolvedValue({
+      ...decision,
+      assignments: [
+        ...decision.assignments,
+        {
+          ...decision.assignments[0],
+          resourceId: "retired-resource",
+          destinationId: "retired-asset",
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderDialog({
+      resources: [{ id: "resource-1", label: "Engine 1" }],
+      destinations: [{ id: "asset-1", label: "Pine Junction" }],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Approve recommendation" }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    await user.click(screen.getByRole("button", { name: "Submit approve decision" }));
+
+    const finalAssignments = await screen.findByRole("list", { name: "Final assignments" });
+    expect(finalAssignments).toHaveTextContent("Engine 1 → Pine Junction");
+    expect(finalAssignments).toHaveTextContent("Unavailable resource → Unavailable destination");
+    expect(finalAssignments).not.toHaveTextContent("retired-resource");
+    expect(finalAssignments).not.toHaveTextContent("retired-asset");
+  });
+
+  it("renders colon-containing final assignments without duplicate key warnings", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(apiClient, "createDecision").mockResolvedValue({
+      ...decision,
+      assignments: [
+        { ...decision.assignments[0], resourceId: "a:b", destinationId: "c" },
+        { ...decision.assignments[0], resourceId: "a", destinationId: "b:c" },
+      ],
+    });
+    const user = userEvent.setup();
+    renderDialog({ resources: ["a:b", "a"], destinations: ["c", "b:c"] });
+
+    await user.click(screen.getByRole("button", { name: "Approve recommendation" }));
+    await user.type(screen.getByRole("textbox", { name: "Decision note" }), "Proceed");
+    await user.click(screen.getByRole("button", { name: "Submit approve decision" }));
+
+    await screen.findByRole("list", { name: "Final assignments" });
+    expect(consoleError.mock.calls.flat().join(" ")).not.toContain("Encountered two children with the same key");
+  });
+
   it("sends an exact trimmed reject request without edited assignments", async () => {
     const createDecision = vi.spyOn(apiClient, "createDecision").mockResolvedValue({
       ...decision,
@@ -402,6 +451,10 @@ describe("DecisionDialog", () => {
     settle(decision);
 
     expect(await screen.findByText("Decision recorded")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Decision recorded" })).toHaveFocus();
+    expect(screen.getByRole("status", { name: "Decision recorded" })).toHaveTextContent(
+      "Decision recorded.",
+    );
     expect(screen.getByText("operator-1")).toBeVisible();
     expect(screen.getByText("Proceed")).toBeVisible();
     expect(screen.getByRole("button", { name: "Approve recommendation" })).toBeDisabled();

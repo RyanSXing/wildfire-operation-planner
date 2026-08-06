@@ -1,0 +1,249 @@
+/* Live command centre — surface-specific rules.
+ * Tokens and shared primitives come from ../ui/wildfireops.css. */
+
+@import "../ui/wildfireops.css";
+
+/* Incident cards sit where the exercise puts its progress steps, so they share
+   the rail's rhythm without pretending to be a linear sequence. */
+.wf-rail > .wf-steps:not(.wf-steps--compact) {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 44%;
+}
+
+/* Progress follows the incident list immediately; the remaining space falls
+   below it so the rail does not read as two disconnected halves. */
+.wf-rail > .wf-label:nth-of-type(2) {
+  margin-top: 10px;
+  border-top: 1px solid var(--wf-line-faint);
+  padding-top: 14px;
+}
+
+.wf-rail > .wf-steps--compact {
+  margin-bottom: auto;
+}
+
+.wf-incident {
+  display: block;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--wf-line-faint);
+  border-radius: 10px;
+  background: var(--wf-card);
+  color: var(--wf-text);
+  text-align: left;
+}
+
+.wf-incident:hover {
+  background: var(--wf-raised);
+}
+
+.wf-incident[data-state="current"] {
+  background: var(--wf-selected);
+  border-color: rgba(76, 211, 232, 0.55);
+}
+
+.wf-incident__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.wf-incident__name {
+  font: 600 13.5px var(--wf-sans);
+}
+
+.wf-incident__score {
+  margin-left: auto;
+  font: 600 11px var(--wf-mono);
+  color: var(--wf-cyan);
+}
+
+.wf-incident__meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--wf-text-2);
+}
+
+/* The replay scrubber sits under the status row, which leaves the bottom of
+   the map free for the command bar and whatever panel is open above it. */
+.wf-monitor__replay {
+  position: absolute;
+  top: 56px;
+  left: 12px;
+  right: 12px;
+  z-index: 12;
+  padding: 8px 12px;
+  border: 1px solid var(--wf-line);
+  border-radius: 11px;
+  background: var(--wf-panel);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--wf-shadow-panel);
+}
+
+.wf-monitor__replay .replay-timeline,
+.wf-monitor__replay input,
+.wf-monitor__replay button {
+  color: var(--wf-text);
+}
+
+.wf-monitor__replay input[type="range"] {
+  width: 100%;
+  accent-color: var(--wf-cyan);
+}
+
+/* Comparison tables are wide; they scroll inside the drawer rather than
+   pushing the page sideways. */
+.wf-scroll-x {
+  overflow-x: auto;
+  border: 1px solid var(--wf-line-faint);
+  border-radius: 9px;
+}
+
+.wf-scroll-x table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  color: var(--wf-data);
+}
+
+.wf-scroll-x th,
+.wf-scroll-x td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.wf-scroll-x th {
+  font: 600 10.5px var(--wf-mono);
+  letter-spacing: 0.1em;
+  color: var(--wf-text-3);
+}
+
+/* The reused editor and decision forms inherit the design system rather than
+   carrying the light-theme styling they were written against. */
+.wf-panel form label,
+.wf-panel fieldset label {
+  display: block;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--wf-text-2);
+}
+
+.wf-panel legend {
+  font: 600 10.5px var(--wf-mono);
+  letter-spacing: 0.12em;
+  color: var(--wf-text-3);
+}
+
+.wf-panel fieldset {
+  margin: 12px 0 0;
+  padding: 0;
+  border: none;
+}
+
+.wf-panel input[type="text"],
+.wf-panel input[type="search"],
+.wf-panel input[type="number"],
+.wf-panel textarea,
+.wf-panel select {
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--wf-line-control);
+  border-radius: 8px;
+  background: #10141a;
+  color: var(--wf-text);
+  font: 400 13px var(--wf-sans);
+}
+
+.wf-panel input[type="checkbox"],
+.wf-panel input[type="radio"] {
+  width: auto;
+  margin-right: 8px;
+  accent-color: var(--wf-cyan);
+}
+
+.wf-panel button[type="submit"] {
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 9px;
+  background: var(--wf-action);
+  color: var(--wf-action-ink);
+  font: 700 13px var(--wf-sans);
+}
+
+.wf-panel button[type="submit"]:disabled {
+  opacity: 0.45;
+}
+
+.wf-panel details {
+  margin-top: 12px;
+}
+
+.wf-panel summary {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  font: 600 12px var(--wf-sans);
+  color: var(--wf-text-2);
+  cursor: pointer;
+}
+
+.wf-panel ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--wf-data);
+}
+
+/* OperationsMap brings its own grid (canvas, summary, legend) sized for the
+   old light layout. Here it fills the workspace, and its two footer strips
+   adopt the design system so the map does not sit in a bright box. */
+.wf-main > .operations-map {
+  position: absolute;
+  inset: 0;
+  background: var(--wf-page);
+}
+
+.wf-main > .operations-map .operations-map__canvas {
+  min-height: 0;
+}
+
+.wf-main > .operations-map .operations-map__summary,
+.wf-main > .operations-map .operations-map__legend {
+  background: rgba(23, 27, 33, 0.94);
+  border-top: 1px solid var(--wf-line-faint);
+  color: var(--wf-data);
+}
+
+/* The command bar clears those footer strips, and any panel clears the bar. */
+.wf-main > .wf-dock {
+  bottom: 76px;
+}
+
+.wf-main > .wf-panel--above-dock {
+  bottom: 156px;
+  max-height: calc(100% - 220px);
+}
+
+/* The rail carries incidents and progress together, so the step list is
+   compact enough that both fit without scrolling at 1000px. */
+.wf-steps--compact {
+  flex: none;
+  overflow: visible;
+  padding-bottom: 4px;
+}
+
+.wf-steps--compact .wf-step {
+  padding: 7px 10px;
+}
+
+.wf-steps--compact .wf-step__note {
+  font-size: 11px;
+}

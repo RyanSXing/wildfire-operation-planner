@@ -200,6 +200,15 @@ def test_legacy_manifest_remains_valid_without_road_graph_metadata() -> None:
     assert "road_graph" not in manifest.to_payload()
 
 
+def test_with_files_returns_valid_replacement_without_mutating_original() -> None:
+    manifest = ReplayManifest.load(FIXTURE_MANIFEST)
+
+    replaced = manifest.with_files({"exercise.json": "a" * 64})
+
+    assert "exercise.json" not in manifest.files
+    assert replaced.files["exercise.json"] == "a" * 64
+
+
 def test_road_graph_metadata_round_trips_atomically(tmp_path: Path) -> None:
     payload = _manifest_payload()
     digest = "a" * 64

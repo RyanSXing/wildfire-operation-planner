@@ -110,6 +110,17 @@ function sourceFeatures(map: RecordedMap, sourceId: string) {
   return (map.sources.get(sourceId)?.data as FeatureCollection<Geometry> | undefined)?.features ?? [];
 }
 
+function disclosureSummary(label: string): HTMLElement {
+  const summary = screen
+    .getAllByText(label)
+    .find((element) => element.closest("summary") !== null)
+    ?.closest("summary");
+  if (!summary) {
+    throw new Error(`Expected a summary labeled ${label}`);
+  }
+  return summary;
+}
+
 beforeEach(() => {
   resetMapLibreTestState();
   TestEventSource.instances.length = 0;
@@ -139,7 +150,7 @@ describe("AppShell", () => {
     renderShell();
     await screen.findByRole("region", { name: "Wildfire operations map" });
     const map = onlyMap();
-    act(() => map.emit("load"));
+    act(() => map.emit("style.load"));
     await user.click(await screen.findByRole("button", { name: "Create baseline and generate recommendation" }));
     await user.click(await screen.findByRole("radio", { name: "Scenario version 1" }));
     await waitFor(() => expect(sourceFeatures(map, MAP_SOURCE_IDS.routes)).toHaveLength(2));
@@ -192,7 +203,7 @@ describe("AppShell", () => {
     renderShell();
     await screen.findByRole("region", { name: "Wildfire operations map" });
     const map = onlyMap();
-    act(() => map.emit("load"));
+    act(() => map.emit("style.load"));
 
     await user.click(await screen.findByRole("button", { name: "Create baseline and generate recommendation" }));
     await user.click(await screen.findByRole("radio", { name: "Scenario version 1" }));
@@ -279,7 +290,7 @@ describe("AppShell", () => {
 
     const map = onlyMap();
     act(() => {
-      map.emit("load");
+      map.emit("style.load");
     });
     expect(visualizedIncidentId(map)).toBe(REDWOOD_ID);
 
@@ -292,16 +303,15 @@ describe("AppShell", () => {
     await waitFor(() => {
       expect(visualizedIncidentId(map)).toBe(BEAR_ID);
     });
-    expect(
-      within(screen.getByRole("region", { name: "Risk explanation" })).getByText(
-        "61",
-      ),
-    ).toBeVisible();
+    expect(within(overview).getByText("61")).toBeVisible();
   });
 
   it("selects the nearest returned replay frame while current assets and resources remain current", async () => {
+    const user = userEvent.setup();
     renderShell();
 
+    await screen.findByText("Risk evidence");
+    await user.click(disclosureSummary("Risk evidence"));
     const risk = await screen.findByRole("region", {
       name: "Risk explanation",
     });
@@ -326,6 +336,8 @@ describe("AppShell", () => {
       ).toHaveTextContent("Replay frame");
     });
     expect(screen.getByText(/Replay frame: 1 incident feature/i)).toBeVisible();
+    await user.click(disclosureSummary("Exposed assets"));
+    await user.click(disclosureSummary("Simulated resources"));
     expect(
       within(screen.getByRole("region", { name: "Exposed assets" })).getByText(
         "Current snapshot",
@@ -510,6 +522,7 @@ describe("AppShell", () => {
     expect(calls[0].key).not.toBe("");
     expect(calls[1].key).not.toBe("");
 
+    await user.click(screen.getByText("Modify scenario assumptions (optional)"));
     await user.click(screen.getByRole("checkbox", { name: /Alpha Road/ }));
     await user.type(screen.getByLabelText("Wind speed (m/s)"), "14.5");
     await user.type(screen.getByLabelText("Wind direction (degrees)"), "225");
@@ -697,7 +710,7 @@ describe("AppShell", () => {
 
     await screen.findByRole("combobox", { name: "Road graph" });
     const map = onlyMap();
-    act(() => map.emit("load"));
+    act(() => map.emit("style.load"));
     await user.click(
       screen.getByRole("button", {
         name: "Create baseline and generate recommendation",
@@ -749,7 +762,7 @@ describe("AppShell", () => {
         name: "Create baseline and generate recommendation",
       }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Search roads" })).toBeEnabled();
+    expect(screen.getByText("Road catalog")).toBeVisible();
     expect(screen.getByText(/Replay frame: 1 incident feature/i)).toBeVisible();
   });
 });

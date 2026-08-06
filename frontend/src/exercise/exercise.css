@@ -1,0 +1,5 @@
+/* Park Fire decision exercise.
+ * Every rule it needs now lives in the shared design system, because the live
+ * command centre uses the same surfaces. */
+
+@import "../ui/wildfireops.css";

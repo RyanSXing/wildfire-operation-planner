@@ -1,11 +1,18 @@
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from wildfireops.application.read_models import ReadModelNotFound
+from wildfireops.application.exercises import (
+    ExerciseError,
+    ExerciseTransitionInvalid,
+    ExerciseVersionConflict,
+)
+from wildfireops.api.schemas.exercises import ExerciseSessionResponse
 
 
 class ApiError(Exception):
@@ -25,6 +32,19 @@ class ApiError(Exception):
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    @app.exception_handler(ExerciseError)
+    async def handle_exercise_error(
+        request: Request, error: ExerciseError
+    ) -> JSONResponse:
+        from wildfireops.api.command_errors import exercise_api_error
+
+        return _api_error_response(
+            exercise_api_error(
+                error,
+                current_state=await _exercise_current_state(request, error),
+            )
+        )
+
     @app.exception_handler(ReadModelNotFound)
     async def handle_read_model_not_found(
         request: Request,
@@ -56,16 +76,7 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def handle_api_error(request: Request, error: ApiError) -> JSONResponse:
         del request
-        return JSONResponse(
-            status_code=error.status_code,
-            content={
-                "error": {
-                    "code": error.code,
-                    "message": error.message,
-                    "details": error.details,
-                }
-            },
-        )
+        return _api_error_response(error)
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(
@@ -119,3 +130,49 @@ def register_error_handlers(app: FastAPI) -> None:
                 }
             },
         )
+
+
+async def _exercise_current_state(
+    request: Request, error: ExerciseError
+) -> dict[str, object] | None:
+    if not isinstance(error, (ExerciseVersionConflict, ExerciseTransitionInvalid)):
+        return None
+    raw_session_id = request.path_params.get("session_id")
+    if not isinstance(raw_session_id, str):
+        return None
+    try:
+        session_id = UUID(raw_session_id)
+    except ValueError:
+        return None
+    provider = request.app.state.command_service_provider
+    try:
+        async with provider.exercise_queries() as service:
+            state = await service.session(session_id)
+    except ExerciseError:
+        return None
+    return ExerciseSessionResponse.model_validate(
+        _thaw_json(state)
+    ).model_dump(mode="json", by_alias=True)
+
+
+def _thaw_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    if isinstance(value, list):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
+def _api_error_response(error: ApiError) -> JSONResponse:
+    return JSONResponse(
+        status_code=error.status_code,
+        content={
+            "error": {
+                "code": error.code,
+                "message": error.message,
+                "details": error.details,
+            }
+        },
+    )

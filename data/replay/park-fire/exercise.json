@@ -1,0 +1,69 @@
+{
+  "exerciseId": "park-fire-decision",
+  "version": "2",
+  "name": "Park Fire decision exercise",
+  "description": "A portfolio decision exercise combining historical Park Fire inputs with explicitly simulated operations.",
+  "replayPackageId": "park-fire-2024-v1",
+  "graphVersion": "f922708bbb96ea293b372c1f9da6f99f3285c69cd9eea4377b823f6ccc7adebd",
+  "objectives": {
+    "fastest-response": {"travelWeight": 10, "basePriorityWeight": 1, "criticalServiceWeight": 1, "populationDivisor": 1000, "populationWeight": 1},
+    "protect-critical-services": {"travelWeight": 1, "basePriorityWeight": 2, "criticalServiceWeight": 100, "populationDivisor": 1000, "populationWeight": 1},
+    "maximize-population-coverage": {"travelWeight": 1, "basePriorityWeight": 1, "criticalServiceWeight": 1, "populationDivisor": 1000, "populationWeight": 10}
+  },
+  "assets": [
+    {"assetId": "census-place-0655520", "assetKind": "community", "name": "Paradise town", "position": {"longitude": -121.6064, "latitude": 39.754192}, "sourceName": "census", "sourceVersion": "2020-decennial-pl", "sourceRecordId": "census-place-0655520", "citationUrl": "https://www.census.gov/quickfacts/fact/table/chicocitycalifornia,paradisetowncalifornia/PST045224", "provenance": "historical"},
+    {"assetId": "census-place-0613014", "assetKind": "community", "name": "Chico city", "position": {"longitude": -121.81772, "latitude": 39.758951}, "sourceName": "census", "sourceVersion": "2020-decennial-pl", "sourceRecordId": "census-place-0613014", "citationUrl": "https://www.census.gov/quickfacts/fact/table/chicocitycalifornia,paradisetowncalifornia/PST045224", "provenance": "historical"},
+    {"assetId": "census-place-0609318", "assetKind": "community", "name": "Butte Meadows CDP", "position": {"longitude": -121.542683, "latitude": 40.08531}, "sourceName": "census_tab20", "sourceVersion": "2020-census-tab20", "sourceRecordId": "census-place-0609318", "citationUrl": "https://tigerweb.geo.census.gov/tigerwebmain/Files/bas25/tigerweb_bas25_cdp_2020_tab20_ca.html", "provenance": "historical"},
+    {"assetId": "adventist-health-feather-river", "assetKind": "hospital", "name": "Adventist Health Feather River", "position": {"longitude": -121.570327, "latitude": 39.757417}, "sourceName": "OpenStreetMap", "sourceVersion": "2026-07-25T14:03:09Z", "sourceRecordId": "way/577807430", "citationUrl": "https://www.openstreetmap.org/way/577807430", "provenance": "historical"},
+    {"assetId": "card-community-center", "assetKind": "shelter", "name": "CARD Community Center", "position": {"longitude": -121.833301, "latitude": 39.7340607}, "sourceName": "OpenStreetMap", "sourceVersion": "2026-07-25T14:03:09Z", "sourceRecordId": "way/1392880190", "citationUrl": "https://www.openstreetmap.org/way/1392880190", "provenance": "historical"},
+    {"assetId": "paradise-substation", "assetKind": "power-substation", "name": "Paradise Substation", "position": {"longitude": -121.61888, "latitude": 39.7606558}, "sourceName": "OpenStreetMap", "sourceVersion": "2026-07-25T14:03:09Z", "sourceRecordId": "way/1256348450", "citationUrl": "https://www.openstreetmap.org/way/1256348450", "provenance": "historical"},
+    {"assetId": "kpay-fm-chico", "assetKind": "communications", "name": "KPAY-FM (Chico)", "position": {"longitude": -121.7224787, "latitude": 39.9459939}, "sourceName": "OpenStreetMap", "sourceVersion": "2026-07-25T14:03:09Z", "sourceRecordId": "node/358814442", "citationUrl": "https://www.openstreetmap.org/node/358814442", "provenance": "historical"},
+    {"assetId": "nunneley-road-corridor", "assetKind": "road-corridor", "name": "Nunneley Road corridor", "position": {"longitude": -121.606545, "latitude": 39.755887}, "sourceName": "OpenStreetMap", "sourceVersion": "2026-07-25T14:03:09Z", "sourceRecordId": "way/629318940", "citationUrl": "https://www.openstreetmap.org/way/629318940", "provenance": "historical"}
+  ],
+  "resources": [
+    {"resourceId": "exercise-engine-1", "resourceType": "engine", "capabilities": ["critical-infrastructure-protection", "suppression"], "capacity": 2, "available": true, "position": {"longitude": -121.6064, "latitude": 39.754192}, "provenance": "exercise"},
+    {"resourceId": "exercise-bus-1", "resourceType": "evacuation-bus", "capabilities": ["evacuation-transport"], "capacity": 40, "available": true, "position": {"longitude": -121.6064, "latitude": 39.754192}, "provenance": "exercise"},
+    {"resourceId": "exercise-medical-1", "resourceType": "medical-team", "capabilities": ["medical-support"], "capacity": 4, "available": true, "position": {"longitude": -121.6064, "latitude": 39.754192}, "provenance": "exercise"},
+    {"resourceId": "exercise-road-crew-1", "resourceType": "road-crew", "capabilities": ["corridor-clearing"], "capacity": 1, "available": true, "position": {"longitude": -121.6064, "latitude": 39.754192}, "provenance": "exercise"}
+  ],
+  "checkpoints": [
+    {
+      "checkpointKey": "initial-allocation", "title": "Initial allocation", "situationSummary": "Historical detections establish the Park Fire; task demand is an exercise assumption.", "decisionPrompt": "Choose an objective and allocate the scarce exercise resources.", "referenceAt": "2024-07-29T20:10:00Z", "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T19:54:00",
+      "incidents": [{"incidentKey": "park-fire", "name": "Park Fire", "provenance": "historical", "detectionIdentities": ["nasa_firms:viirs-snpp-2024-us-line-225982"]}],
+      "tasks": [
+        {"taskId": "evacuate-paradise", "incidentKey": "park-fire", "assetId": "census-place-0655520", "taskType": "community-evacuation", "requiredCapability": "evacuation-transport", "requiredCapacity": 40, "deadlineMinutes": 1000, "affectedPopulation": 4764, "criticalService": false, "basePriority": 100, "provenance": "exercise"},
+        {"taskId": "evacuate-chico", "incidentKey": "park-fire", "assetId": "census-place-0613014", "taskType": "community-evacuation", "requiredCapability": "evacuation-transport", "requiredCapacity": 40, "deadlineMinutes": 1000, "affectedPopulation": 101475, "criticalService": false, "basePriority": 10, "provenance": "exercise"},
+        {"taskId": "support-feather-river", "incidentKey": "park-fire", "assetId": "adventist-health-feather-river", "taskType": "hospital-support", "requiredCapability": "medical-support", "requiredCapacity": 4, "deadlineMinutes": 1000, "affectedPopulation": 500, "criticalService": true, "basePriority": 500, "provenance": "exercise"},
+        {"taskId": "protect-paradise-substation", "incidentKey": "park-fire", "assetId": "paradise-substation", "taskType": "power-substation-protection", "requiredCapability": "suppression", "requiredCapacity": 2, "deadlineMinutes": 1000, "affectedPopulation": 4764, "criticalService": true, "basePriority": 500, "provenance": "exercise"}
+      ],
+      "disruption": {"windSpeedMps": 2.1, "windDirectionDegrees": 210, "closedEdgeIds": [], "provenance": "exercise"}
+    },
+    {
+      "checkpointKey": "cascading-disruption", "title": "Cascading disruption", "situationSummary": "An exercise spot fire, wind shift, and corridor closure compete for the same exercise resources.", "decisionPrompt": "Replan across both incidents and the closed corridor.", "referenceAt": "2024-07-29T21:05:00Z", "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T20:58:00",
+      "incidents": [{"incidentKey": "park-fire", "name": "Park Fire", "provenance": "historical", "detectionIdentities": ["nasa_firms:viirs-snpp-2024-us-line-225982"]}, {"incidentKey": "spot-fire", "name": "Exercise spot fire", "provenance": "exercise", "simulatedPosition": {"longitude": -121.61888, "latitude": 39.7606558}}],
+      "tasks": [
+        {"taskId": "evacuate-paradise", "incidentKey": "park-fire", "assetId": "census-place-0655520", "taskType": "community-evacuation", "requiredCapability": "evacuation-transport", "requiredCapacity": 40, "deadlineMinutes": 1000, "affectedPopulation": 4764, "criticalService": false, "basePriority": 100, "provenance": "exercise"},
+        {"taskId": "evacuate-chico", "incidentKey": "park-fire", "assetId": "census-place-0613014", "taskType": "community-evacuation", "requiredCapability": "evacuation-transport", "requiredCapacity": 40, "deadlineMinutes": 1000, "affectedPopulation": 101475, "criticalService": false, "basePriority": 10, "provenance": "exercise"},
+        {"taskId": "support-feather-river", "incidentKey": "park-fire", "assetId": "adventist-health-feather-river", "taskType": "hospital-support", "requiredCapability": "medical-support", "requiredCapacity": 4, "deadlineMinutes": 1000, "affectedPopulation": 500, "criticalService": true, "basePriority": 500, "provenance": "exercise"},
+        {"taskId": "protect-kpay-communications", "incidentKey": "park-fire", "assetId": "kpay-fm-chico", "taskType": "communications-protection", "requiredCapability": "critical-infrastructure-protection", "requiredCapacity": 2, "deadlineMinutes": 1000, "affectedPopulation": 101475, "criticalService": true, "basePriority": 600, "provenance": "exercise"},
+        {"taskId": "protect-paradise-substation", "incidentKey": "spot-fire", "assetId": "paradise-substation", "taskType": "power-substation-protection", "requiredCapability": "critical-infrastructure-protection", "requiredCapacity": 2, "deadlineMinutes": 1000, "affectedPopulation": 4764, "criticalService": true, "basePriority": 500, "provenance": "exercise"},
+        {"taskId": "clear-primary-corridor", "incidentKey": "spot-fire", "assetId": "nunneley-road-corridor", "taskType": "corridor-clearing", "requiredCapability": "corridor-clearing", "requiredCapacity": 1, "deadlineMinutes": 1000, "affectedPopulation": 4764, "criticalService": true, "basePriority": 100, "provenance": "exercise"}
+      ],
+      "disruption": {"windSpeedMps": 5.7, "windDirectionDegrees": 160, "closedEdgeIds": ["osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f"], "provenance": "exercise"}
+    },
+    {
+      "checkpointKey": "field-report", "title": "Shelter field report", "situationSummary": "A simulated field report adds a shelter-capacity transport decision.", "decisionPrompt": "Validate the evacuation-bus override before recording the decision.", "referenceAt": "2024-07-29T22:00:00Z", "historicalWeatherIdentity": "noaa_ncei:72497393203-2024-07-29T21:54:00",
+      "incidents": [{"incidentKey": "park-fire", "name": "Park Fire", "provenance": "historical", "detectionIdentities": ["nasa_firms:viirs-snpp-2024-us-line-225982"]}],
+      "tasks": [
+        {"taskId": "evacuate-paradise", "incidentKey": "park-fire", "assetId": "census-place-0655520", "taskType": "community-evacuation", "requiredCapability": "evacuation-transport", "requiredCapacity": 40, "deadlineMinutes": 1000, "affectedPopulation": 4764, "criticalService": false, "basePriority": 100, "provenance": "exercise"},
+        {"taskId": "evacuate-chico", "incidentKey": "park-fire", "assetId": "census-place-0613014", "taskType": "community-evacuation", "requiredCapability": "evacuation-transport", "requiredCapacity": 40, "deadlineMinutes": 1000, "affectedPopulation": 101475, "criticalService": false, "basePriority": 10, "provenance": "exercise"},
+        {"taskId": "support-feather-river", "incidentKey": "park-fire", "assetId": "adventist-health-feather-river", "taskType": "hospital-support", "requiredCapability": "medical-support", "requiredCapacity": 4, "deadlineMinutes": 1000, "affectedPopulation": 500, "criticalService": true, "basePriority": 500, "provenance": "exercise"},
+        {"taskId": "shelter-capacity-transport", "incidentKey": "park-fire", "assetId": "card-community-center", "taskType": "shelter-transport", "requiredCapability": "evacuation-transport", "requiredCapacity": 40, "deadlineMinutes": 1000, "affectedPopulation": 300, "criticalService": true, "basePriority": 1, "provenance": "exercise"}
+      ],
+      "disruption": {"windSpeedMps": 6.7, "windDirectionDegrees": 160, "closedEdgeIds": ["osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f"], "provenance": "exercise"},
+      "fieldReports": [{"reportId": "exercise-shelter-capacity", "taskId": "shelter-capacity-transport", "message": "Exercise assumption: shelter capacity pressure requires an evacuation-bus override.", "provenance": "exercise"}]
+    }
+  ],
+  "sandbox": {"checkpointKeys": ["initial-allocation", "cascading-disruption", "field-report"], "closureEdgeIds": ["osm-20100003f58c64e9ea9c5b1b82874110b4315c6fe6c421cb4cc484111874e91f"], "windPresets": {"historical-calm": {"windSpeedMps": 2.1, "windDirectionDegrees": 210, "closedEdgeIds": [], "provenance": "exercise"}, "shifted": {"windSpeedMps": 5.7, "windDirectionDegrees": 160, "closedEdgeIds": [], "provenance": "exercise"}, "strong-shift": {"windSpeedMps": 6.7, "windDirectionDegrees": 135, "closedEdgeIds": [], "provenance": "exercise"}}, "priorityMultipliers": {"standard": 1, "elevated": 2, "urgent": 3}},
+  "safetyStatement": "Portfolio decision exercise only. Historical inputs are combined with simulated operational assumptions. Do not use for emergency or life-safety decisions."
+}

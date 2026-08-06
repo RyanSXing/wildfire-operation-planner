@@ -17,6 +17,7 @@ from wildfireops.replay.seed import (
     ReplaySeedError,
     ReplaySeedResult,
     _package_digest,
+    _package_incident_name,
     _result_json,
     _seed_request_hash,
     _seed_request_payload,
@@ -74,6 +75,10 @@ def test_package_digest_ignores_manifest_file_insertion_order() -> None:
     second = _manifest({"resources.json": "b" * 64, "observations.jsonl": "a" * 64})
 
     assert _package_digest(first) == _package_digest(second)
+
+
+def test_package_incident_name_removes_replay_version_metadata() -> None:
+    assert _package_incident_name("park-fire-2024-v1") == "Park Fire"
 
 
 def test_package_digest_changes_for_every_semantic_manifest_change() -> None:

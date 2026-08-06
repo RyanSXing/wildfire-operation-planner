@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 import os
+import re
 import time
 from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime
@@ -148,6 +149,35 @@ def test_present_graph_node_coordinates_must_be_finite_numbers(
         RoadGraph.from_graph(_coordinate_graph(**coordinates))
 
 
+@pytest.mark.parametrize(
+    ("coordinates", "field", "value", "allowed_range"),
+    [
+        ({"x": 181, "y": 0}, "x/longitude", "181.0", "[-180, 180]"),
+        ({"x": 0, "y": 90.1}, "y/latitude", "90.1", "[-90, 90]"),
+    ],
+)
+def test_graph_load_rejects_node_coordinates_outside_wgs84_bounds(
+    tmp_path: Path,
+    coordinates: dict[str, object],
+    field: str,
+    value: str,
+    allowed_range: str,
+) -> None:
+    path = tmp_path / "invalid.graphml"
+    graph = nx.MultiDiGraph()
+    graph.add_node("A", **coordinates)
+    nx.write_graphml(graph, path)
+
+    with pytest.raises(
+        RoadGraphInvalid,
+        match=(
+            r"^road graph node builtins\.str:'A' "
+            rf"{field}={value} is outside allowed range {re.escape(allowed_range)}$"
+        ),
+    ):
+        RoadGraph.load(path)
+
+
 def test_road_edge_catalog_is_stable_geographic_and_read_only() -> None:
     graph = nx.MultiDiGraph()
     graph.add_node("A", x=-121.7, y=39.7)
@@ -208,6 +238,12 @@ def test_road_edge_catalog_is_stable_geographic_and_read_only() -> None:
             distance_meters=450.0,
         ),
     )
+    assert roads.node_coordinates == ((-121.7, 39.7), (-121.6, 39.8))
+    assert roads.node_position("A") == (-121.7, 39.7)
+    with pytest.raises(RoadGraphInvalid, match="unknown road node"):
+        roads.node_position("missing")
+    with pytest.raises(RoadGraphInvalid, match="has no finite coordinates"):
+        roads.node_position("missing-origin")
     with pytest.raises(FrozenInstanceError):
         setattr(roads.road_edges[0], "label", "Changed")
     assert roads.graph_version == version

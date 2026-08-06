@@ -79,6 +79,50 @@ function installSuccessfulCommands(calls: RecordedCommand[]) {
 describe("ScenarioPlanningPanel", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("shows a skippable workflow guide and the first action before the road catalog", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const guide = screen.getByRole("navigation", { name: "Decision workflow" });
+    expect(within(guide).getByText("Observe")).toHaveAttribute(
+      "data-status",
+      "complete",
+    );
+    expect(within(guide).getByText("Plan")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    expect(within(guide).getByText("Recommend")).toHaveAttribute(
+      "data-status",
+      "upcoming",
+    );
+    expect(within(guide).getByText("Decide")).toHaveAttribute(
+      "data-status",
+      "upcoming",
+    );
+
+    const action = await screen.findByRole("button", {
+      name: "Create baseline and generate recommendation",
+    });
+    const roads = screen.getByText(/Road catalog/).closest("details");
+    if (!roads) {
+      throw new Error("Expected road catalog to use a details disclosure");
+    }
+    expect(roads).not.toHaveAttribute("open");
+    expect(
+      action.compareDocumentPosition(roads) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const guideDisclosure = within(
+      screen.getByRole("region", { name: "Scenario planning" }),
+    ).getByText("Decision workflow").closest("details");
+    if (!guideDisclosure) {
+      throw new Error("Expected workflow guide disclosure");
+    }
+    await user.click(guideDisclosure.querySelector("summary")!);
+    expect(guideDisclosure).not.toHaveAttribute("open");
+  });
+
   it("emits baseline, matching selection, newer-version clear, and reset selections", async () => {
     const calls: RecordedCommand[] = [];
     installSuccessfulCommands(calls);
@@ -101,6 +145,7 @@ describe("ScenarioPlanningPanel", () => {
   });
 
   it("discovers the default graph and bounded road catalog without posting on mount", async () => {
+    const user = userEvent.setup();
     renderPanel();
 
     expect(
@@ -111,6 +156,7 @@ describe("ScenarioPlanningPanel", () => {
     expect(graph).toHaveValue("roads-v1");
     expect(within(graph).getAllByRole("option")).toHaveLength(2);
     expect(await screen.findByText("Showing 3 of 205 road edges.")).toBeVisible();
+    await user.click(roadCatalogSummary());
     expect(
       screen.getByText("Road catalog is a bounded subset of matching edges."),
     ).toBeVisible();
@@ -162,6 +208,47 @@ describe("ScenarioPlanningPanel", () => {
   it("creates and recommends the baseline before allowing an immutable branch", async () => {
     const calls: RecordedCommand[] = [];
     installSuccessfulCommands(calls);
+    server.use(
+      http.post("/api/recommendations/:recommendationId/decisions", ({ params }) =>
+        HttpResponse.json(
+          {
+            id: "decision-1",
+            recommendationId: String(params.recommendationId),
+            action: "approve",
+            note: "Proceed with the baseline",
+            actorId: "operator-1",
+            assignments: baselineRecommendationResponse.assignments,
+            createdAt: "2026-07-18T12:00:00Z",
+          },
+          { status: 201 },
+        ),
+      ),
+      http.get("/api/audit-events", ({ request }) => {
+        const recommendationId =
+          new URL(request.url).searchParams.get("recommendationId") ?? "";
+        return HttpResponse.json({
+          items: [
+            {
+              id: "audit-1",
+              decisionActionId: "decision-1",
+              actorId: "operator-1",
+              eventType: "recommendation.approved",
+              aggregateType: "recommendation",
+              aggregateId: recommendationId,
+              scenarioVersionId: baselineScenarioVersionResponse.id,
+              incidentSnapshotId: baselineRecommendationResponse.incidentSnapshotId,
+              recommendationId,
+              algorithms: {},
+              beforeState: {},
+              afterState: { action: "approve" },
+              inputs: {},
+              note: "Proceed with the baseline",
+              occurredAt: "2026-07-18T12:00:00Z",
+            },
+          ],
+        });
+      }),
+    );
     const user = userEvent.setup();
     renderPanel();
 
@@ -184,6 +271,25 @@ describe("ScenarioPlanningPanel", () => {
     expect(
       screen.getByRole("button", { name: "Approve recommendation" }),
     ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Edit recommendation" }));
+    expect(screen.getByRole("option", { name: "Engine 1" })).toHaveValue("engine-1");
+    expect(screen.getByRole("option", { name: "Forest Ranch" })).toHaveValue("community-1");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    const editorDisclosure = screen
+      .getByText("Modify scenario assumptions (optional)")
+      .closest("details");
+    if (!editorDisclosure) {
+      throw new Error("Expected optional scenario editor disclosure");
+    }
+    expect(editorDisclosure).not.toHaveAttribute("open");
+    const decisionControls = screen.getByRole("region", {
+      name: "Recommendation decision controls",
+    });
+    expect(
+      decisionControls.compareDocumentPosition(editorDisclosure) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await user.click(screen.getByText("Modify scenario assumptions (optional)"));
     expect(
       screen.getByRole("form", { name: "Scenario version editor" }),
     ).toBeVisible();
@@ -206,6 +312,53 @@ describe("ScenarioPlanningPanel", () => {
     expect(calls[1].key).toEqual(expect.any(String));
     expect(calls[1].key).not.toBe(calls[0].key);
     expect(graphSelection()).toBeDisabled();
+
+    const guide = screen.getByRole("navigation", { name: "Decision workflow" });
+    expect(within(guide).getByText("Plan")).toHaveAttribute(
+      "data-status",
+      "complete",
+    );
+    expect(within(guide).getByText("Recommend")).toHaveAttribute(
+      "data-status",
+      "complete",
+    );
+    expect(within(guide).getByText("Decide")).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve recommendation" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Decision note" }),
+      "Proceed with the baseline",
+    );
+    await user.click(screen.getByRole("button", { name: "Submit approve decision" }));
+    expect(await screen.findByText("Decision recorded")).toBeVisible();
+    expect(within(guide).getByText("Decide")).toHaveAttribute(
+      "data-status",
+      "complete",
+    );
+    await user.click(screen.getByText("Audit history"));
+    expect(await screen.findByRole("list", { name: "Audit events" })).toBeVisible();
+  });
+
+  it("gives duplicate resource types stable unique operational labels", async () => {
+    const calls: RecordedCommand[] = [];
+    installSuccessfulCommands(calls);
+    const user = userEvent.setup();
+    renderPanel(false, {
+      ...incident,
+      simulatedResources: [
+        ...incident.simulatedResources,
+        { ...incident.simulatedResources[0], resourceId: "engine-2" },
+      ],
+    });
+
+    await bootstrapBaseline(user);
+    await user.click(screen.getByRole("button", { name: "Edit recommendation" }));
+
+    expect(screen.getByRole("option", { name: "Engine 1" })).toHaveValue("engine-1");
+    expect(screen.getByRole("option", { name: "Engine 2" })).toHaveValue("engine-2");
   });
 
   it("keeps the baseline graph locked when refreshed context changes its default", async () => {
@@ -301,6 +454,7 @@ describe("ScenarioPlanningPanel", () => {
       }),
     ).toBeVisible();
     expect(graphSelection()).toBeDisabled();
+    await user.click(roadCatalogSummary());
     expect(screen.getByRole("region", { name: "Road catalog" })).toBeVisible();
     expect(
       screen.getByRole("form", { name: "Scenario version editor" }),
@@ -772,6 +926,7 @@ describe("ScenarioPlanningPanel", () => {
   });
 
   it("keeps reads visible but disables every planning command during replay", async () => {
+    const user = userEvent.setup();
     renderPanel(true);
 
     expect(
@@ -785,8 +940,9 @@ describe("ScenarioPlanningPanel", () => {
         name: "Create baseline and generate recommendation",
       }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Search roads" })).toBeEnabled();
     expect(await screen.findByText("Showing 3 of 205 road edges.")).toBeVisible();
+    await user.click(roadCatalogSummary());
+    expect(screen.getByRole("button", { name: "Search roads" })).toBeEnabled();
   });
 
   it("uses the latest freshness token as the baseline when an event arrives before planning", async () => {
@@ -1434,6 +1590,7 @@ describe("ScenarioPlanningPanel", () => {
     await bootstrapBaseline(user);
 
     await user.click(screen.getByRole("checkbox", { name: /Alpha Road/ }));
+    await user.click(roadCatalogSummary());
     await user.type(screen.getByRole("searchbox", { name: "Search road edges" }), "County");
     await user.click(screen.getByRole("button", { name: "Search roads" }));
 
@@ -1502,10 +1659,19 @@ async function bootstrapBaseline(user: ReturnType<typeof userEvent.setup>) {
     }),
   );
   await screen.findByText("Baseline scenario version 1");
+  await user.click(screen.getByText("Modify scenario assumptions (optional)"));
 }
 
 function graphSelection(): HTMLSelectElement {
   return screen.getByRole("combobox", { name: "Road graph" });
+}
+
+function roadCatalogSummary(): HTMLElement {
+  const summary = screen.getByText("Road catalog").closest("summary");
+  if (!summary) {
+    throw new Error("Expected a road catalog summary");
+  }
+  return summary;
 }
 
 async function recordCommand(request: Request): Promise<RecordedCommand> {

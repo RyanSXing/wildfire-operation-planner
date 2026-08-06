@@ -30,6 +30,25 @@ def test_replay_startup_uses_manifest_clock_and_graph() -> None:
     assert tuple(app.state.graphs) == (loader.manifest.road_graph.graph_version,)
 
 
+def test_replay_startup_validates_loaded_exercise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wildfireops import main
+
+    observed: list[tuple[object, object]] = []
+    monkeypatch.setattr(
+        main,
+        "validate_exercise_runtime",
+        lambda definition, graph: observed.append((definition, graph)),
+    )
+
+    app = main.create_app(Settings(replay_package=PARK_FIRE_PACKAGE))
+
+    assert len(observed) == 1
+    assert observed[0][0] is app.state.exercise_definition
+    assert observed[0][1] is next(iter(app.state.graphs.values()))
+
+
 def test_live_startup_keeps_wall_clock_and_no_graphs() -> None:
     app = create_app(Settings(replay_package=None))
 

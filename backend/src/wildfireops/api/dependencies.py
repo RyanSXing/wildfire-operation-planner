@@ -13,6 +13,8 @@ from wildfireops.decision.commands import AuditQueryService, DecisionCommandServ
 from wildfireops.decision.recommendations import RecommendationService
 from wildfireops.decision.scenarios import ScenarioService
 from wildfireops.geospatial.road_graph import RoadGraph
+from wildfireops.application.exercise_planning import ExercisePlanningService
+from wildfireops.application.exercises import ExerciseQueryService, ExerciseSessionService
 
 
 async def get_incident_query_service(
@@ -68,4 +70,36 @@ async def get_decision_service(
 async def get_audit_service(request: Request) -> AsyncIterator[AuditQueryService]:
     provider: CommandServiceProvider = request.app.state.command_service_provider
     async with provider.audits() as service:
+        yield service
+
+
+async def get_exercise_session_service(
+    request: Request,
+) -> AsyncIterator[ExerciseSessionService]:
+    provider: CommandServiceProvider = request.app.state.command_service_provider
+    async with provider.exercise_sessions() as service:
+        yield service
+
+
+async def get_exercise_planning_service(
+    request: Request,
+) -> AsyncIterator[ExercisePlanningService]:
+    provider: CommandServiceProvider = request.app.state.command_service_provider
+    async with provider.exercise_planning() as service:
+        yield service
+
+
+async def get_exercise_sandbox_planning_service(
+    request: Request,
+) -> AsyncIterator[ExercisePlanningService]:
+    provider: CommandServiceProvider = request.app.state.command_service_provider
+    async with provider.exercise_sandbox_planning() as service:
+        yield service
+
+
+async def get_exercise_query_service(
+    request: Request,
+) -> AsyncIterator[ExerciseQueryService]:
+    provider: CommandServiceProvider = request.app.state.command_service_provider
+    async with provider.exercise_queries() as service:
         yield service

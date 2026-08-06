@@ -1,59 +1,24 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import type { FormEvent } from "react";
 
 import { ApiClientError } from "../../api/client";
-import {
-  useCreateScenarioMutation,
-  useCreateScenarioVersionMutation,
-  useDecisionContext,
-  useGenerateRecommendationMutation,
-  useRoadEdges,
-} from "../../api/hooks";
-import type {
-  IncidentDetail,
-  Recommendation,
-  ScenarioVersion,
-  ScenarioVersionCreateRequest,
-} from "../../api/types";
+import type { useRoadEdges } from "../../api/hooks";
+import type { ScenarioVersion } from "../../api/types";
 import { DecisionDialog } from "../decisions/DecisionDialog";
 import { AuditDrawer } from "../decisions/AuditDrawer";
 import { RecommendationPanel } from "../decisions/RecommendationPanel";
 import { ScenarioComparison } from "./ScenarioComparison";
 import { ScenarioEditor } from "./ScenarioEditor";
-import type { PlanningMapSelection } from "../map/planningOverlays";
+import {
+  isScenarioStale,
+  useScenarioPlanning,
+  type ScenarioPlanningPanelProps,
+} from "./useScenarioPlanning";
 
-export type ScenarioPlanningPanelProps = {
-  incident: IncidentDetail;
-  planningDisabled: boolean;
-  freshnessToken: string;
-  onPlanningMapSelection?: (
-    selection: PlanningMapSelection | null,
-    ownerIncidentId: string,
-  ) => void;
-};
+export type { ScenarioPlanningPanelProps };
 
-type GeneratedRecommendation = {
-  version: ScenarioVersion;
-  recommendation: Recommendation;
-};
 
-type PlanningPolicy = {
-  incidentId: string;
-  snapshotId: string;
-  planningDisabled: boolean;
-  freshnessToken: string;
-};
 
-const recommendationRequest = {
-  maxResponseMinutes: 30,
-  maxSolverSeconds: 2,
-} as const;
+
 
 const roadNumberFormatter = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 3,
@@ -65,292 +30,41 @@ export function ScenarioPlanningPanel({
   freshnessToken,
   onPlanningMapSelection,
 }: ScenarioPlanningPanelProps) {
-  const contextQuery = useDecisionContext(incident.id);
-  const [graphChoice, setGraphChoice] = useState<string | null>(null);
-  const [scenarioName, setScenarioName] = useState("");
-  const [roadSearchDraft, setRoadSearchDraft] = useState("");
-  const [roadSearch, setRoadSearch] = useState("");
-  const [baselineVersion, setBaselineVersion] =
-    useState<ScenarioVersion | null>(null);
-  const selectedGraph =
-    baselineVersion?.graphVersion ??
-    graphForContext(graphChoice, contextQuery.data);
-  const roadQuery = useRoadEdges(selectedGraph, {
-    q: roadSearch || undefined,
-    limit: 200,
-  });
-  const createScenario = useCreateScenarioMutation();
-  const createVersion = useCreateScenarioVersionMutation();
-  const generateRecommendation = useGenerateRecommendationMutation();
-  const sessionGeneration = useRef(0);
-  const mounted = useRef(false);
-  const latestPolicy = useRef<PlanningPolicy>({
-    incidentId: incident.id,
-    snapshotId: incident.snapshotId,
+  const {
+    baselineRecommendation, baselineVersion, bootstrap, bootstrapPending,
+    canBootstrap, commandError, commandsDisabled, contextQuery, createScenario,
+    createVersion, decidedRecommendationId, failedGenerationVersionId,
+    generateForVersion, generateRecommendation, lastSuccessful, latestVersion,
+    mapMode, resetPlanning, resourceLabels, roadQuery, roadSearchDraft,
+    saveVersion, scenarioName, selectedGraph, sessionStale,
+    setDecidedRecommendationId, setGraphChoice, setMapMode, setRoadSearch,
+    setRoadSearchDraft, setScenarioName, setStaleLatched,
+  } = useScenarioPlanning({
+    incident,
     planningDisabled,
     freshnessToken,
+    onPlanningMapSelection,
   });
-
-  const [baselineRecommendation, setBaselineRecommendation] =
-    useState<Recommendation | null>(null);
-  const [latestVersion, setLatestVersion] = useState<ScenarioVersion | null>(
-    null,
-  );
-  const [lastSuccessful, setLastSuccessful] =
-    useState<GeneratedRecommendation | null>(null);
-  const [failedGenerationVersionId, setFailedGenerationVersionId] = useState<
-    string | null
-  >(null);
-  const [commandError, setCommandError] = useState<unknown>(null);
-  const [staleLatched, setStaleLatched] = useState(false);
-  const [sessionFreshnessToken, setSessionFreshnessToken] = useState<
-    string | null
-  >(null);
-  const [mapMode, setMapMode] = useState<"baseline" | "scenario">("baseline");
-
-  useLayoutEffect(() => {
-    latestPolicy.current = {
-      incidentId: incident.id,
-      snapshotId: incident.snapshotId,
-      planningDisabled,
-      freshnessToken,
-    };
-  }, [freshnessToken, incident.id, incident.snapshotId, planningDisabled]);
-
-  useLayoutEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      sessionGeneration.current += 1;
-    };
-  }, []);
-
-  const snapshotMismatch = planningSnapshotIds(
-    baselineVersion,
-    latestVersion,
-    baselineRecommendation,
-    lastSuccessful,
-  ).some((snapshotId) => snapshotId !== incident.snapshotId);
-  const freshnessMismatch =
-    sessionFreshnessToken !== null &&
-    sessionFreshnessToken !== freshnessToken;
-  const sessionStale = snapshotMismatch || freshnessMismatch || staleLatched;
-
-  useEffect(() => {
-    if (snapshotMismatch || freshnessMismatch) {
-      setStaleLatched(true);
-    }
-  }, [freshnessMismatch, snapshotMismatch]);
-
-  const commandsDisabled = planningDisabled || sessionStale;
-  const bootstrapPending =
-    createScenario.isPending || generateRecommendation.isPending;
-  const canBootstrap = selectedGraph.length > 0 && !commandsDisabled;
-  const planningMapSelection = useMemo<PlanningMapSelection | null>(
-    () =>
-      mapMode === "scenario" && latestVersion
-      ? {
-          incidentId: incident.id,
-          scenarioVersion: latestVersion,
-          recommendation:
-            lastSuccessful?.version.id === latestVersion.id &&
-            lastSuccessful.recommendation.scenarioVersionId === latestVersion.id &&
-            lastSuccessful.recommendation.graphVersion === latestVersion.graphVersion
-              ? lastSuccessful.recommendation
-              : null,
-          freshness: sessionStale ? "stale" : "current",
-        }
-        : null,
-    [incident.id, lastSuccessful, latestVersion, mapMode, sessionStale],
-  );
-
-  useLayoutEffect(() => {
-    onPlanningMapSelection?.(planningMapSelection, incident.id);
-  }, [incident.id, onPlanningMapSelection, planningMapSelection]);
-
-  const isActiveSession = (generation: number): boolean =>
-    mounted.current && generation === sessionGeneration.current;
-
-  const canSettleForVersion = (
-    version: ScenarioVersion,
-    generation: number,
-  ): boolean =>
-    isActiveSession(generation) &&
-    latestPolicy.current.incidentId === version.incidentId;
-
-  const canStartGeneration = (
-    version: ScenarioVersion,
-    generation: number,
-  ): boolean => {
-    const policy = latestPolicy.current;
-    return (
-      canSettleForVersion(version, generation) &&
-      !policy.planningDisabled &&
-      policy.snapshotId === version.incidentSnapshotId
-    );
-  };
-
-  const generateForVersion = async (
-    version: ScenarioVersion,
-    baseline: boolean,
-    generation = sessionGeneration.current,
-  ): Promise<void> => {
-    if (
-      !canStartGeneration(version, generation) ||
-      createVersion.isPending ||
-      generateRecommendation.isPending
-    ) {
-      return;
-    }
-    const generationFreshnessToken = latestPolicy.current.freshnessToken;
-    setCommandError(null);
-    try {
-      const recommendation = await generateRecommendation.mutateAsync({
-        versionId: version.id,
-        body: recommendationRequest,
-      });
-      if (!canSettleForVersion(version, generation)) {
-        return;
-      }
-      const successful = { version, recommendation };
-      if (baseline) {
-        setBaselineRecommendation(recommendation);
-      }
-      setLastSuccessful(successful);
-      setFailedGenerationVersionId(null);
-      if (
-        version.incidentSnapshotId !== latestPolicy.current.snapshotId ||
-        recommendation.incidentSnapshotId !== latestPolicy.current.snapshotId ||
-        generationFreshnessToken !== latestPolicy.current.freshnessToken
-      ) {
-        setStaleLatched(true);
-      }
-    } catch (error) {
-      if (!canSettleForVersion(version, generation)) {
-        return;
-      }
-      setCommandError(error);
-      setFailedGenerationVersionId(version.id);
-      if (
-        isScenarioStale(error) ||
-        generationFreshnessToken !== latestPolicy.current.freshnessToken
-      ) {
-        setStaleLatched(true);
-      }
-    }
-  };
-
-  const bootstrap = async (): Promise<void> => {
-    if (!canBootstrap || bootstrapPending) {
-      return;
-    }
-    if (baselineVersion) {
-      await generateForVersion(baselineVersion, true);
-      return;
-    }
-
-    const generation = sessionGeneration.current;
-    setCommandError(null);
-    const trimmedName = scenarioName.trim();
-    try {
-      const version = await createScenario.mutateAsync({
-        incidentId: incident.id,
-        body: {
-          graphVersion: selectedGraph,
-          objective: "minimize-response-time",
-          ...(trimmedName ? { name: trimmedName } : {}),
-          algorithmConfigVersion: "scenario-v1",
-        },
-      });
-      if (!isActiveSession(generation)) {
-        return;
-      }
-      const policy = latestPolicy.current;
-      if (policy.incidentId !== version.incidentId) {
-        return;
-      }
-      setSessionFreshnessToken(policy.freshnessToken);
-      setBaselineVersion(version);
-      setLatestVersion(version);
-      setFailedGenerationVersionId(null);
-      if (version.incidentSnapshotId !== policy.snapshotId) {
-        setStaleLatched(true);
-        return;
-      }
-      if (policy.planningDisabled) {
-        return;
-      }
-      await generateForVersion(version, true, generation);
-    } catch (error) {
-      if (!isActiveSession(generation)) {
-        return;
-      }
-      setCommandError(error);
-      if (isScenarioStale(error)) {
-        setStaleLatched(true);
-      }
-    }
-  };
-
-  const saveVersion = async (
-    request: ScenarioVersionCreateRequest,
-  ): Promise<void> => {
-    if (
-      !latestVersion ||
-      commandsDisabled ||
-      createVersion.isPending ||
-      generateRecommendation.isPending
-    ) {
-      return;
-    }
-    const generation = sessionGeneration.current;
-    setCommandError(null);
-    try {
-      const version = await createVersion.mutateAsync({
-        scenarioId: latestVersion.scenarioId,
-        body: request,
-      });
-      if (!isActiveSession(generation)) {
-        return;
-      }
-      setLatestVersion(version);
-      setFailedGenerationVersionId(null);
-    } catch (error) {
-      if (!isActiveSession(generation)) {
-        return;
-      }
-      setCommandError(error);
-      if (isScenarioStale(error)) {
-        setStaleLatched(true);
-      }
-    }
-  };
-
-  const resetPlanning = (): void => {
-    sessionGeneration.current += 1;
-    createScenario.reset();
-    createVersion.reset();
-    generateRecommendation.reset();
-    setGraphChoice(null);
-    setScenarioName("");
-    setRoadSearchDraft("");
-    setRoadSearch("");
-    setBaselineVersion(null);
-    setBaselineRecommendation(null);
-    setLatestVersion(null);
-    setLastSuccessful(null);
-    setFailedGenerationVersionId(null);
-    setCommandError(null);
-    setStaleLatched(false);
-    setSessionFreshnessToken(null);
-    setMapMode("baseline");
-  };
 
   return (
     <section
       className="decision-workspace__section scenario-planning-panel"
       aria-label="Scenario planning"
     >
+      <WorkflowGuide
+        planned={baselineVersion !== null}
+        recommended={
+          lastSuccessful !== null &&
+          latestVersion !== null &&
+          lastSuccessful.version.id === latestVersion.id
+        }
+        decided={
+          lastSuccessful !== null &&
+          latestVersion !== null &&
+          lastSuccessful.version.id === latestVersion.id &&
+          decidedRecommendationId === lastSuccessful.recommendation.id
+        }
+      />
       <div className="decision-workspace__section-heading">
         <h3>Scenario planning</h3>
         <span className="snapshot-context">Current snapshot</span>
@@ -418,16 +132,6 @@ export function ScenarioPlanningPanel({
             </label>
           </div>
 
-          <RoadCatalog
-            roadQuery={roadQuery}
-            searchDraft={roadSearchDraft}
-            onSearchDraftChange={setRoadSearchDraft}
-            onSearch={(event) => {
-              event.preventDefault();
-              setRoadSearch(roadSearchDraft.trim());
-            }}
-          />
-
           {latestVersion ? (
             <fieldset aria-label="Scenario map selection">
               <legend>Map overlays</legend>
@@ -468,28 +172,90 @@ export function ScenarioPlanningPanel({
             </button>
           ) : null}
 
-          {baselineRecommendation && latestVersion ? (
-            <section
-              className="scenario-planning-panel__editor"
-              aria-label="Immutable scenario branch"
-            >
-              <h4>Immutable scenario branch</h4>
-              <p>
-                Active scenario version {latestVersion.version}. Saving creates
-                a new immutable version.
-              </p>
-              <ScenarioEditor
-                roadEdges={roadQuery.data?.items ?? []}
-                resources={incident.simulatedResources}
-                version={latestVersion}
-                busy={createVersion.isPending}
-                disabled={
-                  commandsDisabled || generateRecommendation.isPending
-                }
-                errorMessage={null}
-                onSubmit={(request) => void saveVersion(request)}
+          <RoadCatalog
+            roadQuery={roadQuery}
+            searchDraft={roadSearchDraft}
+            onSearchDraftChange={setRoadSearchDraft}
+            onSearch={(event) => {
+              event.preventDefault();
+              setRoadSearch(roadSearchDraft.trim());
+            }}
+          />
+
+          {lastSuccessful && baselineVersion ? (
+            <>
+              <RecommendationPanel
+                recommendation={lastSuccessful.recommendation}
+                freshness={sessionStale ? "stale" : "current"}
+                versionLabel={recommendationLabel(
+                  lastSuccessful.version,
+                  latestVersion,
+                  baselineVersion,
+                )}
+                resourceLabels={resourceLabels}
+                destinationLabels={Object.fromEntries(
+                  incident.exposedAssets.map(({ assetId, name }) => [assetId, name]),
+                )}
               />
-            </section>
+              <DecisionDialog
+                key={`decision:${lastSuccessful.recommendation.id}`}
+                recommendation={lastSuccessful.recommendation}
+                freshness={sessionStale ? "stale" : "current"}
+                planningDisabled={planningDisabled}
+                resources={incident.simulatedResources.map(({ resourceId }) => ({
+                  id: resourceId,
+                  label: resourceLabels[resourceId],
+                }))}
+                destinations={incident.exposedAssets.map(({ assetId, name }) => ({
+                  id: assetId,
+                  label: name,
+                }))}
+                onStale={() => setStaleLatched(true)}
+                onDecisionRecorded={() =>
+                  setDecidedRecommendationId(lastSuccessful.recommendation.id)
+                }
+              />
+              <AuditDrawer
+                key={`audit:${lastSuccessful.recommendation.id}`}
+                recommendationId={lastSuccessful.recommendation.id}
+              />
+            </>
+          ) : null}
+
+          {baselineRecommendation &&
+          lastSuccessful &&
+          baselineVersion &&
+          lastSuccessful.version.id !== baselineVersion.id ? (
+            <div className="scenario-planning-panel__table-overflow">
+              <ScenarioComparison
+                baseline={baselineRecommendation.outcome}
+                scenario={lastSuccessful.recommendation.outcome}
+              />
+            </div>
+          ) : null}
+
+          {baselineRecommendation && latestVersion ? (
+            <details className="scenario-planning-panel__editor">
+              <summary>Modify scenario assumptions (optional)</summary>
+              <section aria-label="Immutable scenario branch">
+                <h4>Immutable scenario branch</h4>
+                <p>
+                  Active scenario version {latestVersion.version}. Saving creates
+                  a new immutable version.
+                </p>
+                <ScenarioEditor
+                  roadEdges={roadQuery.data?.items ?? []}
+                  resources={incident.simulatedResources}
+                  version={latestVersion}
+                  busy={createVersion.isPending}
+                  disabled={
+                    commandsDisabled || generateRecommendation.isPending
+                  }
+                  errorMessage={null}
+                  onSubmit={(request) => void saveVersion(request)}
+                />
+              </section>
+            </details>
           ) : null}
 
           {baselineRecommendation &&
@@ -531,45 +297,6 @@ export function ScenarioPlanningPanel({
         </p>
       ) : null}
 
-      {lastSuccessful && baselineVersion ? (
-        <>
-          <RecommendationPanel
-            recommendation={lastSuccessful.recommendation}
-            freshness={sessionStale ? "stale" : "current"}
-            versionLabel={recommendationLabel(
-              lastSuccessful.version,
-              latestVersion,
-              baselineVersion,
-            )}
-          />
-          <DecisionDialog
-            key={`decision:${lastSuccessful.recommendation.id}`}
-            recommendation={lastSuccessful.recommendation}
-            freshness={sessionStale ? "stale" : "current"}
-            planningDisabled={planningDisabled}
-            resources={incident.simulatedResources.map(({ resourceId }) => resourceId)}
-            destinations={incident.exposedAssets.map(({ assetId }) => assetId)}
-            onStale={() => setStaleLatched(true)}
-          />
-          <AuditDrawer
-            key={`audit:${lastSuccessful.recommendation.id}`}
-            recommendationId={lastSuccessful.recommendation.id}
-          />
-        </>
-      ) : null}
-
-      {baselineRecommendation &&
-      lastSuccessful &&
-      baselineVersion &&
-      lastSuccessful.version.id !== baselineVersion.id ? (
-        <div className="scenario-planning-panel__table-overflow">
-          <ScenarioComparison
-            baseline={baselineRecommendation.outcome}
-            scenario={lastSuccessful.recommendation.outcome}
-          />
-        </div>
-      ) : null}
-
       {baselineVersion ||
       commandError ||
       sessionStale ||
@@ -584,6 +311,8 @@ export function ScenarioPlanningPanel({
   );
 }
 
+
+
 function RoadCatalog({
   roadQuery,
   searchDraft,
@@ -595,36 +324,45 @@ function RoadCatalog({
   onSearchDraftChange: (value: string) => void;
   onSearch: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  return (
-    <section aria-label="Road catalog">
-      <h4>Road catalog</h4>
-      <form aria-label="Road edge search" onSubmit={onSearch}>
-        <label>
-          Search road edges
-          <input
-            type="search"
-            value={searchDraft}
-            onChange={(event) => onSearchDraftChange(event.currentTarget.value)}
-          />
-        </label>
-        <button type="submit">Search roads</button>
-      </form>
+  const summary = roadQuery.isPending
+    ? "Loading road catalog…"
+    : roadQuery.isError
+      ? "Road catalog unavailable"
+      : roadQuery.data
+        ? `Showing ${roadQuery.data.items.length} of ${roadQuery.data.total} road edges.`
+        : "Road catalog";
 
-      {roadQuery.isPending ? (
-        <p role="status">Loading road catalog…</p>
-      ) : roadQuery.isError ? (
-        <LocalReadFailure
-          label="Road catalog unavailable"
-          message="Road catalog could not be loaded."
-          retryLabel="Retry road catalog"
-          onRetry={() => void roadQuery.refetch()}
-        />
-      ) : roadQuery.data ? (
-        <>
-          <p role="status" aria-live="polite">
-            Showing {roadQuery.data.items.length} of {roadQuery.data.total} road
-            edges.
-          </p>
+  return (
+    <details
+      className="scenario-planning-panel__road-catalog"
+      open={roadQuery.isError || undefined}
+    >
+      <summary>
+        <span>Road catalog</span>
+        <span role="status" aria-live="polite">{summary}</span>
+      </summary>
+      <section aria-label="Road catalog">
+        <form aria-label="Road edge search" onSubmit={onSearch}>
+          <label>
+            Search road edges
+            <input
+              type="search"
+              value={searchDraft}
+              onChange={(event) => onSearchDraftChange(event.currentTarget.value)}
+            />
+          </label>
+          <button type="submit">Search roads</button>
+        </form>
+
+        {roadQuery.isError ? (
+          <LocalReadFailure
+            label="Road catalog unavailable"
+            message="Road catalog could not be loaded."
+            retryLabel="Retry road catalog"
+            onRetry={() => void roadQuery.refetch()}
+          />
+        ) : roadQuery.data ? (
+          <>
           {roadQuery.data.total > roadQuery.data.items.length ? (
             <p>Road catalog is a bounded subset of matching edges.</p>
           ) : null}
@@ -648,9 +386,72 @@ function RoadCatalog({
               Missing road edge IDs: {roadQuery.data.missingEdgeIds.join(", ")}
             </p>
           ) : null}
-        </>
-      ) : null}
-    </section>
+          </>
+        ) : null}
+      </section>
+    </details>
+  );
+}
+
+function WorkflowGuide({
+  planned,
+  recommended,
+  decided,
+}: {
+  planned: boolean;
+  recommended: boolean;
+  decided: boolean;
+}) {
+  const steps = [
+    { label: "Observe", status: "complete" as const },
+    {
+      label: "Plan",
+      status: planned ? ("complete" as const) : ("current" as const),
+    },
+    {
+      label: "Recommend",
+      status: recommended
+        ? ("complete" as const)
+        : planned
+          ? ("current" as const)
+          : ("upcoming" as const),
+    },
+    {
+      label: "Decide",
+      status: decided
+        ? ("complete" as const)
+        : recommended
+          ? ("current" as const)
+          : ("upcoming" as const),
+    },
+  ];
+  const next = !planned
+    ? "Create a baseline scenario and recommendation."
+    : !recommended
+      ? "Generate a recommendation for the active scenario."
+      : !decided
+        ? "Review and record a decision."
+        : "Open audit history to inspect the recorded decision.";
+
+  return (
+    <details className="workflow-guide" open>
+      <summary>Decision workflow</summary>
+      <nav aria-label="Decision workflow">
+        <ol>
+          {steps.map(({ label, status }) => (
+            <li key={label}>
+              <span
+                data-status={status}
+                aria-current={status === "current" ? "step" : undefined}
+              >
+                {label}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <p><strong>Next:</strong> {next}</p>
+      </nav>
+    </details>
   );
 }
 
@@ -675,41 +476,7 @@ function LocalReadFailure({
   );
 }
 
-function graphForContext(
-  choice: string | null,
-  context: ReturnType<typeof useDecisionContext>["data"],
-): string {
-  if (!context || context.availableGraphs.length === 0) {
-    return "";
-  }
-  const graphVersions = new Set(
-    context.availableGraphs.map(({ graphVersion }) => graphVersion),
-  );
-  if (choice && graphVersions.has(choice)) {
-    return choice;
-  }
-  if (
-    context.defaultGraphVersion &&
-    graphVersions.has(context.defaultGraphVersion)
-  ) {
-    return context.defaultGraphVersion;
-  }
-  return context.availableGraphs[0].graphVersion;
-}
 
-function planningSnapshotIds(
-  baselineVersion: ScenarioVersion | null,
-  latestVersion: ScenarioVersion | null,
-  baselineRecommendation: Recommendation | null,
-  lastSuccessful: GeneratedRecommendation | null,
-): string[] {
-  return [
-    baselineVersion?.incidentSnapshotId,
-    latestVersion?.incidentSnapshotId,
-    baselineRecommendation?.incidentSnapshotId,
-    lastSuccessful?.recommendation.incidentSnapshotId,
-  ].filter((snapshotId): snapshotId is string => snapshotId !== undefined);
-}
 
 function recommendationLabel(
   version: ScenarioVersion,
@@ -744,9 +511,6 @@ function safeCommandError(error: unknown): string {
   return "Request could not be completed.";
 }
 
-function isScenarioStale(error: unknown): boolean {
-  return error instanceof ApiClientError && error.code === "scenario_stale";
-}
 
 function formatNumber(value: number): string {
   return roadNumberFormatter.format(value);

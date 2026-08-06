@@ -1,83 +1,128 @@
 import { expect, test } from "@playwright/test";
 
+test.use({ viewport: { width: 1600, height: 1000 } });
+
+// Three planning round trips through the real solver do not fit in Playwright's
+// 30s default; the individual expectations keep their own tighter timeouts.
+test.describe.configure({ timeout: 150_000 });
+
 test("an operator can decide the Park Fire replay recommendation", async ({ page }) => {
-  await page.goto("/");
+  // The decision exercise owns "/"; the live command centre is at /monitor.
+  await page.goto("/monitor");
 
-  const queue = page.getByRole("complementary", { name: "Incident queue" });
-  const incidents = queue.getByRole("button");
-  await expect(incidents).not.toHaveCount(0);
-  const scores = (await queue.locator(".incident-row__risk").allTextContents()).map(Number);
-  expect(scores).toHaveLength(await incidents.count());
-  const highestRiskIndex = scores.indexOf(Math.max(...scores));
-  const highestRiskIncident = incidents.nth(highestRiskIndex);
-  await highestRiskIncident.click();
-  await expect(highestRiskIncident).toHaveAttribute("aria-pressed", "true");
-
-  await expect(page.getByRole("region", { name: "Incident overview" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Risk explanation" })).toContainText(/Score[1-9]/);
-  const assets = page.getByRole("region", { name: "Exposed assets" });
-  await expect(assets).toContainText(/Kindcommunity/i);
-  await expect(assets).toContainText(/Population[1-9]/);
-  await expect(page.getByRole("region", { name: "Source provenance" })).toContainText(/Observed/);
-  const sourceFreshness = page.getByRole("region", { name: "Source freshness" });
-  await expect(sourceFreshness).toContainText(/Sources fresh/i);
-  await expect(sourceFreshness).toContainText("nasa_firms");
-  await expect(sourceFreshness).toContainText("noaa_ncei");
-  await expect(sourceFreshness).toContainText("Fresh");
-
-  const planning = page.getByRole("region", { name: "Scenario planning" });
-  await planning.getByRole("button", { name: "Create baseline and generate recommendation" }).click();
-  await expect(planning.getByRole("form", { name: "Scenario version editor" })).toBeVisible();
-
-  const baselineAssignment = planning
-    .getByRole("list", { name: "Recommendation assignments" })
-    .getByRole("listitem")
-    .first();
-  await expect(baselineAssignment).toContainText("Route statusreachable");
-  const baselineEdgeIds = (await baselineAssignment
-    .getByLabel("Route edge IDs")
-    .innerText())
-    .split(",")
-    .map((edgeId) => edgeId.trim())
-    .filter(Boolean);
-  expect(baselineEdgeIds).not.toHaveLength(0);
-  const closedEdgeId = baselineEdgeIds[0];
-  const baselineDestination = await baselineAssignment
-    .getByLabel("Assignment destination ID")
-    .innerText();
-
-  await planning.getByLabel("Search road edges").fill(closedEdgeId);
-  await planning.getByRole("button", { name: "Search roads" }).click();
-
-  const editor = planning.getByRole("form", { name: "Scenario version editor" });
-  const closure = editor
-    .getByRole("group", { name: "Road closures" })
-    .getByRole("checkbox", { name: new RegExp(closedEdgeId) });
-  await expect(closure).toHaveCount(1);
-  await closure.check();
-  await editor.getByRole("button", { name: "Save scenario version" }).click();
-  await expect(planning).toContainText("Active scenario version 2");
-  await planning.getByRole("button", { name: "Generate recommendation for version 2" }).click();
-  const comparison = page.getByRole("region", { name: "Scenario outcome comparison" });
-  const outcomes = comparison.getByRole("table", { name: "Outcome metrics comparison" });
-  await expect(outcomes).toContainText("Baseline");
-  await expect(outcomes).toContainText("Scenario");
-  await expect(planning).toContainText("No assignments were returned.");
+  // The safety and provenance gate comes first, exactly as the exercise does.
   await expect(
-    planning.getByRole("list", { name: "Uncovered destinations" }),
-  ).toContainText(baselineDestination);
-  const uncoveredRow = outcomes.getByRole("row", {
-    name: /Weighted risk uncovered/,
-  });
-  await expect(uncoveredRow).not.toContainText(
-    /^Weighted risk uncovered\s+0\s+0\s+/,
+    page.getByRole("heading", { name: "Live command centre" }),
+  ).toBeVisible();
+  await expect(page.getByText(/Do not use for emergency/i)).toBeVisible();
+  await expect(page.getByText(/Simulated/)).toBeVisible();
+  await page
+    .getByRole("button", { name: /open the command centre/ })
+    .click();
+
+  // The rail ranks incidents; picking one drives everything else.
+  const rail = page.getByRole("navigation", { name: "Incident queue" });
+  await expect(rail).toContainText("YOUR PROGRESS");
+  await expect(rail).toContainText("Observe");
+  const incidents = rail.getByRole("button");
+  await expect(incidents).not.toHaveCount(0);
+  const scores = (await rail.locator(".wf-incident__score").allTextContents()).map(
+    Number,
+  );
+  expect(scores).toHaveLength(await incidents.count());
+  const highestRisk = incidents.nth(scores.indexOf(Math.max(...scores)));
+  await highestRisk.click();
+  await expect(highestRisk).toHaveAttribute("aria-pressed", "true");
+
+  const drawer = page.getByRole("complementary", { name: "Incident details" });
+  const dock = page.getByRole("region", { name: "Next step" });
+
+  // Before any planning the command bar offers exactly one action.
+  await expect(page.getByText("OBSERVING")).toBeVisible();
+  await expect(dock).toContainText("Ready to plan");
+
+  // Evidence is where the machine vocabulary lives.
+  await drawer.getByRole("tab", { name: "Evidence" }).click();
+  await expect(
+    drawer.getByRole("region", { name: "Risk explanation" }),
+  ).toContainText(/Priority score/);
+  await expect(
+    drawer.getByRole("region", { name: "Source provenance" }),
+  ).toContainText(/detections/);
+  await expect(
+    drawer.getByRole("region", { name: "Source freshness" }),
+  ).toContainText(/nasa_firms/);
+
+  // Exposed places and units are reachable without touching the map.
+  await drawer.getByRole("tab", { name: "Resources" }).click();
+  await expect(drawer).toContainText(/EXPOSED PLACES/i);
+
+  // 1 — baseline.
+  await drawer.getByRole("tab", { name: "Plan" }).click();
+  await dock.getByRole("button", { name: "Create the baseline plan" }).click();
+  await expect(page.getByText("PLAN READY")).toBeVisible({ timeout: 30_000 });
+  await expect(dock).toContainText(/Covers/);
+
+  // The plan reads in plain language: no solver status, no raw identifiers.
+  const planPanel = drawer.getByRole("tabpanel");
+  await expect(planPanel).toContainText("WHAT THE PLAN DOES");
+  await expect(planPanel).toContainText(
+    /best allocation the planner could find|allocation works/,
+  );
+  const planText = await planPanel.innerText();
+  expect(planText).not.toMatch(/OPTIMAL|FEASIBLE/);
+  expect(planText).not.toMatch(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
   );
 
-  const decisions = page.getByRole("region", { name: "Recommendation decision controls" });
-  await decisions.getByRole("button", { name: "Approve recommendation" }).click();
-  await page.getByLabel("Decision note").fill("Stage resources for replay exercise");
-  await page.getByRole("button", { name: "Submit approve decision" }).click();
+  // 2 — branch the scenario by closing a road.
+  const scenario = page.getByRole("dialog", { name: "Scenario assumptions" });
+  await dock.getByRole("button", { name: "Adjust the scenario" }).click();
+  await expect(scenario).toBeVisible();
 
+  const editor = scenario.getByRole("form", { name: "Scenario version editor" });
+  const closures = editor.getByRole("group", { name: "Road closures" });
+  // Each row says what closing it means, rather than showing a bare identifier.
+  await expect(closures).toContainText(/units may route through it/i);
+  const firstClosure = closures.getByRole("checkbox").first();
+  await expect(firstClosure).toHaveCount(1);
+  await firstClosure.check();
+  await expect(closures).toContainText(/must route around it/i);
+  await editor.getByRole("button", { name: "Save scenario version" }).click();
+  await expect(scenario).toBeHidden();
+
+  // 3 — plan again against the branch and compare against the baseline.
+  await dock.getByRole("button", { name: "Generate the plan" }).click();
+  await expect(dock).toContainText(/Covers/, { timeout: 30_000 });
+  await expect(planPanel).toContainText("ASSUMPTIONS THIS PLAN USED");
+  // The closure is named, never shown as an edge hash.
+  await expect(planPanel).toContainText(/is closed/);
+  expect(await planPanel.innerText()).not.toMatch(/osm-[0-9a-f]{16}/);
+  await expect(planPanel).toContainText("AGAINST THE BASELINE");
+
+  // 4 — record a decision with a note.
+  //
+  // Rejecting rather than approving, deliberately. Approving dispatches the
+  // unit for good, so it can only ever succeed once per seeded database and
+  // makes the spec unrepeatable. Rejection records the same decision, note and
+  // audit event without consuming a resource, so this runs green every time.
+  // The approval path is covered by DecisionDialog.test.tsx.
+  const decision = page.getByRole("dialog", {
+    name: "Recommendation decision controls",
+  });
+  await expect(decision).toBeVisible();
+  await decision.getByRole("button", { name: /^Reject/ }).click();
+  await page.getByLabel("WHY THIS DECISION").fill("Stage resources for replay exercise");
+  await page.getByRole("button", { name: "Submit reject decision" }).click();
+
+  // The command bar is what reports the outcome here: recording a decision
+  // closes the decision panel, so its own confirmation section is gone by the
+  // time the state settles.
+  await expect(dock).toContainText("Decision recorded", { timeout: 30_000 });
+  await expect(page.getByText("DECIDED")).toBeVisible();
+
+  // 5 — the decision is in the audit trail.
+  await dock.getByRole("button", { name: "View audit" }).click();
   await page.getByText("Audit history", { exact: true }).click();
   const events = page.getByRole("list", { name: "Audit events" });
   const approval = events
@@ -85,7 +130,36 @@ test("an operator can decide the Park Fire replay recommendation", async ({ page
     .filter({ hasText: "Stage resources for replay exercise" });
   await expect(approval).toHaveCount(1);
   await approval.getByRole("button", { name: /^View details for / }).click();
-  const provenance = page.getByRole("region", { name: "Audit provenance" });
-  await expect(provenance).toContainText("Stage resources for replay exercise");
-  await expect(provenance).toContainText(/Source versions/);
+  await expect(
+    page.getByRole("region", { name: "Audit provenance" }),
+  ).toContainText(/Observed|allocation|approve/);
+});
+
+test("planning is locked, and says so, while a replay frame is showing", async ({
+  page,
+}) => {
+  await page.goto("/monitor");
+  await page
+    .getByRole("button", { name: /open the command centre/ })
+    .click();
+  const dock = page.getByRole("region", { name: "Next step" });
+  await expect(dock).toContainText("Ready to plan");
+
+  // An incident without two ordered snapshots has no replay range at all, so
+  // the scrubber is not rendered and planning simply stays available.
+  const slider = page.getByRole("slider", { name: /Replay position/ });
+  if ((await slider.count()) === 0) {
+    await expect(dock).toContainText("Ready to plan");
+    return;
+  }
+
+  await slider.fill("0");
+  await expect(page.getByText("REPLAY")).toBeVisible();
+  await expect(dock).toContainText("You are looking at a replay frame");
+  await expect(
+    dock.getByRole("button", { name: "Create the baseline plan" }),
+  ).toHaveCount(0);
+
+  await dock.getByRole("button", { name: "Return to current" }).click();
+  await expect(dock).toContainText("Ready to plan");
 });

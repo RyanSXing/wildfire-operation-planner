@@ -54,6 +54,9 @@ export const EMPTY_FEATURE_COLLECTION: FeatureCollection<Geometry, Record<string
   features: [],
 };
 
+export const BASEMAP_STYLE_URL =
+  "https://tiles.openfreemap.org/styles/positron";
+
 export const INLINE_MAP_STYLE: StyleSpecification = {
   version: 8,
   sources: {},

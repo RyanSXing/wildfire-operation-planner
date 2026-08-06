@@ -7,7 +7,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.sql.schema import SchemaItem
 
 from wildfireops.config import Settings
-from wildfireops.persistence import decision_models, observed_models  # noqa: F401
+from wildfireops.persistence import (  # noqa: F401
+    decision_models,
+    exercise_models,
+    observed_models,
+)
 from wildfireops.persistence.base import Base
 
 

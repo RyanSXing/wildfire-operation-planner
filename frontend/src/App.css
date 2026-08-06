@@ -603,6 +603,42 @@
   font-size: 0.64rem;
 }
 
+.decision-workspace__driver-summary {
+  margin-top: 8px;
+  color: var(--slate-700);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.decision-workspace details > summary {
+  min-height: 44px;
+}
+
+.decision-workspace__disclosure > summary,
+.scenario-planning-panel__road-catalog > summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--slate-900);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.decision-workspace__disclosure > summary span:last-child,
+.scenario-planning-panel__road-catalog > summary span:last-child {
+  color: var(--slate-600);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.decision-workspace__disclosure-content {
+  margin-top: 12px;
+}
+
 .snapshot-context,
 .simulation-label {
   display: inline-flex;
@@ -693,6 +729,60 @@
   gap: 10px;
 }
 
+.workflow-guide {
+  padding: 9px 10px;
+  background: var(--slate-100);
+  border: 1px solid var(--slate-300);
+  border-radius: 2px;
+}
+
+.workflow-guide > summary {
+  color: var(--slate-800);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.workflow-guide nav {
+  margin-top: 8px;
+}
+
+.workflow-guide ol {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-guide li span {
+  display: block;
+  padding: 5px 3px;
+  color: var(--slate-600);
+  border-bottom: 2px solid var(--slate-300);
+  font-size: 0.64rem;
+  font-weight: 750;
+  text-align: center;
+}
+
+.workflow-guide li span[data-status="complete"] {
+  color: var(--slate-800);
+  border-color: #35735b;
+}
+
+.workflow-guide li span[aria-current="step"] {
+  color: var(--fire-700);
+  border-color: var(--fire-600);
+}
+
+.workflow-guide p {
+  margin-top: 8px;
+  color: var(--slate-700);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
 .scenario-planning-panel h4,
 .scenario-planning-panel h5,
 .scenario-planning-panel h6 {
@@ -775,11 +865,28 @@
   border-left-color: var(--stale-700);
 }
 
+.scenario-planning-panel__road-catalog,
 .scenario-planning-panel [aria-label="Road catalog"] {
   display: grid;
   gap: 8px;
   min-width: 0;
   padding-top: 2px;
+}
+
+.scenario-planning-panel__road-catalog {
+  border-top: 1px solid var(--slate-300);
+}
+
+.recommendation-panel__technical-evidence {
+  padding-top: 8px;
+  border-top: 1px solid var(--slate-300);
+}
+
+.recommendation-panel__technical-evidence > summary {
+  color: var(--slate-700);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
 }
 
 .scenario-planning-panel [aria-label="Road edge search"] {
@@ -802,6 +909,18 @@
   min-width: 0;
   padding-top: 10px;
   border-top: 1px solid var(--slate-300);
+}
+
+.scenario-planning-panel__editor > summary {
+  color: var(--slate-800);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.scenario-planning-panel__editor > section {
+  display: grid;
+  gap: 8px;
 }
 
 .scenario-planning-panel fieldset {

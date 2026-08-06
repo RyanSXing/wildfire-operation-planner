@@ -1,8 +1,10 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -21,6 +23,7 @@ from wildfireops.persistence.decision_models import (
     IdempotencyKeyModel,
     IncidentSnapshotModel,
 )
+from wildfireops.persistence.exposures import refresh_exposure_and_risk
 from wildfireops.persistence.incidents import _INCIDENT_REFRESH_LOCK_ID
 from wildfireops.persistence.observations import IngestStats, ObservationRepository
 from wildfireops.persistence.observed_models import (
@@ -38,6 +41,7 @@ from wildfireops.replay.seed import (
     ReplaySeedConflict,
     ReplaySeedError,
     _package_digest,
+    _name_highest_priority_snapshot,
     _seed_request_hash,
     seed_replay_package,
 )
@@ -78,6 +82,7 @@ def _build_synthetic_package(
     variant: str,
     package_id: str = "synthetic-seed-v1",
     fire_intensity: float = 327.4,
+    fire_records: tuple[dict[str, object], ...] | None = None,
 ) -> ReplayLoader:
     staging = tmp_path / f"staging-{variant}"
     output = tmp_path / f"output-{variant}"
@@ -85,7 +90,7 @@ def _build_synthetic_package(
     staging.joinpath("fire_detections.jsonl").write_text(
         "\n".join(
             json.dumps(record, sort_keys=True, separators=(",", ":"))
-            for record in (
+            for record in fire_records or (
                 {
                     "observation_type": "fire_detection",
                     "source_name": "nasa_firms",
@@ -357,6 +362,268 @@ async def test_identical_seed_is_a_noop(
     assert result.incidents_created == 0
     assert result.snapshots_created == 0
     assert await _row_counts(factory) == counts
+
+
+@pytest.mark.asyncio
+async def test_refresh_after_seed_reuses_named_snapshot(
+    isolated_engine: AsyncEngine,
+    tmp_path: Path,
+) -> None:
+    loader = _build_synthetic_package(
+        tmp_path,
+        variant="named-refresh",
+        package_id="park-fire-2024-v1",
+    )
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    await seed_replay_package(
+        loader=loader,
+        session_factory=factory,
+        clustering_config=CLUSTERING,
+        exposure_config=EXPOSURE,
+        risk_config=RISK,
+    )
+
+    async with factory.begin() as session:
+        original = (
+            await session.scalars(
+                select(IncidentSnapshotModel).order_by(
+                    IncidentSnapshotModel.snapshot_version
+                )
+            )
+        ).all()
+        refreshed_ids = await refresh_exposure_and_risk(
+            session,
+            reference_at=loader.manifest.end_at,
+            exposure_config=EXPOSURE,
+            risk_config=RISK,
+            clustering_algorithm_version=CLUSTERING.algorithm_version,
+        )
+        refreshed = (
+            await session.scalars(
+                select(IncidentSnapshotModel).order_by(
+                    IncidentSnapshotModel.snapshot_version
+                )
+            )
+        ).all()
+
+    assert refreshed_ids == tuple(snapshot.id for snapshot in original)
+    assert [snapshot.snapshot_version for snapshot in refreshed] == [1]
+    assert refreshed[0].incident_state["name"] == "Park Fire"
+
+
+@pytest.mark.asyncio
+async def test_name_highest_priority_snapshot_uses_detection_identities_not_incident_id(
+    isolated_engine: AsyncEngine,
+) -> None:
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    cluster_a_id = UUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+    cluster_b_id = UUID("00000000-0000-0000-0000-000000000000")
+    point = WKTElement("POINT(-121.5 39.8)", srid=4326)
+    observed_at = datetime(2024, 7, 24, 18, tzinfo=UTC)
+
+    async with factory.begin() as session:
+        session.add_all(
+            [
+                WildfireIncidentModel(
+                    id=cluster_a_id,
+                    risk_score=1.0,
+                    geometry=point,
+                    first_observed_at=observed_at,
+                    last_observed_at=observed_at,
+                ),
+                WildfireIncidentModel(
+                    id=cluster_b_id,
+                    risk_score=1.0,
+                    geometry=point,
+                    first_observed_at=observed_at,
+                    last_observed_at=observed_at,
+                ),
+            ]
+        )
+        await session.flush()
+        snapshots = [
+            IncidentSnapshotModel(
+                id=UUID("11111111-1111-1111-1111-111111111111"),
+                incident_id=cluster_a_id,
+                snapshot_version=1,
+                source_versions={},
+                incident_state={"detection_identities": ["nasa_firms:fire-a"]},
+                asset_state=[],
+                resource_state=[],
+            ),
+            IncidentSnapshotModel(
+                id=UUID("22222222-2222-2222-2222-222222222222"),
+                incident_id=cluster_b_id,
+                snapshot_version=1,
+                source_versions={},
+                incident_state={"detection_identities": ["nasa_firms:fire-b"]},
+                asset_state=[],
+                resource_state=[],
+            ),
+        ]
+        session.add_all(snapshots)
+        await _name_highest_priority_snapshot(
+            session,
+            [snapshot.id for snapshot in snapshots],
+            "Park Fire",
+        )
+
+    async with factory() as session:
+        named_incident_ids = set(
+            (
+                await session.scalars(
+                    select(IncidentSnapshotModel.incident_id).where(
+                        IncidentSnapshotModel.incident_state["name"].astext
+                        == "Park Fire"
+                    )
+                )
+            ).all()
+        )
+
+    assert cluster_b_id < cluster_a_id
+    assert named_incident_ids == {cluster_a_id}
+
+
+@pytest.mark.asyncio
+async def test_equal_priority_clusters_name_the_same_detection_cluster_on_fresh_seeds(
+    isolated_engine: AsyncEngine,
+    tmp_path: Path,
+) -> None:
+    fire_records = tuple(
+        {
+            "observation_type": "fire_detection",
+            "source_name": "nasa_firms",
+            "source_record_id": record_id,
+            "observed_at": observed_at,
+            "longitude": longitude,
+            "latitude": 39.8000,
+            "confidence": 0.75,
+            "intensity": 327.4,
+            "raw_payload": {"satellite": "N20"},
+        }
+        for record_id, observed_at, longitude in (
+            ("fire-a1", "2024-07-24T18:27:00Z", -121.7000),
+            ("fire-a2", "2024-07-24T18:30:00Z", -121.7000),
+            ("fire-b1", "2024-07-24T18:27:00Z", -121.7300),
+            ("fire-b2", "2024-07-24T18:30:00Z", -121.7300),
+        )
+    )
+    loader = _build_synthetic_package(
+        tmp_path,
+        variant="equal-priority",
+        package_id="park-fire-2024-v1",
+        fire_records=fire_records,
+    )
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    clustering = replace(CLUSTERING, temporal_window_seconds=300.0)
+
+    async def seed_and_named_identities() -> tuple[tuple[str, ...], ...]:
+        await seed_replay_package(
+            loader=loader,
+            session_factory=factory,
+            clustering_config=clustering,
+            exposure_config=EXPOSURE,
+            risk_config=RISK,
+        )
+        async with factory() as session:
+            snapshots = (await session.scalars(select(IncidentSnapshotModel))).all()
+            scores = (
+                await session.scalars(select(WildfireIncidentModel.risk_score))
+            ).all()
+            named = [
+                tuple(snapshot.incident_state["detection_identities"])
+                for snapshot in snapshots
+                if snapshot.incident_state.get("name") == "Park Fire"
+            ]
+            assert len(snapshots) == 2
+            assert {
+                tuple(snapshot.incident_state["detection_identities"])
+                for snapshot in snapshots
+            } == {
+                ("nasa_firms:fire-a1", "nasa_firms:fire-a2"),
+                ("nasa_firms:fire-b1", "nasa_firms:fire-b2"),
+            }
+            assert len(set(scores)) == 1
+            assert len(named) == 1
+            return tuple(named)
+
+    first = await seed_and_named_identities()
+    async with isolated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                "TRUNCATE TABLE quarantined_observations, source_status, "
+                "idempotency_keys, resource_units, exposed_assets, "
+                "wildfire_incidents, source_observations CASCADE"
+            )
+        )
+    second = await seed_and_named_identities()
+
+    assert first == second == (("nasa_firms:fire-a1", "nasa_firms:fire-a2"),)
+
+
+@pytest.mark.asyncio
+async def test_identical_seed_does_not_mutate_unrelated_snapshots(
+    isolated_engine: AsyncEngine,
+    tmp_path: Path,
+) -> None:
+    loader = _build_synthetic_package(
+        tmp_path,
+        variant="name-backfill",
+        package_id="park-fire-2024-v1",
+    )
+    factory = async_sessionmaker(isolated_engine, expire_on_commit=False)
+    await seed_replay_package(
+        loader=loader,
+        session_factory=factory,
+        clustering_config=CLUSTERING,
+        exposure_config=EXPOSURE,
+        risk_config=RISK,
+    )
+    async with factory.begin() as session:
+        snapshot = (await session.scalars(select(IncidentSnapshotModel))).one()
+        session.add(
+            IncidentSnapshotModel(
+                incident_id=snapshot.incident_id,
+                snapshot_version=snapshot.snapshot_version + 1,
+                source_versions={},
+                incident_state={"status": "active", "name": "Unrelated Fire"},
+                asset_state=[],
+                resource_state=[],
+            )
+        )
+        session.add(
+            IncidentSnapshotModel(
+                incident_id=snapshot.incident_id,
+                snapshot_version=snapshot.snapshot_version + 2,
+                source_versions={},
+                incident_state={"status": "active"},
+                asset_state=[],
+                resource_state=[],
+            )
+        )
+    counts = await _row_counts(factory)
+
+    result = await seed_replay_package(
+        loader=loader,
+        session_factory=factory,
+        clustering_config=CLUSTERING,
+        exposure_config=EXPOSURE,
+        risk_config=RISK,
+    )
+
+    assert result.status == "already_seeded"
+    assert await _row_counts(factory) == counts
+    async with factory() as session:
+        snapshots = (
+            await session.scalars(
+                select(IncidentSnapshotModel).order_by(
+                    IncidentSnapshotModel.snapshot_version
+                )
+            )
+        ).all()
+    assert snapshots[0].incident_state["name"] == "Park Fire"
+    assert snapshots[1].incident_state["name"] == "Unrelated Fire"
+    assert snapshots[2].incident_state == {"status": "active"}
 
 
 @pytest.mark.asyncio
